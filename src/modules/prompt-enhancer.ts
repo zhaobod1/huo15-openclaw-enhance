@@ -1,7 +1,9 @@
 /**
  * 模块3: 提示词增强（多 Agent 隔离版）
  *
- * 钩子从 ctx.agentId 获取当前 Agent，注入该 Agent 专属的记忆上下文。
+ * before_prompt_build hook 签名:
+ *   event: { prompt, messages }
+ *   ctx:   { runId, agentId, sessionKey, sessionId, workspaceDir, messageProvider, trigger, channelId }
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { DEFAULT_AGENT_ID, type PromptConfig, type PromptSection } from "../types.js";
@@ -24,7 +26,7 @@ const SECTIONS: Record<PromptSection, string> = {
     "- 不要添加请求之外的功能、注释或类型标注",
     "- 不要为不可能发生的场景做错误处理",
     "- 三行相似代码好过一个过早的抽象",
-    "- 失败时先诊断���因，不要盲目重试",
+    "- 失败时先诊断原因，不要盲目重试",
     "- 做破坏性操作前先确认（删除、force push、覆盖未保存的修改）",
   ].join("\n"),
 

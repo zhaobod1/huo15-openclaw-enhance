@@ -1,6 +1,6 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "龙虾增强包 — 结构化记忆、工具安全、提示词增强、工作流自动化、仪表盘",
   "type": "module",
   "main": "index.ts",
@@ -41,6 +41,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/jobzhao15/openclaw-enhance"
+    "url": "https://github.com/zhaobod1/huo15-openclaw-enhance"
   }
 }

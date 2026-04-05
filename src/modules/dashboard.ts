@@ -1,10 +1,13 @@
 /**
  * 模块5: 增强仪表盘（多 Agent 隔离版）
  *
- * 支持按 agentId 筛选数据，默认显示全局聚合视图。
- * URL 参数: ?agent=<agentId> 查看特定 Agent 数据
+ * registerHttpRoute handler 签名:
+ *   (req: IncomingMessage, res: ServerResponse) => Promise<boolean | void>
+ *
+ * 这是 Node.js 原生 HTTP handler，不是 Web Fetch API。
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   getDb,
   getMemoryStats,
@@ -13,6 +16,7 @@ import {
   getRecentSafetyEvents,
   getAllAgentIds,
 } from "../utils/sqlite-store.js";
+import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow } from "../types.js";
@@ -25,6 +29,27 @@ function loadAllWorkflows(openclawDir: string): Workflow[] {
   } catch {
     return [];
   }
+}
+
+function parseUrl(req: IncomingMessage): URL {
+  return new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+}
+
+function sendJson(res: ServerResponse, data: unknown): void {
+  const body = JSON.stringify(data);
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function sendHtml(res: ServerResponse, html: string): void {
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(html),
+  });
+  res.end(html);
 }
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -63,8 +88,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>🦞 龙虾增强包</h1>
-<p class="subtitle">OpenClaw Enhancement Kit — Multi-Agent Dashboard</p>
+<h1>&#x1F99E; 龙虾增强包</h1>
+<p class="subtitle">OpenClaw Enhancement Kit &mdash; Multi-Agent Dashboard</p>
 
 <div class="agent-bar">
   <label>Agent:</label>
@@ -91,69 +116,46 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="workflows"></div>
 </div>
 
-<footer>龙虾增强包 v1.1.0 — 多 Agent 隔离</footer>
+<footer>龙虾增强包 v1.2.0 &mdash; 多 Agent 隔离</footer>
 
 <script>
-let currentAgent='';
-function switchAgent(v){currentAgent=v;const u=new URL(location.href);if(v)u.searchParams.set('agent',v);else u.searchParams.delete('agent');history.replaceState(null,'',u);load();}
-async function load(){
-  try{
-    const u='/enhance/api/status'+(currentAgent?'?agent='+encodeURIComponent(currentAgent):'');
-    const r=await fetch(u);const d=await r.json();
-    // Populate agent selector
-    const sel=document.getElementById('agentSelect');
-    const prev=sel.value;
-    sel.innerHTML='<option value="">全部 (聚合)</option>'+d.agents.map(a=>'<option value="'+esc(a)+'"'+(a===currentAgent?' selected':'')+'>'+esc(a)+'</option>').join('');
+var currentAgent='';
+function switchAgent(v){currentAgent=v;var u=new URL(location.href);if(v)u.searchParams.set('agent',v);else u.searchParams.delete('agent');history.replaceState(null,'',u);load();}
+function load(){
+  var u='/enhance/api/status'+(currentAgent?'?agent='+encodeURIComponent(currentAgent):'');
+  var x=new XMLHttpRequest();x.open('GET',u);x.onload=function(){
+    if(x.status!==200)return;
+    var d=JSON.parse(x.responseText);
+    var sel=document.getElementById('agentSelect');
+    sel.innerHTML='<option value="">全部 (聚合)</option>'+d.agents.map(function(a){return '<option value="'+esc(a)+'"'+(a===currentAgent?' selected':'')+'>'+esc(a)+'</option>';}).join('');
     document.getElementById('currentAgent').textContent=currentAgent?'当前: '+currentAgent:'全部 Agent 聚合视图';
-    // Stats cards
-    const s=document.getElementById('stats');
-    s.innerHTML=[
-      card('Agent 数',d.agents.length,'个'),
-      card('记忆总数',d.memory.total,'条'),
-      card('用户记忆',d.memory.user||0,'条'),
-      card('项目记忆',d.memory.project||0,'条'),
-      card('安全事件',d.safety.total,'次'),
-      card('已拦截',d.safety.blocked,'次'),
-      card('工作流',d.workflows.length,'个'),
-    ].join('');
-    // Memories table
-    const m=document.getElementById('memories');
-    if(d.recentMemories.length===0){m.innerHTML='<p class="empty">暂无记忆</p>';} else {
-      m.innerHTML='<table><tr><th>ID</th><th>Agent</th><th>类型</th><th>���容</th><th>时间</th></tr>'+
-        d.recentMemories.map(e=>'<tr><td>#'+e.id+'</td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.category+'</td><td>'+esc(e.content).slice(0,50)+'</td><td>'+e.created_at+'</td></tr>').join('')+'</table>';
-    }
-    // Safety table
-    const sf=document.getElementById('safety');
-    if(d.recentSafety.length===0){sf.innerHTML='<p class="empty">暂无安全事件</p>';} else {
-      sf.innerHTML='<table><tr><th>动作</th><th>Agent</th><th>工具</th><th>参数</th><th>时间</th></tr>'+
-        d.recentSafety.map(e=>'<tr><td><span class="badge badge-'+e.action+'">'+e.action+'</span></td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.tool+'</td><td>'+esc(e.params||'').slice(0,35)+'</td><td>'+e.created_at+'</td></tr>').join('')+'</table>';
-    }
-    // Workflows
-    const w=document.getElementById('workflows');
-    if(d.workflows.length===0){w.innerHTML='<p class="empty">暂无工作流</p>';} else {
-      w.innerHTML='<table><tr><th>名称</th><th>Agent</th><th>触发词</th><th>状态</th></tr>'+
-        d.workflows.map(e=>'<tr><td>'+esc(e.name)+'</td><td><span class="agent-tag">'+esc(e.agent_id||'main')+'</span></td><td>'+esc(e.trigger)+'</td><td>'+(e.enabled?'✅':'⏸️')+'</td></tr>').join('')+'</table>';
-    }
-  }catch(e){document.body.innerHTML+='<p style="color:red">加载失败: '+e.message+'</p>';}
+    var s=document.getElementById('stats');
+    s.innerHTML=[card('Agent 数',d.agents.length,'个'),card('记忆总数',d.memory.total,'条'),card('用户记忆',d.memory.user||0,'条'),card('项目记忆',d.memory.project||0,'条'),card('安全事件',d.safety.total,'次'),card('已拦截',d.safety.blocked,'次'),card('工作流',d.workflows.length,'个')].join('');
+    var m=document.getElementById('memories');
+    if(!d.recentMemories.length){m.innerHTML='<p class="empty">暂无记忆</p>';}else{m.innerHTML='<table><tr><th>ID</th><th>Agent</th><th>类型</th><th>内容</th><th>时间</th></tr>'+d.recentMemories.map(function(e){return '<tr><td>#'+e.id+'</td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.category+'</td><td>'+esc(e.content).slice(0,50)+'</td><td>'+e.created_at+'</td></tr>';}).join('')+'</table>';}
+    var sf=document.getElementById('safety');
+    if(!d.recentSafety.length){sf.innerHTML='<p class="empty">暂无安全事件</p>';}else{sf.innerHTML='<table><tr><th>动作</th><th>Agent</th><th>工具</th><th>参数</th><th>时间</th></tr>'+d.recentSafety.map(function(e){return '<tr><td><span class="badge badge-'+e.action+'">'+e.action+'</span></td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.tool+'</td><td>'+esc(e.params||'').slice(0,35)+'</td><td>'+e.created_at+'</td></tr>';}).join('')+'</table>';}
+    var w=document.getElementById('workflows');
+    if(!d.workflows.length){w.innerHTML='<p class="empty">暂无工作流</p>';}else{w.innerHTML='<table><tr><th>名称</th><th>Agent</th><th>触发词</th><th>状态</th></tr>'+d.workflows.map(function(e){return '<tr><td>'+esc(e.name)+'</td><td><span class="agent-tag">'+esc(e.agent_id||'main')+'</span></td><td>'+esc(e.trigger)+'</td><td>'+(e.enabled?'&#x2705;':'&#x23F8;')+'</td></tr>';}).join('')+'</table>';}
+  };x.send();
 }
 function card(t,v,l){return '<div class="card"><h3>'+t+'</h3><div class="value">'+v+'</div><div class="label">'+l+'</div></div>';}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-// Init from URL
-const p=new URLSearchParams(location.search);currentAgent=p.get('agent')||'';
+var p=new URLSearchParams(location.search);currentAgent=p.get('agent')||'';
 load();
 </script>
 </body>
 </html>`;
 
 export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardConfig) {
-  const openclawDir = api.runtime.paths?.home ?? process.env.HOME + "/.openclaw";
+  const openclawDir = resolveOpenClawHome(api);
 
   api.registerHttpRoute({
     path: "/enhance",
     match: "prefix",
     auth: "gateway",
-    handler: async (req) => {
-      const url = new URL(req.url, "http://localhost");
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      const url = parseUrl(req);
       const pathname = url.pathname;
 
       if (pathname === "/enhance/api/status") {
@@ -164,16 +166,14 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
         const memoryStats = getMemoryStats(db, agentFilter);
         const safetyStats = getSafetyStats(db, agentFilter);
 
-        // 记忆和安全事件：如果指定了 agent 则按 agent 过滤
         const recentMemories = agentFilter
           ? getRecentMemories(db, agentFilter, 15)
           : (() => {
-              // 聚合模式：取各 agent 最近的记忆
               const all: any[] = [];
               for (const aid of agents) {
                 all.push(...getRecentMemories(db, aid, 5));
               }
-              return all.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 15);
+              return all.sort((a: any, b: any) => b.created_at.localeCompare(a.created_at)).slice(0, 15);
             })();
 
         const recentSafety = getRecentSafetyEvents(db, agentFilter, 15);
@@ -183,22 +183,13 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
           ? allWorkflows.filter((w) => w.agent_id === agentFilter)
           : allWorkflows;
 
-        return new Response(
-          JSON.stringify({
-            agents,
-            memory: memoryStats,
-            safety: safetyStats,
-            recentMemories,
-            recentSafety,
-            workflows,
-          }),
-          { headers: { "Content-Type": "application/json" } },
-        );
+        sendJson(res, { agents, memory: memoryStats, safety: safetyStats, recentMemories, recentSafety, workflows });
+        return true;
       }
 
-      return new Response(DASHBOARD_HTML, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      });
+      // 默认: 仪表盘 HTML
+      sendHtml(res, DASHBOARD_HTML);
+      return true;
     },
   });
 

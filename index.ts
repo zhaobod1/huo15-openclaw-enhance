@@ -1,7 +1,7 @@
 /**
  * 龙虾增强包 (OpenClaw Enhancement Kit)
  *
- * 非侵入式增强插件（v1.1.0 — 多 Agent 隔离）：
+ * 非侵入式增强插件（v1.2.0 — 多 Agent 隔离）：
  * - 模块1: 结构化记忆系统（按 agentId 隔离，借鉴 Claude Code auto-memory）
  * - 模块2: 工具安全守卫（按 agentId 记录日志，借鉴 Claude Code 权限系统）
  * - 模块3: 提示词增强（按 agentId 注入上下文，借鉴 Claude Code systemPromptSections）
@@ -64,11 +64,11 @@ export default definePluginEntry({
           mod.load();
           loaded.push(mod.name);
         } catch (err) {
-          api.logger.error(`[enhance] 模块「${mod.name}」加载失败:`, err);
+          api.logger.error(`[enhance] 模块「${mod.name}」加载失败: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.1.0 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v1.2.0 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
   },
 });

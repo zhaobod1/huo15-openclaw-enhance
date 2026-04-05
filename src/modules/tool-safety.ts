@@ -2,12 +2,16 @@
  * 模块2: 工具安全守卫（多 Agent 隔离版）
  *
  * 安全规则全局生效，但审计日志按 agentId 隔离记录。
- * 钩子从 ctx.agentId 获取当前 Agent。
+ *
+ * before_tool_call hook 签名:
+ *   event: { toolName, params, runId, toolCallId }
+ *   ctx:   { agentId, sessionKey, sessionId, runId, toolName, toolCallId }
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { Type } from "@sinclair/typebox";
 import { getDb, logSafetyEvent, getRecentSafetyEvents, getSafetyStats } from "../utils/sqlite-store.js";
+import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { DEFAULT_AGENT_ID, type SafetyConfig, type SafetyRule } from "../types.js";
 
 function matchGlob(pattern: string, text: string): boolean {
@@ -33,16 +37,17 @@ function extractPathText(params: Record<string, unknown>): string {
 }
 
 export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig) {
-  const openclawDir = api.runtime.paths?.home ?? process.env.HOME + "/.openclaw";
+  const openclawDir = resolveOpenClawHome(api);
   const db = getDb(openclawDir);
   const rules: SafetyRule[] = config?.rules ?? [];
   const defaultAction = config?.defaultAction ?? "allow";
 
-  // ── Hook: before_tool_call — 安全拦截（按 agent 记录日志）──
-  api.on("before_tool_call", (_event, ctx) => {
+  // ── Hook: before_tool_call — 安全拦截 ──
+  // event 包含 toolName, params; ctx 包含 agentId
+  api.on("before_tool_call", (event, ctx) => {
     const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
-    const toolName = ctx?.toolName ?? "";
-    const params = (ctx?.params ?? {}) as Record<string, unknown>;
+    const toolName = (event as any)?.toolName ?? "";
+    const params = ((event as any)?.params ?? {}) as Record<string, unknown>;
     const matchText = extractMatchText(params);
     const pathText = extractPathText(params);
 

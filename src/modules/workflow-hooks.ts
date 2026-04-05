@@ -1,14 +1,16 @@
 /**
  * 模块4: 工作流自动化（多 Agent 隔离版）
  *
- * 工作流按 agentId 隔离存储和触发。
- * 每个动态 Agent 拥有独立的工作流集合。
+ * before_prompt_build hook 签名:
+ *   event: { prompt, messages }  — event.prompt 包含用户消息
+ *   ctx:   { agentId, ... }
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { Type } from "@sinclair/typebox";
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { DEFAULT_AGENT_ID, type Workflow, type WorkflowConfig } from "../types.js";
 
 function getWorkflowsPath(openclawDir: string): string {
@@ -20,7 +22,6 @@ function loadAllWorkflows(openclawDir: string): Workflow[] {
   if (!existsSync(path)) return [];
   try {
     const data = JSON.parse(readFileSync(path, "utf-8"));
-    // v1 兼容：如果旧数据没有 agent_id，补上 DEFAULT_AGENT_ID
     return (data as Workflow[]).map((w) => ({
       ...w,
       agent_id: w.agent_id || DEFAULT_AGENT_ID,
@@ -39,7 +40,7 @@ function saveWorkflows(openclawDir: string, workflows: Workflow[]): void {
 }
 
 export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: WorkflowConfig) {
-  const openclawDir = api.runtime.paths?.home ?? process.env.HOME + "/.openclaw";
+  const openclawDir = resolveOpenClawHome(api);
 
   // ── Tool Factory: enhance_workflow_define ──
   api.registerTool(
@@ -56,7 +57,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
       ].join("\n"),
       parameters: Type.Object({
         name: Type.String({ description: "工作流名称" }),
-        trigger: Type.String({ description: "触发词（出现在用��消息中即触发）" }),
+        trigger: Type.String({ description: "触发词（出现在用户消息中即触发）" }),
         instructions: Type.String({ description: "触发后注入的行为指令" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
@@ -146,9 +147,10 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
   );
 
   // ── Hook: before_prompt_build — 按当前 Agent 检查触发词 ──
-  api.on("before_prompt_build", (_event, ctx) => {
+  // event.prompt 包含用户输入
+  api.on("before_prompt_build", (event, ctx) => {
     const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
-    const userMessage = ctx?.lastUserMessage ?? "";
+    const userMessage = (event as any)?.prompt ?? "";
     if (!userMessage) return {};
 
     const workflows = loadWorkflows(openclawDir, agentId);

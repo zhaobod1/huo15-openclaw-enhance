@@ -16,6 +16,7 @@ import {
   deleteMemory,
   getMemoryStats,
 } from "../utils/sqlite-store.js";
+import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { DEFAULT_AGENT_ID, type MemoryConfig, type MemoryCategory } from "../types.js";
 
 const VALID_CATEGORIES: MemoryCategory[] = ["user", "project", "feedback", "reference", "decision"];
@@ -25,12 +26,11 @@ function resolveAgentId(ctx: OpenClawPluginToolContext): string {
 }
 
 export function registerStructuredMemory(api: OpenClawPluginApi, config?: MemoryConfig) {
-  const openclawDir = api.runtime.paths?.home ?? process.env.HOME + "/.openclaw";
+  const openclawDir = resolveOpenClawHome(api);
   const db = getDb(openclawDir);
   const maxCtx = config?.maxContextEntries ?? 5;
 
   // ── Tool Factory: enhance_memory_store ──
-  // 使用 factory 模式，每次工具调用时从 ctx 获取 agentId
   api.registerTool(
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_store",
