@@ -1,0 +1,46 @@
+{
+  "name": "@huo15/openclaw-enhance",
+  "version": "1.1.0",
+  "description": "龙虾增强包 — 结构化记忆、工具安全、提示词增强、工作流自动化、仪表盘",
+  "type": "module",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "bin": {
+    "openclaw-enhance-setup": "./scripts/setup.sh"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "enhance",
+    "memory",
+    "safety",
+    "agent"
+  ],
+  "author": "jobzhao15",
+  "license": "MIT",
+  "peerDependencies": {
+    "openclaw": ">=2026.2.24"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "src/**/*",
+    "skills/**/*",
+    "templates/**/*",
+    "scripts/**/*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jobzhao15/openclaw-enhance"
+  }
+}
