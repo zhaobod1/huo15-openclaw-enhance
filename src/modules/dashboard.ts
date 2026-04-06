@@ -116,13 +116,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="workflows"></div>
 </div>
 
-<footer>龙虾增强包 v1.2.0 &mdash; 多 Agent 隔离</footer>
+<footer>龙虾增强包 v1.2.1 &mdash; 多 Agent 隔离</footer>
 
 <script>
 var currentAgent='';
 function switchAgent(v){currentAgent=v;var u=new URL(location.href);if(v)u.searchParams.set('agent',v);else u.searchParams.delete('agent');history.replaceState(null,'',u);load();}
 function load(){
-  var u='/enhance/api/status'+(currentAgent?'?agent='+encodeURIComponent(currentAgent):'');
+  var u='/plugins/enhance/api/status'+(currentAgent?'?agent='+encodeURIComponent(currentAgent):'');
   var x=new XMLHttpRequest();x.open('GET',u);x.onload=function(){
     if(x.status!==200)return;
     var d=JSON.parse(x.responseText);
@@ -151,14 +151,14 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
   const openclawDir = resolveOpenClawHome(api);
 
   api.registerHttpRoute({
-    path: "/enhance",
+    path: "/plugins/enhance",
     match: "prefix",
-    auth: "gateway",
+    auth: "plugin",
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       const url = parseUrl(req);
       const pathname = url.pathname;
 
-      if (pathname === "/enhance/api/status") {
+      if (pathname === "/plugins/enhance/api/status") {
         const db = getDb(openclawDir);
         const agentFilter = url.searchParams.get("agent") || undefined;
 
@@ -193,5 +193,5 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
     },
   });
 
-  api.logger.info("[enhance] 仪表盘模块已加载（多 Agent 视图），访问 /enhance/");
+  api.logger.info("[enhance] 仪表盘模块已加载（多 Agent 视图），访问 /plugins/enhance/");
 }

@@ -53,7 +53,7 @@ openclaw plugins install @huo15/openclaw-enhance
 openclaw restart
 ```
 
-安装完成后访问仪表盘：`http://localhost:18789/enhance/`
+安装完成后访问仪表盘：`http://localhost:18789/plugins/enhance/`
 
 ---
 
@@ -65,7 +65,7 @@ openclaw restart
 | **工具安全** | 可配置的工具调用拦截规则 + 审计日志 | `enhance_safety_log` `enhance_safety_rules` |
 | **提示词增强** | 自动注入任务分类、质量指引、记忆上下文 | 自动（通过 hook） |
 | **工作流自动化** | 触发词驱动的行为指令注入 | `enhance_workflow_define` `enhance_workflow_list` `enhance_workflow_delete` |
-| **仪表盘** | Web UI 查看系统状态 | `http://localhost:18789/enhance/` |
+| **仪表盘** | Web UI 查看系统状态 | `http://localhost:18789/plugins/enhance/` |
 
 ---
 
