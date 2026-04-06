@@ -116,7 +116,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="workflows"></div>
 </div>
 
-<footer>龙虾增强包 v1.2.1 &mdash; 多 Agent 隔离</footer>
+<footer>龙虾增强包 v1.2.3 &mdash; 多 Agent 隔离</footer>
 
 <script>
 var currentAgent='';

@@ -1,7 +1,7 @@
 /**
  * 龙虾增强包 (OpenClaw Enhancement Kit)
  *
- * 非侵入式增强插件（v1.2.1 — 多 Agent 隔离）：
+ * 非侵入式增强插件（v1.2.3 — 多 Agent 隔离）：
  * - 模块1: 结构化记忆系统（按 agentId 隔离，借鉴 Claude Code auto-memory）
  * - 模块2: 工具安全守卫（按 agentId 记录日志，借鉴 Claude Code 权限系统）
  * - 模块3: 提示词增强（按 agentId 注入上下文，借鉴 Claude Code systemPromptSections）
@@ -19,7 +19,47 @@ import { registerToolSafety } from "./src/modules/tool-safety.js";
 import { registerPromptEnhancer } from "./src/modules/prompt-enhancer.js";
 import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
 import { registerDashboard } from "./src/modules/dashboard.js";
+import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import type { EnhancePluginConfig } from "./src/types.js";
+import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * 同步插件 skills 到指定的 workspace/skills/ 目录。
+ * 支持全局 workspace 和每个动态 Agent 的独立 workspace。
+ */
+function syncSkillsToDir(pluginSkillsDir: string, targetSkillsDir: string): number {
+  if (!existsSync(pluginSkillsDir)) return 0;
+  if (!existsSync(targetSkillsDir)) {
+    mkdirSync(targetSkillsDir, { recursive: true });
+  }
+
+  let synced = 0;
+  const skillDirs = readdirSync(pluginSkillsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory());
+
+  for (const skillDir of skillDirs) {
+    const srcDir = join(pluginSkillsDir, skillDir.name);
+    const destDir = join(targetSkillsDir, skillDir.name);
+
+    if (!existsSync(destDir)) {
+      mkdirSync(destDir, { recursive: true });
+    }
+
+    const files = readdirSync(srcDir, { withFileTypes: true })
+      .filter((f) => f.isFile());
+
+    for (const file of files) {
+      copyFileSync(join(srcDir, file.name), join(destDir, file.name));
+    }
+    synced++;
+  }
+
+  return synced;
+}
+
+/** 记录已同步过 skills 的 workspace 路径，避免重复同步 */
+const syncedWorkspaces = new Set<string>();
 
 export default definePluginEntry({
   id: "enhance",
@@ -69,6 +109,42 @@ export default definePluginEntry({
       }
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.2.1 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
+    // 自动同步 skills 到全局 workspace
+    const pluginDir = api.rootDir;
+    const pluginSkillsDir = pluginDir ? join(pluginDir, "skills") : null;
+
+    if (pluginSkillsDir && existsSync(pluginSkillsDir)) {
+      try {
+        const openclawHome = resolveOpenClawHome(api);
+        const globalSkillsDir = join(openclawHome, "workspace", "skills");
+        const syncCount = syncSkillsToDir(pluginSkillsDir, globalSkillsDir);
+        syncedWorkspaces.add(globalSkillsDir);
+        if (syncCount > 0) {
+          api.logger.info(`[enhance] 已同步 ${syncCount} 个增强技能到全局 workspace/skills/`);
+        }
+      } catch (err) {
+        api.logger.error(`[enhance] 全局技能同步失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // 为每个动态 Agent 的 workspace 也同步 skills（首次遇到时）
+      api.on("before_prompt_build", (_event: unknown, ctx: unknown) => {
+        try {
+          const agentCtx = ctx as { workspaceDir?: string } | undefined;
+          const workspaceDir = agentCtx?.workspaceDir;
+          if (!workspaceDir) return;
+
+          const agentSkillsDir = join(workspaceDir, "skills");
+          if (syncedWorkspaces.has(agentSkillsDir)) return;
+
+          syncSkillsToDir(pluginSkillsDir, agentSkillsDir);
+          syncedWorkspaces.add(agentSkillsDir);
+          api.logger.info(`[enhance] 已同步增强技能到 Agent workspace: ${workspaceDir}`);
+        } catch {
+          // 静默失败，不影响主流程
+        }
+      });
+    }
+
+    api.logger.info(`[enhance] 龙虾增强包 v1.2.3 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
   },
 });
