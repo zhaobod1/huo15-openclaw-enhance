@@ -5,7 +5,12 @@
   "type": "module",
   "main": "index.ts",
   "openclaw": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": "2026.2.24"
+    }
   },
   "bin": {
     "openclaw-enhance-setup": "./scripts/setup.sh"
@@ -24,7 +29,7 @@
     "openclaw": ">=2026.2.24"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.0",
+    "@sinclair/typebox": "^0.34.49",
     "better-sqlite3": "^11.0.0"
   },
   "devDependencies": {
