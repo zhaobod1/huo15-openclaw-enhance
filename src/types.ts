@@ -75,11 +75,6 @@ export interface DashboardConfig {
   enabled?: boolean;
 }
 
-// ── 企业文档标准 ──
-export interface DocumentStandardConfig {
-  enabled?: boolean;
-}
-
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
   memory?: MemoryConfig;
@@ -87,5 +82,4 @@ export interface EnhancePluginConfig {
   prompt?: PromptConfig;
   workflows?: WorkflowConfig;
   dashboard?: DashboardConfig;
-  documentStandard?: DocumentStandardConfig;
 }

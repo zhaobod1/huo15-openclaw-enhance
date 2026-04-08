@@ -19,7 +19,6 @@ import { registerToolSafety } from "./src/modules/tool-safety.js";
 import { registerPromptEnhancer } from "./src/modules/prompt-enhancer.js";
 import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
 import { registerDashboard } from "./src/modules/dashboard.js";
-import { registerDocumentStandard } from "./src/modules/document-standard.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import type { EnhancePluginConfig } from "./src/types.js";
 import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
@@ -65,9 +64,7 @@ const syncedWorkspaces = new Set<string>();
 export default definePluginEntry({
   id: "enhance",
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
-  description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘、企业文档标准",
-
-  version: "1.3.0",
+  description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
 
   register(api) {
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
@@ -97,11 +94,6 @@ export default definePluginEntry({
         name: "仪表盘",
         enabled: config.dashboard?.enabled !== false,
         load: () => registerDashboard(api, config.dashboard),
-      },
-      {
-        name: "企业文档标准",
-        enabled: config.documentStandard?.enabled !== false,
-        load: () => registerDocumentStandard(api, config.documentStandard),
       },
     ];
 
@@ -153,6 +145,6 @@ export default definePluginEntry({
       });
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.3.0 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v1.2.3 已加载（多 Agent 隔离），启用模块: ${loaded.join("、")}`);
   },
 });
