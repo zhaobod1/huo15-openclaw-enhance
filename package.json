@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "1.2.3",
-  "description": "龙虾增强包 — 结构化记忆、工具安全、提示词增强、工作流自动化、仪表盘",
+  "version": "1.3.0",
+  "description": "龙虾增强包 — 结构化记忆、工具安全、提示词增强、工作流自动化、仪表盘、企业文档标准",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
