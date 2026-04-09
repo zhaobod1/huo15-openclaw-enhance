@@ -30,7 +30,15 @@ const SECTIONS: Record<PromptSection, string> = {
     "- 做破坏性操作前先确认（删除、force push、覆盖未保存的修改）",
   ].join("\n"),
 
-  memoryContext: "", // 由 structured-memory 模块通过自己的钩子注入
+  // 仅在结构化记忆模块禁用时作为托底说明
+  memoryInstructions: [
+    "## 记忆工具说明（增强包）",
+    "你有以下结构化记忆工具可以使用：",
+    "- enhance_memory_store: 存储重要信息（user/project/feedback/reference/decision 五类）",
+    "- enhance_memory_search: 按类别或关键词搜索历史记忆",
+    "- enhance_memory_review: 查看记忆统计和最近记忆",
+    "记忆数据按 Agent 隔离，每个用户/群组独立存储。",
+  ].join("\n"),
 
   safetyAwareness: [
     "## 安全意识（增强包）",
@@ -42,7 +50,8 @@ const SECTIONS: Record<PromptSection, string> = {
 };
 
 export function registerPromptEnhancer(api: OpenClawPluginApi, config?: PromptConfig) {
-  const enabledSections: PromptSection[] = config?.sections ?? ["qualityGuidelines", "memoryContext"];
+  // 默认只启用质量准则；memoryInstructions 仅作为托底（结构化记忆模块禁用时才需要）
+  const enabledSections: PromptSection[] = config?.sections ?? ["qualityGuidelines"];
 
   api.on("before_prompt_build", (_event, ctx) => {
     const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;

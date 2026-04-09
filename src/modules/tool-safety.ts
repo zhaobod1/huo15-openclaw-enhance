@@ -44,6 +44,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
 
   // ── Hook: before_tool_call — 安全拦截 ──
   // event 包含 toolName, params; ctx 包含 agentId
+  // 声明高优先级（900），确保在其他插件之前执行安全检查
   api.on("before_tool_call", (event, ctx) => {
     const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
     const toolName = (event as any)?.toolName ?? "";
@@ -58,9 +59,28 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
 
       logSafetyEvent(db, agentId, toolName, matchText.slice(0, 500), rule.action, JSON.stringify(rule), rule.reason ?? "");
 
+      if (rule.action === "hardblock") {
+        // 无条件拦截，不给用户确认机会（用于极危险操作）
+        api.logger.warn(`[enhance-safety] 已强制拦截 (agent: ${agentId}): ${toolName} — ${rule.reason ?? "匹配安全规则"}`);
+        return { block: true, blockReason: rule.reason ?? "匹配安全规则（hardblock）" };
+      }
+
       if (rule.action === "block") {
-        api.logger.warn(`[enhance-safety] 已拦截 (agent: ${agentId}): ${toolName} — ${rule.reason ?? "匹配安全规则"}`);
-        return { block: true };
+        // 弹出用户确认对话框，超时 30s 默认拒绝
+        api.logger.warn(`[enhance-safety] 需要用户确认 (agent: ${agentId}): ${toolName} — ${rule.reason ?? "匹配安全规则"}`);
+        return {
+          requireApproval: {
+            title: `安全守卫：拦截工具调用「${toolName}」`,
+            description: [
+              rule.reason ?? "该操作匹配了安全规则，请确认是否允许执行。",
+              `工具: ${toolName}`,
+              `参数: ${matchText.slice(0, 200)}`,
+            ].join("\n"),
+            severity: "critical" as const,
+            timeoutMs: 30_000,
+            timeoutBehavior: "deny" as const,
+          },
+        };
       }
       return {};
     }
@@ -69,7 +89,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
       logSafetyEvent(db, agentId, toolName, matchText.slice(0, 500), "log", "", "default-log");
     }
     return {};
-  });
+  }, { priority: 900 } as any);
 
   // ── Tool Factory: enhance_safety_log ──
   api.registerTool(
@@ -138,6 +158,19 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
       };
     },
   });
+
+  // ── 安全审计收集器 — 供 `openclaw doctor` 命令汇报 ──
+  if (typeof (api as any).registerSecurityAuditCollector === "function") {
+    (api as any).registerSecurityAuditCollector(async () => {
+      const recentBlocks = getRecentSafetyEvents(db, undefined, 20).filter(
+        (e) => e.action === "block" || e.action === "hardblock",
+      );
+      return recentBlocks.map((b) => ({
+        level: "warn",
+        message: `[enhance-safety] 工具「${b.tool}」被拦截 (${b.created_at}): ${b.reason || "匹配安全规则"}`,
+      }));
+    });
+  }
 
   api.logger.info(`[enhance] 工具安全模块已加载（多 Agent 隔离日志），${rules.length} 条规则`);
 }

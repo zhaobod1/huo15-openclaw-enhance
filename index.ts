@@ -50,7 +50,11 @@ function syncSkillsToDir(pluginSkillsDir: string, targetSkillsDir: string): numb
       .filter((f) => f.isFile());
 
     for (const file of files) {
-      copyFileSync(join(srcDir, file.name), join(destDir, file.name));
+      const destFile = join(destDir, file.name);
+      // 仅当目标文件不存在时才复制，避免覆盖同名的 openclaw 内置技能
+      if (!existsSync(destFile)) {
+        copyFileSync(join(srcDir, file.name), destFile);
+      }
     }
     synced++;
   }

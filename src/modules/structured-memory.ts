@@ -184,5 +184,56 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
     };
   });
 
+  // ── Hook: session_start — 会话启动时注入重要记忆摘要 ──
+  // 借鉴 Claude Code 的 session_start hook，在会话初始化时提供记忆快照
+  if (typeof (api as any).on === "function") {
+    try {
+      (api as any).on("session_start", (_event: unknown, ctx: unknown) => {
+        const agentCtx = ctx as { agentId?: string } | undefined;
+        const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
+
+        // 拉取重要性最高的记忆（按 importance 降序）
+        const topMemories = searchMemories(db, agentId, { limit: 3 });
+        if (topMemories.length === 0) return {};
+
+        const summary = topMemories
+          .map((e) => `- [${e.category}] ${e.content.slice(0, 120)}`)
+          .join("\n");
+
+        return {
+          appendSystemContext: [
+            "## 会话记忆摘要（增强包）",
+            `以下是 Agent「${agentId}」最重要的结构化记忆：`,
+            summary,
+          ].join("\n"),
+        };
+      });
+    } catch {
+      // session_start hook 不可用时静默跳过
+    }
+  }
+
+  // ── Hook: pre_compact — 对话压缩前自动记录存档标记 ──
+  // 借鉴 Claude Code 的 pre_compact hook，防止重要上下文在压缩时丢失
+  if (typeof (api as any).on === "function") {
+    try {
+      (api as any).on("pre_compact", (_event: unknown, ctx: unknown) => {
+        const agentCtx = ctx as { agentId?: string } | undefined;
+        const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
+
+        storeMemory(
+          db,
+          agentId,
+          "decision",
+          `[auto-compact] 对话上下文已压缩（${new Date().toISOString()}）。重要上下文可能已被截断，建议使用 enhance_memory_search 查找历史记忆。`,
+          "auto-compact",
+          3,
+        );
+      });
+    } catch {
+      // pre_compact hook 不可用时静默跳过
+    }
+  }
+
   api.logger.info("[enhance] 结构化记忆模块已加载（多 Agent 隔离）");
 }

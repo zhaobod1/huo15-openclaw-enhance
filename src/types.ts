@@ -27,7 +27,8 @@ export interface MemoryConfig {
 }
 
 // ── 工具安全 ──
-export type SafetyAction = "block" | "log" | "allow";
+/** block: 弹出用户确认对话框（可超时拒绝）；hardblock: 无条件拦截；log: 只记录；allow: 放行 */
+export type SafetyAction = "block" | "hardblock" | "log" | "allow";
 
 export interface SafetyRule {
   tool: string;
@@ -47,7 +48,7 @@ export interface SafetyConfig {
 export type PromptSection =
   | "taskClassification"
   | "qualityGuidelines"
-  | "memoryContext"
+  | "memoryInstructions"
   | "safetyAwareness";
 
 export interface PromptConfig {
