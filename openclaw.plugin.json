@@ -1,7 +1,7 @@
 {
   "id": "enhance",
-  "name": "龙虾增强包 (OpenClaw Enhancement Kit)",
-  "description": "非侵入式增强：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
+  "name": "火一五·克劳德·龙虾增强插件",
+  "description": "借鉴 Claude Code 优秀设计：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
   "version": "1.2.3",
   "configSchema": {
     "type": "object",

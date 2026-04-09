@@ -1,0 +1,11 @@
+type FacadeModule = typeof import("@openclaw/memory-core/runtime-api.js");
+export declare const auditShortTermPromotionArtifacts: FacadeModule["auditShortTermPromotionArtifacts"];
+export declare const getBuiltinMemoryEmbeddingProviderDoctorMetadata: FacadeModule["getBuiltinMemoryEmbeddingProviderDoctorMetadata"];
+export declare const getMemorySearchManager: FacadeModule["getMemorySearchManager"];
+export declare const listBuiltinAutoSelectMemoryEmbeddingProviderDoctorMetadata: FacadeModule["listBuiltinAutoSelectMemoryEmbeddingProviderDoctorMetadata"];
+export declare const MemoryIndexManager: FacadeModule["MemoryIndexManager"];
+export declare const repairShortTermPromotionArtifacts: FacadeModule["repairShortTermPromotionArtifacts"];
+export type BuiltinMemoryEmbeddingProviderDoctorMetadata = import("@openclaw/memory-core/runtime-api.js").BuiltinMemoryEmbeddingProviderDoctorMetadata;
+export type RepairShortTermPromotionArtifactsResult = import("@openclaw/memory-core/runtime-api.js").RepairShortTermPromotionArtifactsResult;
+export type ShortTermAuditSummary = import("@openclaw/memory-core/runtime-api.js").ShortTermAuditSummary;
+export {};

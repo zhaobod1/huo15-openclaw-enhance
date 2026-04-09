@@ -1,0 +1,7 @@
+export declare const matrixSingleAccountKeysToMove: readonly ["deviceId", "avatarUrl", "initialSyncLimit", "encryption", "allowlistOnly", "allowBots", "blockStreaming", "replyToMode", "threadReplies", "textChunkLimit", "chunkMode", "responsePrefix", "ackReaction", "ackReactionScope", "reactionNotifications", "threadBindings", "startupVerification", "startupVerificationCooldownHours", "mediaMaxMb", "autoJoin", "autoJoinAllowlist", "dm", "groups", "rooms", "actions"];
+export declare const matrixNamedAccountPromotionKeys: readonly ["name", "homeserver", "userId", "accessToken", "password", "deviceId", "deviceName", "avatarUrl", "initialSyncLimit", "encryption"];
+export declare const singleAccountKeysToMove: ("dm" | "textChunkLimit" | "chunkMode" | "groups" | "actions" | "avatarUrl" | "initialSyncLimit" | "deviceId" | "responsePrefix" | "ackReaction" | "replyToMode" | "mediaMaxMb" | "reactionNotifications" | "blockStreaming" | "threadBindings" | "autoJoin" | "allowBots" | "ackReactionScope" | "rooms" | "encryption" | "allowlistOnly" | "threadReplies" | "startupVerification" | "startupVerificationCooldownHours" | "autoJoinAllowlist")[];
+export declare const namedAccountPromotionKeys: ("name" | "password" | "homeserver" | "userId" | "accessToken" | "deviceName" | "avatarUrl" | "initialSyncLimit" | "deviceId" | "encryption")[];
+export declare function resolveSingleAccountPromotionTarget(params: {
+    channel: Record<string, unknown>;
+}): string;

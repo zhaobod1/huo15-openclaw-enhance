@@ -1,0 +1,74 @@
+import type { OpenClawConfig } from "../config/config.js";
+import { type PluginCandidate } from "./discovery.js";
+import { type PluginManifest, type PluginManifestChannelConfig, type PluginManifestContracts, type PluginManifestModelSupport } from "./manifest.js";
+import type { PluginBundleFormat, PluginConfigUiHint, PluginDiagnostic, PluginFormat, PluginKind, PluginOrigin } from "./types.js";
+type PluginManifestContractListKey = "speechProviders" | "mediaUnderstandingProviders" | "realtimeVoiceProviders" | "realtimeTranscriptionProviders" | "imageGenerationProviders" | "videoGenerationProviders" | "musicGenerationProviders" | "memoryEmbeddingProviders" | "webFetchProviders" | "webSearchProviders";
+export type PluginManifestRecord = {
+    id: string;
+    name?: string;
+    description?: string;
+    version?: string;
+    enabledByDefault?: boolean;
+    autoEnableWhenConfiguredProviders?: string[];
+    legacyPluginIds?: string[];
+    format?: PluginFormat;
+    bundleFormat?: PluginBundleFormat;
+    bundleCapabilities?: string[];
+    kind?: PluginKind | PluginKind[];
+    channels: string[];
+    providers: string[];
+    modelSupport?: PluginManifestModelSupport;
+    providerAuthEnvVars?: Record<string, string[]>;
+    providerAuthChoices?: PluginManifest["providerAuthChoices"];
+    skills: string[];
+    settingsFiles?: string[];
+    hooks: string[];
+    origin: PluginOrigin;
+    workspaceDir?: string;
+    rootDir: string;
+    source: string;
+    setupSource?: string;
+    startupDeferConfiguredChannelFullLoadUntilAfterListen?: boolean;
+    manifestPath: string;
+    schemaCacheKey?: string;
+    configSchema?: Record<string, unknown>;
+    configUiHints?: Record<string, PluginConfigUiHint>;
+    contracts?: PluginManifestContracts;
+    channelConfigs?: Record<string, PluginManifestChannelConfig>;
+    channelCatalogMeta?: {
+        id: string;
+        label?: string;
+        blurb?: string;
+        preferOver?: readonly string[];
+    };
+};
+export type PluginManifestRegistry = {
+    plugins: PluginManifestRecord[];
+    diagnostics: PluginDiagnostic[];
+};
+export declare function clearPluginManifestRegistryCache(): void;
+export declare function resolveManifestContractPluginIds(params: {
+    contract: PluginManifestContractListKey;
+    origin?: PluginOrigin;
+    config?: OpenClawConfig;
+    workspaceDir?: string;
+    env?: NodeJS.ProcessEnv;
+    onlyPluginIds?: readonly string[];
+}): string[];
+export declare function resolveManifestContractOwnerPluginId(params: {
+    contract: PluginManifestContractListKey;
+    value: string | undefined;
+    origin?: PluginOrigin;
+    config?: OpenClawConfig;
+    workspaceDir?: string;
+    env?: NodeJS.ProcessEnv;
+}): string | undefined;
+export declare function loadPluginManifestRegistry(params?: {
+    config?: OpenClawConfig;
+    workspaceDir?: string;
+    cache?: boolean;
+    env?: NodeJS.ProcessEnv;
+    candidates?: PluginCandidate[];
+    diagnostics?: PluginDiagnostic[];
+}): PluginManifestRegistry;
+export {};

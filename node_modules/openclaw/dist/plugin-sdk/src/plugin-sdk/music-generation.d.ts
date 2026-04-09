@@ -1,0 +1,1 @@
+export type { GeneratedMusicAsset, MusicGenerationProvider, MusicGenerationProviderCapabilities, MusicGenerationRequest, MusicGenerationResult, MusicGenerationSourceImage, MusicGenerationOutputFormat, } from "../music-generation/types.js";

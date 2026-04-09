@@ -1,0 +1,30 @@
+import { r as loadBundledEntryExportSync } from "./channel-entry-contract-DyY5TZkc.js";
+import "./setup-core-YXE84urA.js";
+import "./group-access-juUr4drH.js";
+//#region extensions/zalo/setup-api.ts
+function createLazyObjectValue(load) {
+	return new Proxy({}, {
+		get(_target, property, receiver) {
+			return Reflect.get(load(), property, receiver);
+		},
+		has(_target, property) {
+			return property in load();
+		},
+		ownKeys() {
+			return Reflect.ownKeys(load());
+		},
+		getOwnPropertyDescriptor(_target, property) {
+			const descriptor = Object.getOwnPropertyDescriptor(load(), property);
+			return descriptor ? {
+				...descriptor,
+				configurable: true
+			} : void 0;
+		}
+	});
+}
+function loadSetupSurfaceModule() {
+	return loadBundledEntryExportSync(import.meta.url, { specifier: "./src/setup-surface.js" });
+}
+const zaloSetupWizard = createLazyObjectValue(() => loadSetupSurfaceModule().zaloSetupWizard);
+//#endregion
+export { zaloSetupWizard as t };

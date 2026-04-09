@@ -1,4 +1,4 @@
-# 龙虾增强包 (OpenClaw Enhancement Kit)
+# 火一五·克劳德·龙虾增强插件
 
 ---
 
@@ -26,7 +26,7 @@
 
 ## 简介
 
-**龙虾增强包** 是 [OpenClaw](https://github.com/nicepkg/openclaw) 的非侵入式增强插件，借鉴 Claude Code 的优秀设计模式，为你的龙虾 AI Agent 注入结构化记忆、工具安全守卫、提示词工程、工作流自动化和可视化仪表盘等能力。
+**火一五·克劳德·龙虾增强插件** 是 [OpenClaw](https://github.com/nicepkg/openclaw) 的非侵入式增强插件，借鉴 Claude Code 的优秀设计模式，为你的龙虾 AI Agent 注入结构化记忆、工具安全守卫、提示词工程、工作流自动化和可视化仪表盘等能力。
 
 完全通过 OpenClaw 插件 API 实现，**不修改任何核心代码**，一键安装即可使用。
 
@@ -159,7 +159,7 @@ openclaw restart
 
 借鉴 Claude Code 的核心设计模式，适配 OpenClaw 的插件架构：
 
-| 维度 | Claude Code 原版 | 龙虾增强包适配 |
+| 维度 | Claude Code 原版 | 火一五·克劳德·龙虾增强插件适配 |
 |------|-----------------|--------------|
 | 记忆系统 | 6 层记忆 + Agent frontmatter | 5 类分类 + SQLite agent_id 隔离 |
 | 权限安全 | 5 层权限模型 + 异步分类器 | 规则匹配 + block/log/allow + 审计日志 |
