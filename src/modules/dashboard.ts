@@ -119,29 +119,92 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <footer>龙虾增强包 v1.2.3 &mdash; 多 Agent 隔离</footer>
 
 <script>
-var currentAgent='';
-function switchAgent(v){currentAgent=v;var u=new URL(location.href);if(v)u.searchParams.set('agent',v);else u.searchParams.delete('agent');history.replaceState(null,'',u);load();}
-function load(){
-  var u='/plugins/enhance/api/status'+(currentAgent?'?agent='+encodeURIComponent(currentAgent):'');
-  var x=new XMLHttpRequest();x.open('GET',u);x.onload=function(){
-    if(x.status!==200)return;
-    var d=JSON.parse(x.responseText);
-    var sel=document.getElementById('agentSelect');
-    sel.innerHTML='<option value="">全部 (聚合)</option>'+d.agents.map(function(a){return '<option value="'+esc(a)+'"'+(a===currentAgent?' selected':'')+'>'+esc(a)+'</option>';}).join('');
-    document.getElementById('currentAgent').textContent=currentAgent?'当前: '+currentAgent:'全部 Agent 聚合视图';
-    var s=document.getElementById('stats');
-    s.innerHTML=[card('Agent 数',d.agents.length,'个'),card('记忆总数',d.memory.total,'条'),card('用户记忆',d.memory.user||0,'条'),card('项目记忆',d.memory.project||0,'条'),card('安全事件',d.safety.total,'次'),card('已拦截',d.safety.blocked,'次'),card('工作流',d.workflows.length,'个')].join('');
-    var m=document.getElementById('memories');
-    if(!d.recentMemories.length){m.innerHTML='<p class="empty">暂无记忆</p>';}else{m.innerHTML='<table><tr><th>ID</th><th>Agent</th><th>类型</th><th>内容</th><th>时间</th></tr>'+d.recentMemories.map(function(e){return '<tr><td>#'+e.id+'</td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.category+'</td><td>'+esc(e.content).slice(0,50)+'</td><td>'+e.created_at+'</td></tr>';}).join('')+'</table>';}
-    var sf=document.getElementById('safety');
-    if(!d.recentSafety.length){sf.innerHTML='<p class="empty">暂无安全事件</p>';}else{sf.innerHTML='<table><tr><th>动作</th><th>Agent</th><th>工具</th><th>参数</th><th>时间</th></tr>'+d.recentSafety.map(function(e){return '<tr><td><span class="badge badge-'+e.action+'">'+e.action+'</span></td><td><span class="agent-tag">'+esc(e.agent_id)+'</span></td><td>'+e.tool+'</td><td>'+esc(e.params||'').slice(0,35)+'</td><td>'+e.created_at+'</td></tr>';}).join('')+'</table>';}
-    var w=document.getElementById('workflows');
-    if(!d.workflows.length){w.innerHTML='<p class="empty">暂无工作流</p>';}else{w.innerHTML='<table><tr><th>名称</th><th>Agent</th><th>触发词</th><th>状态</th></tr>'+d.workflows.map(function(e){return '<tr><td>'+esc(e.name)+'</td><td><span class="agent-tag">'+esc(e.agent_id||'main')+'</span></td><td>'+esc(e.trigger)+'</td><td>'+(e.enabled?'&#x2705;':'&#x23F8;')+'</td></tr>';}).join('')+'</table>';}
-  };x.send();
+// 本地仪表盘：仅请求同域 /plugins/enhance/api/status，无外部网络调用
+var currentAgent = '';
+
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
-function card(t,v,l){return '<div class="card"><h3>'+t+'</h3><div class="value">'+v+'</div><div class="label">'+l+'</div></div>';}
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-var p=new URLSearchParams(location.search);currentAgent=p.get('agent')||'';
+
+function card(title, value, label) {
+  var el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = '<h3>' + esc(title) + '</h3><div class="value">' + esc(String(value)) + '</div><div class="label">' + esc(label) + '</div>';
+  return el.outerHTML;
+}
+
+function buildTable(headers, rows) {
+  if (!rows.length) return '<p class="empty">暂无数据</p>';
+  var head = '<tr>' + headers.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join('') + '</tr>';
+  return '<table>' + head + rows.join('') + '</table>';
+}
+
+function switchAgent(v) {
+  currentAgent = v;
+  var u = new URL(location.href);
+  if (v) {
+    u.searchParams.set('agent', v);
+  } else {
+    u.searchParams.delete('agent');
+  }
+  history.replaceState(null, '', u);
+  load();
+}
+
+function load() {
+  var apiPath = '/plugins/enhance/api/status';
+  if (currentAgent) {
+    apiPath += '?agent=' + encodeURIComponent(currentAgent);
+  }
+
+  fetch(apiPath)
+    .then(function(resp) { return resp.json(); })
+    .then(function(d) {
+      // Agent 选择器
+      var sel = document.getElementById('agentSelect');
+      var opts = '<option value="">全部 (聚合)</option>';
+      d.agents.forEach(function(a) {
+        opts += '<option value="' + esc(a) + '"' + (a === currentAgent ? ' selected' : '') + '>' + esc(a) + '</option>';
+      });
+      sel.innerHTML = opts;
+      document.getElementById('currentAgent').textContent = currentAgent ? '当前: ' + currentAgent : '全部 Agent 聚合视图';
+
+      // 统计卡片
+      document.getElementById('stats').innerHTML = [
+        card('Agent 数', d.agents.length, '个'),
+        card('记忆总数', d.memory.total, '条'),
+        card('用户记忆', d.memory.user || 0, '条'),
+        card('项目记忆', d.memory.project || 0, '条'),
+        card('安全事件', d.safety.total, '次'),
+        card('已拦截', d.safety.blocked, '次'),
+        card('工作流', d.workflows.length, '个'),
+      ].join('');
+
+      // 最近记忆表
+      var memRows = d.recentMemories.map(function(e) {
+        return '<tr><td>#' + e.id + '</td><td><span class="agent-tag">' + esc(e.agent_id) + '</span></td><td>' + esc(e.category) + '</td><td>' + esc(e.content).slice(0, 50) + '</td><td>' + esc(e.created_at) + '</td></tr>';
+      });
+      document.getElementById('memories').innerHTML = buildTable(['ID','Agent','类型','内容','时间'], memRows);
+
+      // 安全事件表
+      var sfRows = d.recentSafety.map(function(e) {
+        return '<tr><td><span class="badge badge-' + esc(e.action) + '">' + esc(e.action) + '</span></td><td><span class="agent-tag">' + esc(e.agent_id) + '</span></td><td>' + esc(e.tool) + '</td><td>' + esc(e.params || '').slice(0, 35) + '</td><td>' + esc(e.created_at) + '</td></tr>';
+      });
+      document.getElementById('safety').innerHTML = buildTable(['动作','Agent','工具','参数','时间'], sfRows);
+
+      // 工作流表
+      var wfRows = d.workflows.map(function(e) {
+        return '<tr><td>' + esc(e.name) + '</td><td><span class="agent-tag">' + esc(e.agent_id || 'main') + '</span></td><td>' + esc(e.trigger) + '</td><td>' + (e.enabled ? '✅' : '⏸') + '</td></tr>';
+      });
+      document.getElementById('workflows').innerHTML = buildTable(['名称','Agent','触发词','状态'], wfRows);
+    });
+}
+
+var params = new URLSearchParams(location.search);
+currentAgent = params.get('agent') || '';
 load();
 </script>
 </body>
