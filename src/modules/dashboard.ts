@@ -8,6 +8,7 @@
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type Database from "better-sqlite3";
 import {
   getDb,
   getMemoryStats,
@@ -15,11 +16,12 @@ import {
   getRecentMemories,
   getRecentSafetyEvents,
   getAllAgentIds,
+  getOrCreatePet,
 } from "../utils/sqlite-store.js";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow } from "../types.js";
+import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow, type NotificationQueue } from "../types.js";
 
 function loadAllWorkflows(openclawDir: string): Workflow[] {
   const path = join(openclawDir, "memory", "enhance-workflows.json");
@@ -88,8 +90,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>&#x1F99E; 龙虾增强包</h1>
-<p class="subtitle">OpenClaw Enhancement Kit &mdash; Multi-Agent Dashboard</p>
+<div style="display:flex;align-items:center;justify-content:space-between">
+  <div><h1>&#x1F99E; 龙虾增强包 <span id="petBadge" style="font-size:0.5em"></span></h1>
+  <p class="subtitle">OpenClaw Enhancement Kit &mdash; Multi-Agent Dashboard</p></div>
+  <div id="notifBell" style="position:relative;cursor:pointer;font-size:1.5em" onclick="toggleNotif()" title="通知">&#x1F514;<span id="notifCount" style="position:absolute;top:-4px;right:-8px;background:#ff4444;color:#fff;border-radius:50%;font-size:0.45em;padding:2px 6px;display:none"></span></div>
+</div>
+<div id="notifPanel" style="display:none;background:#1a1d27;border:1px solid #2a2d37;border-radius:8px;padding:12px;margin-bottom:16px;max-height:240px;overflow-y:auto"></div>
 
 <div class="agent-bar">
   <label>Agent:</label>
@@ -116,7 +122,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="workflows"></div>
 </div>
 
-<footer>龙虾增强包 v1.2.3 &mdash; 多 Agent 隔离</footer>
+<footer>龙虾增强包 v1.5.0 &mdash; 多 Agent 隔离 | <a href="/plugins/enhance/pet" style="color:#ff6b35">&#x1F525; 小火苗</a></footer>
 
 <script>
 // 本地仪表盘：仅请求同域 /plugins/enhance/api/status，无外部网络调用
@@ -203,14 +209,145 @@ function load() {
     });
 }
 
+function toggleNotif() {
+  var p = document.getElementById('notifPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function loadNotif() {
+  var path = '/plugins/enhance/api/notifications';
+  if (currentAgent) path += '?agent=' + encodeURIComponent(currentAgent);
+  fetch(path).then(function(r){return r.json()}).then(function(d){
+    var countEl = document.getElementById('notifCount');
+    if (d.unread > 0) { countEl.textContent = d.unread; countEl.style.display = 'inline'; }
+    else { countEl.style.display = 'none'; }
+    var panel = document.getElementById('notifPanel');
+    if (!d.recent.length) { panel.innerHTML = '<p class="empty">暂无通知</p>'; return; }
+    panel.innerHTML = d.recent.map(function(n){
+      var icon = n.level === 'success' ? '✅' : n.level === 'warn' ? '⚠️' : 'ℹ️';
+      return '<div style="padding:4px 0;border-bottom:1px solid #2a2d37;font-size:0.85em">' + icon + ' <b>' + esc(n.title) + '</b> <span style="color:#666;font-size:0.8em">' + esc(n.created_at) + '</span></div>';
+    }).join('');
+  });
+}
+
+function loadPetBadge() {
+  var path = '/plugins/enhance/api/pet';
+  if (currentAgent) path += '?agent=' + encodeURIComponent(currentAgent);
+  fetch(path).then(function(r){return r.json()}).then(function(d){
+    if (d && d.name) {
+      document.getElementById('petBadge').innerHTML = '&#x1F525; ' + esc(d.name) + ' Lv.' + d.level;
+    }
+  });
+}
+
 var params = new URLSearchParams(location.search);
 currentAgent = params.get('agent') || '';
 load();
+loadNotif();
+loadPetBadge();
 </script>
 </body>
 </html>`;
 
-export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardConfig) {
+const PET_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小火苗 — 龙虾增强包</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f1117;color:#e0e0e0;padding:24px;max-width:600px;margin:0 auto;text-align:center}
+  h1{font-size:2em;margin-bottom:4px;color:#ff6b35}
+  .subtitle{color:#888;margin-bottom:24px}
+  .flame-container{position:relative;width:200px;height:200px;margin:0 auto 24px}
+  .flame{width:60px;height:80px;border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;position:absolute;bottom:40px;left:50%;transform:translateX(-50%);animation:flicker 1.5s ease-in-out infinite alternate}
+  .flame.orange{background:linear-gradient(to top,#ff4500,#ff8c00,#ffd700);box-shadow:0 0 30px #ff4500,0 0 60px #ff8c0088}
+  .flame.blue{background:linear-gradient(to top,#1e90ff,#00bfff,#87ceeb);box-shadow:0 0 30px #1e90ff,0 0 60px #00bfff88}
+  .flame.purple{background:linear-gradient(to top,#8b00ff,#da70d6,#dda0dd);box-shadow:0 0 30px #8b00ff,0 0 60px #da70d688}
+  .flame.green{background:linear-gradient(to top,#228b22,#32cd32,#90ee90);box-shadow:0 0 30px #228b22,0 0 60px #32cd3288}
+  .flame.white{background:linear-gradient(to top,#dcdcdc,#f5f5f5,#fff);box-shadow:0 0 30px #dcdcdc,0 0 60px #ffffff88}
+  .base{width:50px;height:20px;background:#555;border-radius:0 0 8px 8px;position:absolute;bottom:24px;left:50%;transform:translateX(-50%)}
+  @keyframes flicker{0%{transform:translateX(-50%) scale(1) rotate(-2deg)}50%{transform:translateX(-50%) scale(1.05) rotate(1deg)}100%{transform:translateX(-50%) scale(0.97) rotate(-1deg)}}
+  .info{background:#1a1d27;border-radius:12px;padding:20px;border:1px solid #2a2d37;margin-bottom:16px;text-align:left}
+  .info h2{color:#ff6b35;font-size:1.1em;margin-bottom:12px}
+  .stat-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:0.9em}
+  .stat-bar{flex:1;height:8px;background:#2a2d37;border-radius:4px;overflow:hidden}
+  .stat-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#ff6b35,#ffd700)}
+  .xp-bar{width:100%;height:12px;background:#2a2d37;border-radius:6px;overflow:hidden;margin:8px 0}
+  .xp-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#ff6b35,#ff8c00)}
+  .actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .actions button{background:#1a1d27;color:#ff6b35;border:1px solid #ff6b35;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:0.9em}
+  .actions button:hover{background:#ff6b35;color:#0f1117}
+  #msg{color:#888;margin-top:12px;font-size:0.9em;min-height:1.5em}
+  a{color:#ff6b35}
+</style>
+</head>
+<body>
+<h1 id="petTitle">&#x1F525; 小火苗</h1>
+<p class="subtitle" id="petPersonality"></p>
+
+<div class="flame-container">
+  <div class="flame orange" id="flameEl"></div>
+  <div class="base"></div>
+</div>
+
+<div class="info">
+  <h2>等级 <span id="lvl"></span> &mdash; <span id="sizeLabel"></span></h2>
+  <div class="xp-bar"><div class="xp-fill" id="xpBar" style="width:0%"></div></div>
+  <p style="font-size:0.8em;color:#888" id="xpText"></p>
+</div>
+
+<div class="info">
+  <h2>属性</h2>
+  <div class="stat-row">🌡️ 温暖 <span id="sWarmth">0</span><div class="stat-bar"><div class="stat-fill" id="bWarmth"></div></div></div>
+  <div class="stat-row">💡 明亮 <span id="sBrightness">0</span><div class="stat-bar"><div class="stat-fill" id="bBrightness"></div></div></div>
+  <div class="stat-row">🪨 稳定 <span id="sStability">0</span><div class="stat-bar"><div class="stat-fill" id="bStability"></div></div></div>
+  <div class="stat-row">✨ 灵感 <span id="sSpark">0</span><div class="stat-bar"><div class="stat-fill" id="bSpark"></div></div></div>
+  <div class="stat-row">🔋 耐力 <span id="sEndurance">0</span><div class="stat-bar"><div class="stat-fill" id="bEndurance"></div></div></div>
+</div>
+
+<div class="actions">
+  <button onclick="interact('feed')">🍎 喂食</button>
+  <button onclick="interact('pat')">🤚 拍拍</button>
+</div>
+<p id="msg"></p>
+<p style="margin-top:24px"><a href="/plugins/enhance">&larr; 返回仪表盘</a></p>
+
+<script>
+function loadPet() {
+  fetch('/plugins/enhance/api/pet')
+    .then(function(r){return r.json()})
+    .then(function(d) {
+      document.getElementById('petTitle').innerHTML = '&#x1F525; ' + d.name;
+      document.getElementById('petPersonality').textContent = d.personality;
+      document.getElementById('lvl').textContent = 'Lv.' + d.level;
+      document.getElementById('sizeLabel').textContent = d.size;
+      var xpNeeded = 50 + d.level * 30;
+      document.getElementById('xpBar').style.width = (d.xp / xpNeeded * 100) + '%';
+      document.getElementById('xpText').textContent = d.xp + ' / ' + xpNeeded + ' XP (累计 ' + d.total_xp + ')';
+      var fl = document.getElementById('flameEl');
+      fl.className = 'flame ' + d.color;
+      var scale = d.size === 'tiny' ? 0.6 : d.size === 'small' ? 0.8 : d.size === 'medium' ? 1 : 1.3;
+      fl.style.transform = 'translateX(-50%) scale(' + scale + ')';
+      ['warmth','brightness','stability','spark','endurance'].forEach(function(k){
+        var v = d.stats[k] || 0;
+        document.getElementById('s'+k.charAt(0).toUpperCase()+k.slice(1)).textContent = v;
+        document.getElementById('b'+k.charAt(0).toUpperCase()+k.slice(1)).style.width = v + '%';
+      });
+    });
+}
+function interact(action) {
+  fetch('/plugins/enhance/api/pet/interact', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})})
+    .then(function(r){return r.json()})
+    .then(function(d){ document.getElementById('msg').textContent = d.message; loadPet(); });
+}
+loadPet();
+</script>
+</body>
+</html>`;
+
+export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardConfig, notifyQueue?: NotificationQueue, sharedDb?: Database.Database) {
   const openclawDir = resolveOpenClawHome(api);
 
   api.registerHttpRoute({
@@ -222,7 +359,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
       const pathname = url.pathname;
 
       if (pathname === "/plugins/enhance/api/status") {
-        const db = getDb(openclawDir);
+        const db = sharedDb ?? getDb(openclawDir);
         const agentFilter = url.searchParams.get("agent") || undefined;
 
         const agents = getAllAgentIds(db);
@@ -250,11 +387,70 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
         return true;
       }
 
+      // 宠物 JSON API
+      if (pathname === "/plugins/enhance/api/pet") {
+        const db = sharedDb ?? getDb(openclawDir);
+        const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
+        const pet = getOrCreatePet(db, agentId);
+        sendJson(res, pet);
+        return true;
+      }
+
+      // 宠物互动 API
+      if (pathname === "/plugins/enhance/api/pet/interact" && req.method === "POST") {
+        const db = sharedDb ?? getDb(openclawDir);
+        let body = "";
+        for await (const chunk of req) body += chunk;
+        try {
+          const { action, agentId: aid } = JSON.parse(body);
+          const agentId = aid || DEFAULT_AGENT_ID;
+          const { addPetXp: addXp } = await import("../utils/sqlite-store.js");
+          if (action === "feed") {
+            const { pet, leveledUp } = addXp(db, agentId, 10, { warmth: 2 });
+            let msg = `${pet.name} 开心地吃了一口！+10 XP`;
+            if (leveledUp) {
+              msg += ` 升级到 Lv.${pet.level}！`;
+              notifyQueue?.emit(agentId, "success", "pet", `🔥 ${pet.name} 升级到 Lv.${pet.level}！`);
+            }
+            sendJson(res, { ok: true, message: msg });
+          } else if (action === "pat") {
+            const { pet, leveledUp } = addXp(db, agentId, 3, { warmth: 1 });
+            let msg = `${pet.name} 开心地跳了跳！+3 XP`;
+            if (leveledUp) {
+              msg += ` 升级到 Lv.${pet.level}！`;
+              notifyQueue?.emit(agentId, "success", "pet", `🔥 ${pet.name} 升级到 Lv.${pet.level}！`);
+            }
+            sendJson(res, { ok: true, message: msg });
+          } else {
+            sendJson(res, { ok: false, message: "未知操作" });
+          }
+        } catch {
+          sendJson(res, { ok: false, message: "请求解析失败" });
+        }
+        return true;
+      }
+
+      // 通知 API
+      if (pathname === "/plugins/enhance/api/notifications") {
+        const agentId = url.searchParams.get("agent") || undefined;
+        const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+        const recent = notifyQueue?.getRecent(agentId, limit) ?? [];
+        const unread = notifyQueue?.getUnreadCount(agentId) ?? 0;
+        sendJson(res, { recent, unread });
+        return true;
+      }
+
+      // 宠物独立页面
+      if (pathname === "/plugins/enhance/pet") {
+        sendHtml(res, PET_PAGE_HTML);
+        return true;
+      }
+
       // 默认: 仪表盘 HTML
       sendHtml(res, DASHBOARD_HTML);
       return true;
     },
   });
 
-  api.logger.info("[enhance] 仪表盘模块已加载（多 Agent 视图），访问 /plugins/enhance/");
+  api.logger.info("[enhance] 仪表盘模块已加载（多 Agent 视图 + 小火苗 + 通知），访问 /plugins/enhance/");
 }
