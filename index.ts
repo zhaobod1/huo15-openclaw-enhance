@@ -19,7 +19,11 @@ import { registerToolSafety } from "./src/modules/tool-safety.js";
 import { registerPromptEnhancer } from "./src/modules/prompt-enhancer.js";
 import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
 import { registerDashboard } from "./src/modules/dashboard.js";
+import { registerFlamePet } from "./src/modules/flame-pet.js";
+import { registerSpinnerTips } from "./src/modules/spinner-tips.js";
+import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
+import { getDb } from "./src/utils/sqlite-store.js";
 import type { EnhancePluginConfig } from "./src/types.js";
 import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -73,6 +77,11 @@ export default definePluginEntry({
   register(api) {
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
 
+    // 初始化共享数据库和通知队列
+    const openclawHome = resolveOpenClawHome(api);
+    const db = getDb(openclawHome);
+    const notifyQueue = createNotificationQueue(db, config.notifications);
+
     const modules: Array<{ name: string; enabled: boolean; load: () => void }> = [
       {
         name: "结构化记忆",
@@ -97,7 +106,17 @@ export default definePluginEntry({
       {
         name: "仪表盘",
         enabled: config.dashboard?.enabled !== false,
-        load: () => registerDashboard(api, config.dashboard),
+        load: () => registerDashboard(api, config.dashboard, notifyQueue, db),
+      },
+      {
+        name: "小火苗",
+        enabled: config.pet?.enabled !== false,
+        load: () => registerFlamePet(api, config.pet, db, notifyQueue),
+      },
+      {
+        name: "智能贴士",
+        enabled: config.tips?.enabled !== false,
+        load: () => registerSpinnerTips(api, config.tips, notifyQueue),
       },
     ];
 
@@ -149,6 +168,6 @@ export default definePluginEntry({
       });
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.4.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v1.5.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },
 });

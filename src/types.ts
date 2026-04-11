@@ -78,6 +78,84 @@ export interface DashboardConfig {
   enabled?: boolean;
 }
 
+// ── 小火苗宠物 ──
+export type FlameColor = "orange" | "blue" | "purple" | "green" | "white";
+export type FlameSize = "tiny" | "small" | "medium" | "large";
+export type FlameMood = "idle" | "busy" | "error" | "success" | "sleep";
+
+export interface FlameStats {
+  warmth: number;
+  brightness: number;
+  stability: number;
+  spark: number;
+  endurance: number;
+}
+
+export interface FlamePet {
+  agent_id: string;
+  name: string;
+  color: FlameColor;
+  size: FlameSize;
+  level: number;
+  xp: number;
+  total_xp: number;
+  mood: FlameMood;
+  stats: FlameStats;
+  personality: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PetConfig {
+  enabled?: boolean;
+  name?: string;
+  color?: FlameColor;
+}
+
+// ── 智能贴士 ──
+export type TipCategory = "shortcuts" | "memory" | "workflow" | "safety" | "general";
+
+export interface Tip {
+  id: string;
+  category: TipCategory;
+  text: string;
+  weight?: number;
+}
+
+export interface TipsConfig {
+  enabled?: boolean;
+  injectInPrompt?: boolean;
+  cooldownMinutes?: number;
+}
+
+// ── 通知中心 ──
+export type NotificationLevel = "info" | "warn" | "success";
+export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow";
+
+export interface Notification {
+  id: number;
+  agent_id: string;
+  level: NotificationLevel;
+  source: NotificationSource;
+  title: string;
+  detail: string;
+  read: boolean;
+  created_at: string;
+}
+
+export interface NotificationConfig {
+  enabled?: boolean;
+  maxRetained?: number;
+}
+
+export interface NotificationQueue {
+  emit(agentId: string, level: NotificationLevel, source: NotificationSource, title: string, detail?: string): void;
+  getRecent(agentId?: string, limit?: number): Notification[];
+  getUnreadCount(agentId?: string): number;
+  markRead(id: number): void;
+  prune(maxRetained: number): void;
+}
+
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
   memory?: MemoryConfig;
@@ -85,4 +163,7 @@ export interface EnhancePluginConfig {
   prompt?: PromptConfig;
   workflows?: WorkflowConfig;
   dashboard?: DashboardConfig;
+  pet?: PetConfig;
+  tips?: TipsConfig;
+  notifications?: NotificationConfig;
 }
