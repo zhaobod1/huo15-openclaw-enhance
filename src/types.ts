@@ -78,6 +78,58 @@ export interface DashboardConfig {
   enabled?: boolean;
 }
 
+// ── 小火苗宠物 ──
+export type FlameMood = "idle" | "busy" | "happy" | "excited" | "sleep" | "hungry" | "success" | "tired" | "error";
+export type FlameColor = "orange" | "blue" | "purple" | "green" | "white";
+export type NotificationLevel = "info" | "success" | "warning" | "error";
+export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow";
+
+export interface PetConfig {
+  enabled?: boolean;
+  name?: string;
+  color?: FlameColor;
+}
+
+export interface Notification {
+  id: number;
+  agent_id: string;
+  level: NotificationLevel;
+  source: NotificationSource;
+  title: string;
+  detail: string;
+  read: boolean;
+  created_at: string;
+}
+
+export interface NotificationConfig {
+  enabled?: boolean;
+  maxRetained?: number;
+}
+
+export interface NotificationQueue {
+  emit(agentId: string, level: NotificationLevel, source: NotificationSource, title: string, detail?: string): void;
+  getRecent(agentId?: string, limit?: number): Notification[];
+  getUnreadCount(agentId?: string): number;
+  markRead(id: number): void;
+  prune(maxRetained: number): void;
+}
+
+// ── 智能贴士 ──
+export type TipCategory = "shortcuts" | "memory" | "workflow" | "safety" | "general";
+
+export interface Tip {
+  id: string;
+  category: TipCategory;
+  text: string;
+  weight?: number;
+}
+
+export interface TipsConfig {
+  enabled?: boolean;
+  cooldownMinutes?: number;
+  injectInPrompt?: boolean;
+}
+
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
   memory?: MemoryConfig;
@@ -85,4 +137,7 @@ export interface EnhancePluginConfig {
   prompt?: PromptConfig;
   workflows?: WorkflowConfig;
   dashboard?: DashboardConfig;
+  pet?: PetConfig;
+  tips?: TipsConfig;
+  notifications?: NotificationConfig;
 }
