@@ -168,6 +168,6 @@ export default definePluginEntry({
       });
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.5.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v1.7.1 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },
 });
