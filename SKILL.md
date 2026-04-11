@@ -70,7 +70,7 @@ openclaw restart
 ## NPM 包
 
 - **npm**: https://www.npmjs.com/package/@huo15/openclaw-enhance
-- **版本**: 1.3.2
+- **版本**: 1.4.0
 - **作者**: jobzhao15
 - **许可证**: MIT
 

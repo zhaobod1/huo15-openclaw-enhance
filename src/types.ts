@@ -45,11 +45,13 @@ export interface SafetyConfig {
 }
 
 // ── 提示词增强 ──
-export type PromptSection =
-  | "taskClassification"
-  | "qualityGuidelines"
-  | "memoryInstructions"
-  | "safetyAwareness";
+// 注意：taskClassification / safetyAwareness / memoryInstructions 已移除
+// 因为 openclaw 内置系统提示词已包含：
+//   - "## Execution Bias" 覆盖了任务分类
+//   - "## Safety" 覆盖了安全意识
+//   - "## Memory Recall" 覆盖了记忆工具说明
+// 仅保留 qualityGuidelines（openclaw 无对应内置内容）
+export type PromptSection = "qualityGuidelines";
 
 export interface PromptConfig {
   enabled?: boolean;

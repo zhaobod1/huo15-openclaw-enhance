@@ -162,78 +162,31 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
     { name: "enhance_memory_review" },
   );
 
-  // ── Hook: before_prompt_build — 注入当前 Agent 的记忆到上下文 ──
-  api.on("before_prompt_build", (_event, ctx) => {
-    const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
-    const recent = getRecentMemories(db, agentId, maxCtx);
-    if (recent.length === 0) return {};
+  // ── 注意：不在 before_prompt_build 中注入记忆内容 ──
+  // openclaw 内置 memory-core / memory-lancedb 已通过 registerMemoryCapability
+  // 和 before_agent_start hook 注入记忆上下文。本插件不重复注入，
+  // 仅通过上面注册的 enhance_memory_* 工具提供结构化分类记忆的补充能力。
 
-    const memoryBlock = recent
-      .map((e) => `- [${e.category}] ${e.content}`)
-      .join("\n");
+  // ── Hook: before_compaction — 对话压缩前自动存档标记 ──
+  // openclaw 的 hook 名是 before_compaction（非 pre_compact），且为 void hook（纯副作用）
+  try {
+    api.on("before_compaction" as any, (_event: unknown, ctx: unknown) => {
+      const agentCtx = ctx as { agentId?: string } | undefined;
+      const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
 
-    return {
-      appendSystemContext: [
-        "\n\n## 增强记忆上下文（来自龙虾增强包）",
-        `当前 Agent: ${agentId}`,
-        "以下是当前 Agent 最近存储的结构化记忆，可作为参考：",
-        memoryBlock,
-        "\n你可以使用 enhance_memory_store 工具存储新的重要信息，使用 enhance_memory_search 查找历史记忆。",
-        "记忆数据已按 Agent 隔离，每个用户/群组拥有独立的记忆空间。",
-      ].join("\n"),
-    };
-  });
-
-  // ── Hook: session_start — 会话启动时注入重要记忆摘要 ──
-  // 借鉴 Claude Code 的 session_start hook，在会话初始化时提供记忆快照
-  if (typeof (api as any).on === "function") {
-    try {
-      (api as any).on("session_start", (_event: unknown, ctx: unknown) => {
-        const agentCtx = ctx as { agentId?: string } | undefined;
-        const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
-
-        // 拉取重要性最高的记忆（按 importance 降序）
-        const topMemories = searchMemories(db, agentId, { limit: 3 });
-        if (topMemories.length === 0) return {};
-
-        const summary = topMemories
-          .map((e) => `- [${e.category}] ${e.content.slice(0, 120)}`)
-          .join("\n");
-
-        return {
-          appendSystemContext: [
-            "## 会话记忆摘要（增强包）",
-            `以下是 Agent「${agentId}」最重要的结构化记忆：`,
-            summary,
-          ].join("\n"),
-        };
-      });
-    } catch {
-      // session_start hook 不可用时静默跳过
-    }
+      storeMemory(
+        db,
+        agentId,
+        "decision",
+        `[auto-compact] 对话上下文已压缩（${new Date().toISOString()}）。重要上下文可能已被截断，建议使用 enhance_memory_search 查找历史记忆。`,
+        "auto-compact",
+        3,
+      );
+      // void hook — 不返回任何值
+    });
+  } catch {
+    // before_compaction hook 不可用时静默跳过（兼容旧版 openclaw）
   }
 
-  // ── Hook: pre_compact — 对话压缩前自动记录存档标记 ──
-  // 借鉴 Claude Code 的 pre_compact hook，防止重要上下文在压缩时丢失
-  if (typeof (api as any).on === "function") {
-    try {
-      (api as any).on("pre_compact", (_event: unknown, ctx: unknown) => {
-        const agentCtx = ctx as { agentId?: string } | undefined;
-        const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
-
-        storeMemory(
-          db,
-          agentId,
-          "decision",
-          `[auto-compact] 对话上下文已压缩（${new Date().toISOString()}）。重要上下文可能已被截断，建议使用 enhance_memory_search 查找历史记忆。`,
-          "auto-compact",
-          3,
-        );
-      });
-    } catch {
-      // pre_compact hook 不可用时静默跳过
-    }
-  }
-
-  api.logger.info("[enhance] 结构化记忆模块已加载（多 Agent 隔离）");
+  api.logger.info("[enhance] 结构化记忆模块已加载（多 Agent 隔离，不干涉 openclaw 内置记忆）");
 }
