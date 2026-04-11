@@ -1,7 +1,7 @@
 ---
-name: verify-mode
+name: huo15-verify-mode
 description: "验证模式 — 检查工作成果、运行测试、验证假设。借鉴 Claude Code 的 Verification Agent。"
-homepage: https://github.com/jobzhao15/openclaw-enhance
+homepage: https://github.com/zhaobod1/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "✅", "requires": { "bins": [] } } }
 ---
 

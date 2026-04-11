@@ -1,7 +1,7 @@
 ---
-name: plan-mode
+name: huo15-plan-mode
 description: "结构化规划模式 — 在执行复杂任务前先做系统性规划。借鉴 Claude Code 的 Plan Agent。"
-homepage: https://github.com/jobzhao15/openclaw-enhance
+homepage: https://github.com/zhaobod1/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "📋", "requires": { "bins": [] } } }
 ---
 

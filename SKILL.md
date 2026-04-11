@@ -57,7 +57,7 @@ openclaw restart
         "config": {
           "memory": { "enabled": true, "autoCapture": true, "maxContextEntries": 5 },
           "safety": { "enabled": true, "rules": [], "defaultAction": "allow" },
-          "prompt": { "enabled": true, "sections": ["qualityGuidelines", "memoryContext"] },
+          "prompt": { "enabled": true, "sections": ["qualityGuidelines"] },
           "workflows": { "enabled": true },
           "dashboard": { "enabled": true }
         }
@@ -70,7 +70,7 @@ openclaw restart
 ## NPM 包
 
 - **npm**: https://www.npmjs.com/package/@huo15/openclaw-enhance
-- **版本**: 1.2.3
+- **版本**: 1.3.2
 - **作者**: jobzhao15
 - **许可证**: MIT
 
