@@ -146,11 +146,12 @@ export function registerFlamePet(
         }
 
         case "rename": {
-          if (!input.name?.trim()) {
+          const newName = input.name?.trim();
+          if (!newName) {
             return { content: "请提供新名字，例如: { action: 'rename', name: '小焰' }" };
           }
-          renamePet(db, agentId, input.name.trim());
-          return { content: `🔥 好的，从现在起叫「${input.name.trim()}」！` };
+          renamePet(db, agentId, newName);
+          return { content: `🔥 好的，从现在起叫「${newName}」！` };
         }
 
         case "pat": {
