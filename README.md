@@ -75,10 +75,10 @@ openclaw restart
 
 | 技能 | 说明 | 灵感来源 |
 |------|------|---------|
-| `plan-mode` | 结构化规划模式 — 执行复杂任务前先做需求分析、方案设计、风险评估 | Claude Code Plan Agent |
-| `explore-mode` | 深度探索模式 — 只读调研代码库/系统/话题后再给出结论 | Claude Code Explore Agent |
-| `verify-mode` | 验证检查模式 — 检查工作成果、运行测试、验证假设 | Claude Code Verification Agent |
-| `memory-curator` | 记忆整理 — 定期审查记忆、提取洞察、清理过期条目 | Claude Code auto-memory |
+| `huo15-openclaw-plan-mode` | 结构化规划模式 — 执行复杂任务前先做需求分析、方案设计、风险评估 | Claude Code Plan Agent |
+| `huo15-openclaw-explore-mode` | 深度探索模式 — 只读调研代码库/系统/话题后再给出结论 | Claude Code Explore Agent |
+| `huo15-openclaw-verify-mode` | 验证检查模式 — 检查工作成果、运行测试、验证假设 | Claude Code Verification Agent |
+| `huo15-openclaw-memory-curator` | 记忆整理 — 定期审查记忆、提取洞察、清理过期条目 | Claude Code auto-memory |
 
 ---
 
