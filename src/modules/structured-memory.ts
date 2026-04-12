@@ -22,7 +22,7 @@ import { DEFAULT_AGENT_ID, type MemoryConfig, type MemoryCategory } from "../typ
 const VALID_CATEGORIES: MemoryCategory[] = ["user", "project", "feedback", "reference", "decision"];
 
 function resolveAgentId(ctx: OpenClawPluginToolContext): string {
-  return ctx.agentId?.trim() || DEFAULT_AGENT_ID;
+  return (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
 }
 
 export function registerStructuredMemory(api: OpenClawPluginApi, config?: MemoryConfig) {
@@ -172,7 +172,7 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   try {
     api.on("before_compaction" as any, (_event: unknown, ctx: unknown) => {
       const agentCtx = ctx as { agentId?: string } | undefined;
-      const agentId = agentCtx?.agentId?.trim() || DEFAULT_AGENT_ID;
+      const agentId = (agentCtx?.agentId ?? DEFAULT_AGENT_ID).trim();
 
       storeMemory(
         db,

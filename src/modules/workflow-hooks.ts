@@ -61,7 +61,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
         instructions: Type.String({ description: "触发后注入的行为指令" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        const agentId = ctx.agentId?.trim() || DEFAULT_AGENT_ID;
+        const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
         const allWorkflows = loadAllWorkflows(openclawDir);
         const existing = allWorkflows.findIndex(
           (w) => w.name === params.name && w.agent_id === agentId,
@@ -104,7 +104,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
       description: "列出当前 Agent 的所有工作流。",
       parameters: Type.Object({}),
       async execute() {
-        const agentId = ctx.agentId?.trim() || DEFAULT_AGENT_ID;
+        const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
         const workflows = loadWorkflows(openclawDir, agentId);
         if (workflows.length === 0) {
           return { content: [{ type: "text" as const, text: `暂无工作流 (agent: ${agentId})。使用 enhance_workflow_define 创建。` }] };
@@ -130,7 +130,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
         name: Type.String({ description: "要删除的工作流名称" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        const agentId = ctx.agentId?.trim() || DEFAULT_AGENT_ID;
+        const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
         const allWorkflows = loadAllWorkflows(openclawDir);
         const idx = allWorkflows.findIndex(
           (w) => w.name === params.name && w.agent_id === agentId,
@@ -149,7 +149,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
   // ── Hook: before_prompt_build — 按当前 Agent 检查触发词 ──
   // event.prompt 包含用户输入
   api.on("before_prompt_build", (event, ctx) => {
-    const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
+    const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
     const userMessage = (event as any)?.prompt ?? "";
     if (!userMessage) return {};
 

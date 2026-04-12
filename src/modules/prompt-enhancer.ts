@@ -31,7 +31,7 @@ export function registerPromptEnhancer(api: OpenClawPluginApi, config?: PromptCo
   const enabledSections: PromptSection[] = config?.sections ?? ["qualityGuidelines"];
 
   api.on("before_prompt_build", (_event, ctx) => {
-    const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
+    const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
     const parts: string[] = [];
 
     for (const section of enabledSections) {

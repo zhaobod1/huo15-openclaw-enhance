@@ -46,7 +46,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   // event 包含 toolName, params; ctx 包含 agentId
   // 声明高优先级（900），确保在其他插件之前执行安全检查
   api.on("before_tool_call", (event, ctx) => {
-    const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
+    const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
     const toolName = (event as any)?.toolName ?? "";
     const params = ((event as any)?.params ?? {}) as Record<string, unknown>;
     const matchText = extractMatchText(params);
@@ -103,7 +103,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
         limit: Type.Optional(Type.Number({ description: "返回条数（仅 recent 模式）", default: 15 })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        const agentId = ctx.agentId?.trim() || DEFAULT_AGENT_ID;
+        const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
         if (params.action === "stats") {
           const stats = getSafetyStats(db, agentId);
           return {

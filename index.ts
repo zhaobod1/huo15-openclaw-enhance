@@ -128,13 +128,14 @@ export default definePluginEntry({
       {
         name: "小火苗",
         enabled: config.pet?.enabled !== false,
-        load: () => registerFlamePet(api, config.pet, db, notifyQueue),
+        load: () => { console.error("[idx] loading flame-pet..."); registerFlamePet(api, config.pet, db, notifyQueue); },
       },
-      {
-        name: "智能贴士",
-        enabled: config.tips?.enabled !== false,
-        load: () => registerSpinnerTips(api, config.tips, notifyQueue),
-      },
+      // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
+      // {
+      //   name: "智能贴士",
+      //   enabled: config.tips?.enabled !== false,
+      //   load: () => { console.error("[idx] loading spinner-tips..."); registerSpinnerTips(api, config.tips, notifyQueue); },
+      // },
     ];
 
     const loaded: string[] = [];

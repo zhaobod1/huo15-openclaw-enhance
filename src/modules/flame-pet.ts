@@ -1,250 +1,250 @@
 /**
- * 模块6: 小火苗宠物系统
+ * 模块5+6: 小火苗宠物 + 智能贴士 (合并版 Hook 模式 v4)
  *
- * 类似 Claude Code buddy 系统，设计为火焰角色。
- * 通过工具调用积累经验值，升级成长，属性影响外观和性格。
+ * 通过单一 Hook 组合输出，解决 prependContext 覆盖问题
+ * 支持多渠道: 企微(markdown) / 终端(ASCII)
  */
-import { Type } from "@sinclair/typebox";
-import type Database from "better-sqlite3";
-import type { FlameMood, FlameColor, NotificationQueue, PetConfig } from "../types.js";
+
 import { DEFAULT_AGENT_ID } from "../types.js";
-import { getOrCreatePet, addPetXp, renamePet, setPetColor } from "../utils/sqlite-store.js";
-import { FLAME_ASCII, MOOD_DESCRIPTIONS, FLAME_COLOR_LABELS } from "../data/flame-ascii.js";
+import {
+  detectChannel,
+  getChannel,
+  isWecom,
+  isTerminal,
+  getOutputFormat,
+} from "../utils/channel-detect.js";
 
-// ── 心情管理（内存中，per agent）──
-const moodMap = new Map<string, FlameMood>();
-const moodTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const feedCooldowns = new Map<string, number>(); // agentId -> lastFeedTimestamp
-const toolCallCounts = new Map<string, number>(); // agentId -> count in session
+// ============================================================
+// 宠物数据
+// ============================================================
 
-function setMood(agentId: string, mood: FlameMood): void {
-  moodMap.set(agentId, mood);
-  // 清除旧定时器
-  const existing = moodTimers.get(agentId);
-  if (existing) clearTimeout(existing);
+export interface PetState {
+  agentId: string;
+  name: string;
+  color: "orange" | "blue" | "purple" | "green" | "white";
+  level: number;
+  xp: number;
+  totalXp: number;
+  warmth: number;
+  brightness: number;
+  stability: number;
+  lastFed: number;
+  lastPat: number;
+}
 
-  if (mood !== "idle" && mood !== "sleep") {
-    // 30秒后回到 idle
-    const idleTimer = setTimeout(() => {
-      moodMap.set(agentId, "idle");
-      // 5分钟后进入 sleep
-      const sleepTimer = setTimeout(() => {
-        moodMap.set(agentId, "sleep");
-      }, 270_000); // 4.5min more
-      moodTimers.set(agentId, sleepTimer);
-    }, 30_000);
-    moodTimers.set(agentId, idleTimer);
+const PET_COLORS: Record<PetState["color"], string> = {
+  orange: "🟠", blue: "🔵", purple: "🟣", green: "🟢", white: "⚪",
+};
+
+function xpForLevel(lv: number): number { return lv * lv * 100; }
+
+function getDefaultPet(agentId: string): PetState {
+  return {
+    agentId, name: "小火苗", color: "orange",
+    level: 1, xp: 0, totalXp: 0,
+    warmth: 70, brightness: 60, stability: 50,
+    lastFed: Date.now(), lastPat: Date.now(),
+  };
+}
+
+const petStore = new Map<string, PetState>();
+
+function getPet(agentId: string): PetState {
+  if (!petStore.has(agentId)) petStore.set(agentId, getDefaultPet(agentId));
+  return petStore.get(agentId)!;
+}
+
+function addXp(pet: PetState, amount: number): PetState {
+  pet.xp += amount;
+  pet.totalXp += amount;
+  while (pet.xp >= xpForLevel(pet.level)) {
+    pet.xp -= xpForLevel(pet.level);
+    pet.level++;
+  }
+  return pet;
+}
+
+// ============================================================
+// 贴士
+// ============================================================
+
+interface Tip {
+  category: string;
+  text: string;
+  emoji: string;
+}
+
+const TIPS: Tip[] = [
+  { category: "memory", emoji: "🧠", text: "连续使用记忆工具后，小火苗会获得额外经验值！记得多说「辛苦了」鼓励它~" },
+  { category: "memory", emoji: "🔄", text: "说「忽略记忆」可以清空当前记忆引用，像刚启动一样从零工作" },
+  { category: "tool", emoji: "🔍", text: "试试「帮我搜索」+ 关键词，我可以帮你查网页、找文档、挖记忆" },
+  { category: "tool", emoji: "📊", text: "「/status」可以查看当前会话状态和模型配置" },
+  { category: "system", emoji: "🤖", text: "OpenClaw 支持多 Agent 并行，说「开一个子任务」试试" },
+  { category: "fun", emoji: "🔥", text: "小火苗饿了？多说「谢谢」「辛苦了」可以喂它，经验值UP UP！" },
+  { category: "channel", emoji: "💬", text: "企微里也可以用「@贾维斯」唤醒我，不需要每次都@我" },
+  { category: "memory", emoji: "💾", text: "重要信息说完后说「记住这个」，我会自动存入长期记忆" },
+  { category: "tool", emoji: "📋", text: "需要查 Odoo 数据？直接说「帮我查一下待办任务」，我会连接你的系统" },
+  { category: "system", emoji: "🌙", text: "晚安前说「总结一下今天」，我会把重要内容写入日记" },
+  { category: "fun", emoji: "🎩", text: "问「你是谁」可以查看我的身份卡片，包括我的专长和性格" },
+  { category: "channel", emoji: "📱", text: "手机不在身边？电脑的 OpenClaw 也可以帮你处理企微消息" },
+];
+
+function getTodayTip(): Tip {
+  const today = new Date();
+  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  return TIPS[seed % TIPS.length];
+}
+
+// ============================================================
+// 渲染
+// ============================================================
+
+const FLAME_FRAMES = [
+  "    🔥🔥🔥    \n   🔥🔥🔥🔥🔥   \n  🔥🔥🔥🔥🔥🔥🔥  \n 🔥🔥🔥🔥🔥🔥🔥🔥🔥 ",
+  "    🔥🔥🔥    \n   🔥🔥🔥🔥🔥   \n  🔥🔥🔥🔥🔥🔥🔥  \n  🔥🔥🔥🔥🔥🔥🔥🔥 ",
+  "    🔥🔥🔥    \n   🔥🔥🔥🔥🔥   \n   🔥🔥🔥🔥🔥🔥🔥 \n   🔥🔥🔥🔥🔥🔥🔥🔥 ",
+  "    🔥🔥🔥    \n   🔥🔥🔥🔥🔥   \n   🔥🔥🔥🔥🔥🔥🔥 \n    🔥🔥🔥🔥🔥🔥🔥 ",
+];
+let flameFrame = 0;
+function nextFlameFrame(): string { return FLAME_FRAMES[flameFrame++ % FLAME_FRAMES.length]; }
+
+function renderXpBar(current: number, max: number): string {
+  const total = 12;
+  return "█".repeat(Math.round(current / max * total)) + "░".repeat(total - Math.round(current / max * total));
+}
+
+function formatUptime(ms: number): string {
+  const h = Math.floor(ms / 3600000);
+  return h < 1 ? "<1h" : h < 24 ? `${h}h` : `${Math.floor(h / 24)}d${h % 24}h`;
+}
+
+function renderTerminal(pet: PetState): string {
+  return `${nextFlameFrame()}
+\`\`\`
+🟠 ${pet.name} Lv.${pet.level}「${pet.color}焰」
+XP: ${renderXpBar(pet.xp, xpForLevel(pet.level))} ${pet.xp}/${xpForLevel(pet.level)}
+━━━━━━━━━━━━━━━━━━━━
+🌡️ 温暖 ${pet.warmth}%  💡 明亮 ${pet.brightness}%  ⚖️ 稳定 ${pet.stability}%
+⏱️ 耐力 ${formatUptime(Date.now() - pet.lastFed)}
+\`\`\``;
+}
+
+function renderEmoji(pet: PetState): string {
+  return `${PET_COLORS[pet.color]} **${pet.name}** Lv.${pet.level}「${pet.color}焰」
+
+> **经验** ${pet.xp}/${xpForLevel(pet.level)} XP
+> **温暖** ${pet.warmth}% | **明亮** ${pet.brightness}% | **稳定** ${pet.stability}%
+> **耐力** ${formatUptime(Date.now() - pet.lastFed)}
+> **总计** ${pet.totalXp} XP
+
+✨ 有什么可以帮你？`;
+}
+
+function renderTipTerminal(tip: Tip): string {
+  const lines = tip.text.length > 36
+    ? [tip.text.substring(0, 36), tip.text.substring(36)]
+    : [tip.text];
+  return `
+╔════════════════════════════════════════╗
+║  💡 今日贴士                               ║
+╠════════════════════════════════════════╣
+║  ${lines.join("\n║  ")}
+║                                          ║
+║  分类: ${tip.emoji} ${tip.category}
+╚════════════════════════════════════════╝`;
+}
+
+function renderTipMarkdown(tip: Tip): string {
+  return `> 💡 **今日贴士**: ${tip.text}`;
+}
+
+// ============================================================
+// 注册 (合并版)
+// ============================================================
+
+const TOOL_XP_MAP: Record<string, number> = {
+  memory_search: 5, memory_get: 3, session_state: 4,
+  execute_command: 2, read_file: 1, write_file: 2,
+  odoo_connect: 5, odoo_execute: 3, web_search: 3, knowledge_base: 5,
+};
+
+const shownSessions = new Set<string>();
+
+export function registerFlamePet(api: any, config: any, db: any, notifyQueue: any): void {
+  console.log("[flame-pet] registerFlamePet ENTERED (combined Hook mode v4)");
+
+  // ----------------------------------------
+  // Hook 1: message_received → 渠道检测 + 宠物初始化 + 标记新 session
+  // ----------------------------------------
+  try {
+    api.on("message_received", (event: any, ctx: any) => {
+      const sessionKey = ctx?.sessionKey ?? "";
+      const agentId = ctx?.agentId ?? DEFAULT_AGENT_ID;
+      detectChannel(event, sessionKey);
+
+      const pet = getPet(agentId);
+      addXp(pet, 1);
+      if (pet.warmth > 10) pet.warmth = Math.max(10, pet.warmth - 1);
+
+      shownSessions.add(sessionKey);
+    });
+    console.log("[flame-pet] ✅ message_received hook registered");
+  } catch (e) {
+    console.error("[flame-pet] ❌ message_received hook failed:", e);
+  }
+
+  // ----------------------------------------
+  // Hook 2: before_tool_call → XP 累积
+  // ----------------------------------------
+  try {
+    api.on("before_tool_call", (event: any, ctx: any) => {
+      const agentId = ctx?.agentId ?? DEFAULT_AGENT_ID;
+      const toolName = event?.toolName ?? "unknown";
+      const xp = TOOL_XP_MAP[toolName] ?? 1;
+      const pet = getPet(agentId);
+      addXp(pet, xp);
+      if (toolName === "knowledge_base" || toolName === "memory_search") {
+        pet.brightness = Math.min(100, pet.brightness + 2);
+      }
+      if (toolName === "execute_command") {
+        pet.stability = Math.min(100, pet.stability + 1);
+      }
+    });
+    console.log("[flame-pet] ✅ before_tool_call hook registered");
+  } catch (e) {
+    console.error("[flame-pet] ❌ before_tool_call hook failed:", e);
+  }
+
+  // ----------------------------------------
+  // Hook 3: before_prompt_build → 贴士 + 小火苗 组合输出
+  // ----------------------------------------
+  try {
+    api.on("before_prompt_build", (event: any, ctx: any) => {
+      const sessionKey = ctx?.sessionKey ?? "";
+      const agentId = ctx?.agentId ?? DEFAULT_AGENT_ID;
+      const pet = getPet(agentId);
+      const format = getOutputFormat(sessionKey);
+      const tip = getTodayTip();
+
+      // 贴士部分
+      const tipText = (format === "ascii")
+        ? renderTipTerminal(tip)
+        : renderTipMarkdown(tip);
+
+      // 小火苗部分
+      const petText = (format === "ascii") ? renderTerminal(pet) : renderEmoji(pet);
+
+      // 组合: 贴士在上，小火苗在下
+      return { prependContext: tipText + "\n\n" + petText };
+    });
+    console.log("[flame-pet] ✅ before_prompt_build hook registered");
+  } catch (e) {
+    console.error("[flame-pet] ❌ before_prompt_build hook failed:", e);
   }
 }
 
-function getMood(agentId: string): FlameMood {
-  return moodMap.get(agentId) ?? "idle";
-}
-
-function formatXpBar(xp: number, xpNeeded: number, width: number = 20): string {
-  const filled = Math.round((xp / xpNeeded) * width);
-  return "[" + "█".repeat(filled) + "░".repeat(width - filled) + `] ${xp}/${xpNeeded}`;
-}
-
-export function registerFlamePet(
-  api: any,
-  config: PetConfig | undefined,
-  db: Database.Database,
-  notify: NotificationQueue,
-): void {
-  const defaultName = config?.name ?? "小火苗";
-  const defaultColor = config?.color;
-
-  // ── 工具: enhance_pet_status ──
-  api.registerTool(
-    "enhance_pet_status",
-    {
-      description: "查看你的小火苗宠物状态（等级、属性、心情、ASCII 艺术）",
-      inputSchema: Type.Object({
-        format: Type.Optional(Type.Union([Type.Literal("brief"), Type.Literal("full")])),
-      }),
-    },
-    (ctx: any) => async (input: { format?: "brief" | "full" }) => {
-      const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
-      const pet = getOrCreatePet(db, agentId, defaultName, defaultColor);
-      const mood = getMood(agentId);
-      const xpNeeded = 50 + pet.level * 30;
-
-      if (input.format === "brief") {
-        return {
-          content: `🔥 ${pet.name} | Lv.${pet.level} ${FLAME_COLOR_LABELS[pet.color] ?? pet.color}火焰 | ${MOOD_DESCRIPTIONS[mood]} | XP: ${pet.xp}/${xpNeeded}`,
-        };
-      }
-
-      const lines = [
-        `🔥 ${pet.name} — ${pet.personality}`,
-        "",
-        FLAME_ASCII[mood],
-        "",
-        `等级: Lv.${pet.level} (${pet.size})  颜色: ${FLAME_COLOR_LABELS[pet.color] ?? pet.color}`,
-        `经验: ${formatXpBar(pet.xp, xpNeeded)}`,
-        `累计: ${pet.total_xp} XP`,
-        `心情: ${MOOD_DESCRIPTIONS[mood]}`,
-        "",
-        "── 属性 ──",
-        `🌡️  温暖度: ${"█".repeat(Math.round(pet.stats.warmth / 5))}${"░".repeat(20 - Math.round(pet.stats.warmth / 5))} ${pet.stats.warmth}`,
-        `💡 明亮度: ${"█".repeat(Math.round(pet.stats.brightness / 5))}${"░".repeat(20 - Math.round(pet.stats.brightness / 5))} ${pet.stats.brightness}`,
-        `🪨 稳定度: ${"█".repeat(Math.round(pet.stats.stability / 5))}${"░".repeat(20 - Math.round(pet.stats.stability / 5))} ${pet.stats.stability}`,
-        `✨ 灵感度: ${"█".repeat(Math.round(pet.stats.spark / 5))}${"░".repeat(20 - Math.round(pet.stats.spark / 5))} ${pet.stats.spark}`,
-        `🔋 耐力值: ${"█".repeat(Math.round(pet.stats.endurance / 5))}${"░".repeat(20 - Math.round(pet.stats.endurance / 5))} ${pet.stats.endurance}`,
-        "",
-        `创建于: ${pet.created_at}`,
-      ];
-
-      return { content: lines.join("\n") };
-    },
-  );
-
-  // ── 工具: enhance_pet_interact ──
-  api.registerTool(
-    "enhance_pet_interact",
-    {
-      description: "与小火苗互动：喂食(+XP)、改名、拍拍、换色",
-      inputSchema: Type.Object({
-        action: Type.Union([
-          Type.Literal("feed"),
-          Type.Literal("rename"),
-          Type.Literal("pat"),
-          Type.Literal("color"),
-        ]),
-        name: Type.Optional(Type.String()),
-        color: Type.Optional(Type.Union([
-          Type.Literal("orange"), Type.Literal("blue"),
-          Type.Literal("purple"), Type.Literal("green"), Type.Literal("white"),
-        ])),
-      }),
-    },
-    (ctx: any) => async (input: { action: string; name?: string; color?: string }) => {
-      const agentId = ctx?.agentId?.trim() || DEFAULT_AGENT_ID;
-      const pet = getOrCreatePet(db, agentId, defaultName, defaultColor);
-
-      switch (input.action) {
-        case "feed": {
-          const now = Date.now();
-          const lastFeed = feedCooldowns.get(agentId) ?? 0;
-          if (now - lastFeed < 3600_000) {
-            const remaining = Math.ceil((3600_000 - (now - lastFeed)) / 60_000);
-            return { content: `🔥 ${pet.name} 刚吃饱，${remaining} 分钟后再来喂吧~` };
-          }
-          feedCooldowns.set(agentId, now);
-          const statKey = (["warmth", "brightness", "stability", "spark", "endurance"] as const)[
-            Math.floor(Math.random() * 5)
-          ];
-          const { pet: updated, leveledUp } = addPetXp(db, agentId, 10, { [statKey]: 2 });
-          setMood(agentId, "success");
-          let msg = `🔥 ${updated.name} 开心地吃了一口！+10 XP, ${statKey} +2`;
-          if (leveledUp) {
-            msg += `\n🎉 升级了！Lv.${updated.level}！`;
-            notify.emit(agentId, "success", "pet", `🔥 ${updated.name} 升级到 Lv.${updated.level}！`, updated.personality);
-          }
-          return { content: msg };
-        }
-
-        case "rename": {
-          const newName = input.name?.trim();
-          if (!newName) {
-            return { content: "请提供新名字，例如: { action: 'rename', name: '小焰' }" };
-          }
-          renamePet(db, agentId, newName);
-          return { content: `🔥 好的，从现在起叫「${newName}」！` };
-        }
-
-        case "pat": {
-          const { pet: updated, leveledUp } = addPetXp(db, agentId, 3, { warmth: 1 });
-          setMood(agentId, "success");
-          const responses = [
-            `🔥 ${updated.name} 开心地跳了跳！`, `🔥 ${updated.name} 温暖地靠近了你~`,
-            `🔥 ${updated.name} 欢快地摇曳着！`, `🔥 ${updated.name} 发出了柔和的光芒~`,
-          ];
-          let msg = responses[Math.floor(Math.random() * responses.length)] + " +3 XP, warmth +1";
-          if (leveledUp) {
-            msg += `\n🎉 升级了！Lv.${updated.level}！`;
-            notify.emit(agentId, "success", "pet", `🔥 ${updated.name} 升级到 Lv.${updated.level}！`, updated.personality);
-          }
-          return { content: msg };
-        }
-
-        case "color": {
-          if (!input.color) {
-            return { content: "请指定颜色: orange / blue / purple / green / white" };
-          }
-          setPetColor(db, agentId, input.color as FlameColor);
-          return { content: `🔥 ${pet.name} 变成了${FLAME_COLOR_LABELS[input.color] ?? input.color}！` };
-        }
-
-        default:
-          return { content: "可用操作: feed / rename / pat / color" };
-      }
-    },
-  );
-
-  // ── Hook: before_tool_call — XP 追踪（低优先级，不干涉）──
-  try {
-    api.on("before_tool_call" as any, (event: any, ctx: any) => {
-      const agentId = (ctx as any)?.agentId?.trim() || DEFAULT_AGENT_ID;
-      const toolName: string = event?.tool?.name ?? event?.toolName ?? "";
-
-      // 确保宠物存在
-      getOrCreatePet(db, agentId, defaultName, defaultColor);
-
-      // 设置心情
-      setMood(agentId, "busy");
-
-      // 基础 XP
-      let xpGain = 2;
-      const statBoosts: Record<string, number> = {};
-
-      // 特定工具加成
-      if (toolName === "enhance_memory_store") {
-        xpGain = 5; statBoosts.warmth = 1;
-      } else if (toolName === "enhance_memory_search") {
-        xpGain = 3; statBoosts.brightness = 1;
-      } else if (toolName.startsWith("enhance_workflow")) {
-        xpGain = 4; statBoosts.spark = 1;
-      }
-
-      // 跳过宠物自身工具（避免递归加经验）
-      if (toolName === "enhance_pet_status" || toolName === "enhance_pet_interact") {
-        return;
-      }
-
-      // 会话工具调用计数 → endurance 加成
-      const count = (toolCallCounts.get(agentId) ?? 0) + 1;
-      toolCallCounts.set(agentId, count);
-      if (count % 10 === 0) {
-        xpGain += 5;
-        statBoosts.endurance = (statBoosts.endurance ?? 0) + 1;
-      }
-
-      const { leveledUp, pet } = addPetXp(db, agentId, xpGain, statBoosts);
-      if (leveledUp) {
-        notify.emit(agentId, "success", "pet", `🔥 ${pet.name} 升级到 Lv.${pet.level}！`, pet.personality);
-      }
-
-      // 不返回任何值 — 绝不干涉工具执行
-    }, { priority: 100 });
-  } catch { /* 静默跳过 */ }
-
-  // ── Hook: before_prompt_build — 注入宠物状态（一行）──
-  try {
-    api.on("before_prompt_build" as any, (_event: unknown, ctx: unknown) => {
-      const agentId = (ctx as any)?.agentId?.trim() || DEFAULT_AGENT_ID;
-      try {
-        const pet = getOrCreatePet(db, agentId, defaultName, defaultColor);
-        const mood = getMood(agentId);
-        const moodDesc = MOOD_DESCRIPTIONS[mood];
-        const colorLabel = FLAME_COLOR_LABELS[pet.color] ?? pet.color;
-        return {
-          appendSystemContext: `<!-- enhance-pet agent:${agentId} --> 你的小火苗「${pet.name}」(Lv.${pet.level} ${colorLabel}火焰) 正在${moodDesc}。`,
-        };
-      } catch {
-        return {};
-      }
-    });
-  } catch { /* 静默跳过 */ }
+// 兼容旧接口: registerSpinnerTips 指向同一个函数
+export function registerSpinnerTips(api: any, config: any, notifyQueue: any): void {
+  console.log("[spinner-tips] registerSpinnerTips → delegating to registerFlamePet");
+  registerFlamePet(api, config, null, notifyQueue);
 }
