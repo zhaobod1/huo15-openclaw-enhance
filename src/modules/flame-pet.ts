@@ -171,6 +171,8 @@ const TOOL_XP_MAP: Record<string, number> = {
 const shownSessions = new Set<string>();
 
 export function registerFlamePet(api: any, config: any, db: any, notifyQueue: any): void {
+  const showPet = config?.showPet !== false;
+  const showTip = config?.showTip !== false;
   console.log("[flame-pet] registerFlamePet ENTERED (combined Hook mode v4)");
 
   // ----------------------------------------
@@ -227,15 +229,18 @@ export function registerFlamePet(api: any, config: any, db: any, notifyQueue: an
       const tip = getTodayTip();
 
       // 贴士部分
-      const tipText = (format === "ascii")
+      const tipText = (showTip && format === "ascii")
         ? renderTipTerminal(tip)
-        : renderTipMarkdown(tip);
+        : (showTip ? renderTipMarkdown(tip) : "");
 
       // 小火苗部分
-      const petText = (format === "ascii") ? renderTerminal(pet) : renderEmoji(pet);
+      const petText = showPet
+        ? ((format === "ascii") ? renderTerminal(pet) : renderEmoji(pet))
+        : "";
 
       // 组合: 贴士在上，小火苗在下
-      return { prependContext: tipText + "\n\n" + petText };
+      const parts = [tipText, petText].filter(Boolean);
+      return { prependContext: parts.join("\n\n") };
     });
     console.log("[flame-pet] ✅ before_prompt_build hook registered");
   } catch (e) {

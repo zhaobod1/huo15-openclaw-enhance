@@ -59,6 +59,15 @@
         "properties": {
           "enabled": { "type": "boolean", "default": true }
         }
+      },
+      "pet": {
+        "type": "object",
+        "description": "小火苗宠物 + 智能贴士",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "showPet": { "type": "boolean", "default": true, "description": "显示小火苗状态" },
+          "showTip": { "type": "boolean", "default": true, "description": "显示今日贴士" }
+        }
       }
     }
   }
