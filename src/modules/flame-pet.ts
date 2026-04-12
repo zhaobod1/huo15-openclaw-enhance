@@ -13,6 +13,7 @@ import {
   isTerminal,
   getOutputFormat,
 } from "../utils/channel-detect.js";
+import { savePetState } from "../utils/pet-state-store.js";
 
 // ============================================================
 // 宠物数据
@@ -61,6 +62,7 @@ function addXp(pet: PetState, amount: number): PetState {
     pet.xp -= xpForLevel(pet.level);
     pet.level++;
   }
+  savePetState(pet);
   return pet;
 }
 
@@ -187,6 +189,7 @@ export function registerFlamePet(api: any, config: any, db: any, notifyQueue: an
       const pet = getPet(agentId);
       addXp(pet, 1);
       if (pet.warmth > 10) pet.warmth = Math.max(10, pet.warmth - 1);
+      savePetState(pet);
 
       shownSessions.add(sessionKey);
     });
