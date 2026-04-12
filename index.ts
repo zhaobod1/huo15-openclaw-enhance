@@ -25,42 +25,59 @@ import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
 import type { EnhancePluginConfig } from "./src/types.js";
-import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
+
+/** 从 ClawHub 安装技能列表 */
+const CLANGB_HUB_SKILLS = [
+  "huo15-openclaw-explore-mode",
+  "huo15-openclaw-memory-curator",
+  "huo15-openclaw-plan-mode",
+  "huo15-openclaw-verify-mode",
+];
+
+/**
+ * 从 ClawHub 安装技能到目标目录。
+ * 使用 clawhub install 命令，支持离线缓存。
+ */
+function installSkillFromClawHub(skillName: string, targetDir: string, logger: (msg: string) => void): boolean {
+  try {
+    // 确保目标目录存在
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+
+    // 使用 clawhub install 安装技能
+    const cmd = `clawhub install ${skillName} --dir "${targetDir}"`;
+    execSync(cmd, { stdio: "pipe" });
+    logger(`[enhance] 已从 ClawHub 安装技能: ${skillName}`);
+    return true;
+  } catch (err) {
+    logger(`[enhance] 从 ClawHub 安装技能失败: ${skillName}, ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
 
 /**
  * 同步插件 skills 到指定的 workspace/skills/ 目录。
- * 支持全局 workspace 和每个动态 Agent 的独立 workspace。
+ * 从 ClawHub 远程安装，不再依赖插件内置 skills 目录。
  */
-function syncSkillsToDir(pluginSkillsDir: string, targetSkillsDir: string): number {
-  if (!existsSync(pluginSkillsDir)) return 0;
+function syncSkillsToDir(targetSkillsDir: string, logger: (msg: string) => void): number {
   if (!existsSync(targetSkillsDir)) {
     mkdirSync(targetSkillsDir, { recursive: true });
   }
 
   let synced = 0;
-  const skillDirs = readdirSync(pluginSkillsDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory());
-
-  for (const skillDir of skillDirs) {
-    const srcDir = join(pluginSkillsDir, skillDir.name);
-    const destDir = join(targetSkillsDir, skillDir.name);
-
-    if (!existsSync(destDir)) {
-      mkdirSync(destDir, { recursive: true });
+  for (const skillName of CLANGB_HUB_SKILLS) {
+    const skillDestDir = join(targetSkillsDir, skillName);
+    // 已安装则跳过
+    if (existsSync(skillDestDir)) {
+      continue;
     }
-
-    const files = readdirSync(srcDir, { withFileTypes: true })
-      .filter((f) => f.isFile());
-
-    for (const file of files) {
-      const destFile = join(destDir, file.name);
-      // 仅当目标文件不存在时才复制，避免覆盖同名的 openclaw 内置技能
-      if (!existsSync(destFile)) {
-        copyFileSync(join(srcDir, file.name), destFile);
-      }
+    if (installSkillFromClawHub(skillName, targetSkillsDir, logger)) {
+      synced++;
     }
-    synced++;
   }
 
   return synced;
@@ -132,41 +149,36 @@ export default definePluginEntry({
       }
     }
 
-    // 自动同步 skills 到全局 workspace
-    const pluginDir = api.rootDir;
-    const pluginSkillsDir = pluginDir ? join(pluginDir, "skills") : null;
-
-    if (pluginSkillsDir && existsSync(pluginSkillsDir)) {
-      try {
-        const openclawHome = resolveOpenClawHome(api);
-        const globalSkillsDir = join(openclawHome, "workspace", "skills");
-        const syncCount = syncSkillsToDir(pluginSkillsDir, globalSkillsDir);
-        syncedWorkspaces.add(globalSkillsDir);
-        if (syncCount > 0) {
-          api.logger.info(`[enhance] 已同步 ${syncCount} 个增强技能到全局 workspace/skills/`);
-        }
-      } catch (err) {
-        api.logger.error(`[enhance] 全局技能同步失败: ${err instanceof Error ? err.message : String(err)}`);
+    // 自动从 ClawHub 安装 skills 到全局 workspace
+    try {
+      const openclawHome = resolveOpenClawHome(api);
+      const globalSkillsDir = join(openclawHome, "workspace", "skills");
+      const syncCount = syncSkillsToDir(globalSkillsDir, (msg) => api.logger.info(msg));
+      syncedWorkspaces.add(globalSkillsDir);
+      if (syncCount > 0) {
+        api.logger.info(`[enhance] 已从 ClawHub 安装 ${syncCount} 个增强技能到全局 workspace/skills/`);
       }
-
-      // 为每个动态 Agent 的 workspace 也同步 skills（首次遇到时）
-      api.on("before_prompt_build", (_event: unknown, ctx: unknown) => {
-        try {
-          const agentCtx = ctx as { workspaceDir?: string } | undefined;
-          const workspaceDir = agentCtx?.workspaceDir;
-          if (!workspaceDir) return;
-
-          const agentSkillsDir = join(workspaceDir, "skills");
-          if (syncedWorkspaces.has(agentSkillsDir)) return;
-
-          syncSkillsToDir(pluginSkillsDir, agentSkillsDir);
-          syncedWorkspaces.add(agentSkillsDir);
-          api.logger.info(`[enhance] 已同步增强技能到 Agent workspace: ${workspaceDir}`);
-        } catch {
-          // 静默失败，不影响主流程
-        }
-      });
+    } catch (err) {
+      api.logger.error(`[enhance] 技能安装失败: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // 为每个动态 Agent 的 workspace 也安装 skills（首次遇到时）
+    api.on("before_prompt_build", (_event: unknown, ctx: unknown) => {
+      try {
+        const agentCtx = ctx as { workspaceDir?: string } | undefined;
+        const workspaceDir = agentCtx?.workspaceDir;
+        if (!workspaceDir) return;
+
+        const agentSkillsDir = join(workspaceDir, "skills");
+        if (syncedWorkspaces.has(agentSkillsDir)) return;
+
+        syncSkillsToDir(agentSkillsDir, (msg) => api.logger.info(msg));
+        syncedWorkspaces.add(agentSkillsDir);
+        api.logger.info(`[enhance] 已从 ClawHub 安装增强技能到 Agent workspace: ${workspaceDir}`);
+      } catch {
+        // 静默失败，不影响主流程
+      }
+    });
 
     api.logger.info(`[enhance] 龙虾增强包 v1.7.1 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },

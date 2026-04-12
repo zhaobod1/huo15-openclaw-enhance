@@ -43,12 +43,11 @@
     "index.ts",
     "openclaw.plugin.json",
     "src/**/*",
-    "skills/**/*",
     "templates/**/*",
     "scripts/**/*"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/zhaobod1/huo15-openclaw-enhance"
+    "url": "https://cnb.cool/huo15/ai/huo15-openclaw-enhance"
   }
 }
