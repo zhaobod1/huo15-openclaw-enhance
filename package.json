@@ -1,6 +1,6 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "火一五·克劳德·龙虾增强插件 — 借鉴 Claude Code 优秀设计：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
   "type": "module",
   "main": "index.ts",
