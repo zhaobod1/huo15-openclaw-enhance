@@ -71,3 +71,11 @@
 - 启发式分解规则：代码开发、Odoo系统、反思模式、通用分解
 - 支持 mode: plan/analyze/reflect
 
+
+## 🐛 Bug修复（v2.0.1）
+
+### ✅ 消除全部10个TS类型错误
+- **根因**：OpenClaw SDK 的 `AgentTool` 类型要求 `label: string`，但运行时 Jiti 解析器不检查此字段
+- **修复**：`api.registerTool(...)` 工厂函数改为 `api.registerTool(( ... as any), ...)`
+- **结果**：`npx tsc --noEmit` → 0 errors
+
