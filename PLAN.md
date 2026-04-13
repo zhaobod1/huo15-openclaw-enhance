@@ -79,3 +79,18 @@
 - **修复**：`api.registerTool(...)` 工厂函数改为 `api.registerTool(( ... as any), ...)`
 - **结果**：`npx tsc --noEmit` → 0 errors
 
+
+## ✅ P2 完成（v2.1.0）
+
+### ✅ 记忆整合 — `memory-integrator.ts`
+- `registerMemoryCapability` 把 enhance SQLite 注册为 OpenClaw corpus supplement
+- OpenClaw 搜索记忆时会同时返回 enhance 的分类记忆
+- 新工具 `enhance_memory_export`：导出所有记忆为 JSON（可同步到 Obsidian/KB）
+
+### ✅ 工作流增强 — `workflow-hooks.ts` 全面升级
+- **正则触发**：触发词支持 `/pattern/flags` 语法
+- **条件分支**：支持 keyword/regex/time_range/day_of_week 条件评估
+- **任务状态**：新增 `enhance_task` 工具（create/update/list/get/delete）
+- **看板视图**：新增 `enhance_workflow_tasks` 工具
+- 任务状态持久化到 `workflows/workflow-tasks.json`（跨 session 追踪）
+

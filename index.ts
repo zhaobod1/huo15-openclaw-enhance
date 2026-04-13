@@ -24,6 +24,7 @@ import { registerFlamePet } from "./src/modules/flame-pet.js";
 import { registerSpinnerTips } from "./src/modules/spinner-tips.js";
 import { registerSelfCheck } from "./src/modules/self-check.js";
 import { registerContextPruner } from "./src/modules/context-pruner.js";
+import { registerMemoryIntegrator } from "./src/modules/memory-integrator.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -148,6 +149,11 @@ export default definePluginEntry({
         enabled: true,
         load: () => registerTaskPlanner(api),
       },
+      {
+        name: "记忆整合",
+        enabled: true,
+        load: () => registerMemoryIntegrator(api),
+      },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
       //   name: "智能贴士",
@@ -199,6 +205,6 @@ export default definePluginEntry({
       }
     });
 
-    api.logger.info(`[enhance] 龙虾增强包 v2.0.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v2.1.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },
 });

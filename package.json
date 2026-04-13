@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "2.0.1",
-  "description": "火一五·克劳德·龙虾增强插件 v2.0 — 对标 Claude Code Agent Harness 六层能力：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘、输出自检、Context裁剪、自动重试、任务规划",
+  "version": "2.1.0",
+  "description": "火一五·克劳德·龙虾增强插件 v2.1 — 对标 Claude Code Agent Harness 六层能力：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘、输出自检、Context裁剪、自动重试、任务规划、记忆整合（corpus supplement）、条件分支工作流、任务状态追踪"
   "type": "module",
   "main": "index.ts",
   "openclaw": {
