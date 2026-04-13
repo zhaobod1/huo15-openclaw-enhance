@@ -20,8 +20,7 @@ import { registerToolSafety } from "./src/modules/tool-safety.js";
 import { registerPromptEnhancer } from "./src/modules/prompt-enhancer.js";
 import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
 import { registerDashboard } from "./src/modules/dashboard.js";
-import { registerFlamePet } from "./src/modules/flame-pet.js";
-import { registerSpinnerTips } from "./src/modules/spinner-tips.js";
+
 import { registerSelfCheck } from "./src/modules/self-check.js";
 import { registerContextPruner } from "./src/modules/context-pruner.js";
 import { registerMemoryIntegrator } from "./src/modules/memory-integrator.js";
@@ -129,11 +128,7 @@ export default definePluginEntry({
         enabled: config.dashboard?.enabled !== false,
         load: () => registerDashboard(api, config.dashboard, notifyQueue, db),
       },
-      {
-        name: "小火苗",
-        enabled: config.pet?.enabled !== false,
-        load: () => { console.error("[idx] loading flame-pet..."); registerFlamePet(api, config.pet, db, notifyQueue); },
-      },
+
       {
         name: "输出自检",
         enabled: config.selfCheck?.enabled !== false,
