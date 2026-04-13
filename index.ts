@@ -21,6 +21,8 @@ import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
 import { registerDashboard } from "./src/modules/dashboard.js";
 import { registerFlamePet } from "./src/modules/flame-pet.js";
 import { registerSpinnerTips } from "./src/modules/spinner-tips.js";
+import { registerSelfCheck } from "./src/modules/self-check.js";
+import { registerContextPruner } from "./src/modules/context-pruner.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -130,6 +132,16 @@ export default definePluginEntry({
         enabled: config.pet?.enabled !== false,
         load: () => { console.error("[idx] loading flame-pet..."); registerFlamePet(api, config.pet, db, notifyQueue); },
       },
+      {
+        name: "输出自检",
+        enabled: config.selfCheck?.enabled !== false,
+        load: () => registerSelfCheck(api, config.selfCheck),
+      },
+      {
+        name: "Context裁剪",
+        enabled: config.contextPruner?.enabled !== false,
+        load: () => registerContextPruner(api, config.contextPruner),
+      },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
       //   name: "智能贴士",
@@ -181,6 +193,6 @@ export default definePluginEntry({
       }
     });
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.7.1 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v1.9.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },
 });

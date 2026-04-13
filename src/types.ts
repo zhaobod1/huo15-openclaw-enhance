@@ -156,6 +156,28 @@ export interface NotificationQueue {
   prune(maxRetained: number): void;
 }
 
+// ── 输出自检 ──
+export interface SelfCheckConfig {
+  enabled?: boolean;
+  checkEmpty?: boolean;
+  checkNoReply?: boolean;
+  checkErrorKeywords?: boolean;
+  checkExcessiveLength?: boolean;
+  maxLength?: number;
+  errorKeywords?: string[];
+  blockOnEmpty?: boolean;
+}
+
+// ── Context 裁剪 ──
+export interface ContextPrunerConfig {
+  enabled?: boolean;
+  /** 相关性阈值（0-1），低于此分数的记忆被过滤，默认 0.25 */
+  threshold?: number;
+  /** 最多注入多少条记忆，默认 10 */
+  maxEntries?: number;
+  debug?: boolean;
+}
+
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
   memory?: MemoryConfig;
@@ -166,4 +188,6 @@ export interface EnhancePluginConfig {
   pet?: PetConfig;
   tips?: TipsConfig;
   notifications?: NotificationConfig;
+  selfCheck?: SelfCheckConfig;
+  contextPruner?: ContextPrunerConfig;
 }

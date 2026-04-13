@@ -113,6 +113,9 @@ const TOOL_XP_MAP: Record<string, number> = {
 // 每个 session 最近显示过的贴士 id（避免重复）
 const sessionRecentTips = new Map<string, string[]>();
 
+// 每个 session 是否已在 message_sending 中发送过贴士（只发一次）
+const sessionSentPetTip = new Set<string>();
+
 export function registerFlamePet(api: any, config: any, db: any, notifyQueue: any): void {
   const showPet = config?.showPet !== false;
   const showTip = config?.showTip !== false;
@@ -216,6 +219,65 @@ export function registerFlamePet(api: any, config: any, db: any, notifyQueue: an
   } catch (e) {
     console.error("[flame-pet] ❌ before_prompt_build hook failed:", e);
   }
+
+  // ----------------------------------------
+  // Hook 4: message_sending → 主动推送贴士+宠物到企微消息开头
+  // ----------------------------------------
+  try {
+    api.on("message_sending", (event: any, ctx: any) => {
+      const sessionKey = ctx?.sessionKey ?? "";
+      if (!sessionKey) return {};
+
+      // 每个 session 只在第一条回复时主动推送
+      if (sessionSentPetTip.has(sessionKey)) return {};
+      sessionSentPetTip.add(sessionKey);
+
+      const agentId = ctx?.agentId ?? DEFAULT_AGENT_ID;
+      const pet = getPet(agentId);
+      const channel = detectChannelForSession(sessionKey);
+
+      // 构建贴士文本
+      let tipPrepend = "";
+      if (showTip) {
+        const tip = selectSmartTip({ hour: new Date().getHours() });
+        if (tip) {
+          if (channel === "wecom" || channel === "dingtalk") {
+            tipPrepend = renderTipWeComV2(tip) + "\n\n";
+          } else {
+            tipPrepend = renderTipMarkdown(tip) + "\n\n";
+          }
+        }
+      }
+
+      // 构建宠物文本
+      let petPrepend = "";
+      if (showPet) {
+        if (channel === "wecom" || channel === "dingtalk") {
+          petPrepend = renderPixelPet(pet, "emoji") + "\n\n";
+        } else {
+          petPrepend = renderPixelPet(pet, "terminal") + "\n\n";
+        }
+      }
+
+      const prefix = tipPrepend + petPrepend;
+      if (!prefix) return {};
+
+      // 修改发送内容：贴士+宠物 在前，AI回复在后
+      const original = event?.content ?? "";
+      return { content: prefix + original };
+    });
+    console.log("[flame-pet] ✅ message_sending hook registered");
+  } catch (e) {
+    console.error("[flame-pet] ❌ message_sending hook failed:", e);
+  }
+}
+
+// 根据 sessionKey 获取渠道（channel-detect 只支持 event-based 检测，
+// message_sending 时无 event，只能靠 sessionKey 猜测或默认 emoji 格式）
+function detectChannelForSession(sessionKey: string): "wecom" | "dingtalk" | "terminal" {
+  if (sessionKey.includes("wecom")) return "wecom";
+  if (sessionKey.includes("dingtalk")) return "dingtalk";
+  return "terminal";
 }
 
 // 兼容旧接口
