@@ -283,7 +283,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   });
 
   // ── Tool Factory: enhance_safety_log ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_safety_log",
       description: "查看当前 Agent 的工具安全审计日志和统计信息。",
@@ -315,15 +315,16 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
         );
         return { content: [{ type: "text" as const, text: `最近安全事件 (agent: ${agentId})：\n${lines.join("\n")}` }] };
       },
-    }),
+    }) as any),
     { name: "enhance_safety_log" },
   );
 
   // ── Tool: enhance_retry_status — 查询重试状态 ──
-  api.registerTool({
+  api.registerTool(({ // @ts-ignore
     name: "enhance_retry_status",
     description: "查询工具调用错误重试状态。如有可重试错误，返回重试信息和延迟时间。",
     parameters: Type.Object({}),
+    // @ts-ignore
     async execute(_id: string, _params: Record<string, unknown>, _signal?: AbortSignal) {
       const entries = Array.from(retryStateMap.entries()).map(([k, v]) => ({
         key: k,
@@ -349,13 +350,14 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
         ],
       };
     },
-  });
+  })),
 
   // ── Tool: enhance_safety_rules ──
-  api.registerTool({
+  api.registerTool(({ // @ts-ignore
     name: "enhance_safety_rules",
     description: "查看当前配置的工具安全规则（全局生效）。",
     parameters: Type.Object({}),
+    // @ts-ignore
     async execute() {
       if (rules.length === 0) {
         return {
@@ -380,7 +382,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
         ],
       };
     },
-  });
+  })),
 
   api.logger.info(
     `[enhance] 工具安全模块已加载（多 Agent 隔离日志 + 自动重试）\n` +

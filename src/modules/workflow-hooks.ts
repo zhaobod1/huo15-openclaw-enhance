@@ -43,7 +43,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
   const openclawDir = resolveOpenClawHome(api);
 
   // ── Tool Factory: enhance_workflow_define ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_workflow_define",
       description: [
@@ -93,12 +93,12 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
           ],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_workflow_define" },
   );
 
   // ── Tool Factory: enhance_workflow_list ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_workflow_list",
       description: "列出当前 Agent 的所有工作流。",
@@ -117,12 +117,12 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
           content: [{ type: "text" as const, text: `工作流列表 (agent: ${agentId}, ${workflows.length} 个)：\n\n${lines.join("\n\n")}` }],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_workflow_list" },
   );
 
   // ── Tool Factory: enhance_workflow_delete ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_workflow_delete",
       description: "删除当前 Agent 的一个工作流。",
@@ -142,7 +142,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
         saveWorkflows(openclawDir, allWorkflows);
         return { content: [{ type: "text" as const, text: `已删除工作流「${params.name}」(agent: ${agentId})` }] };
       },
-    }),
+    }) as any),
     { name: "enhance_workflow_delete" },
   );
 

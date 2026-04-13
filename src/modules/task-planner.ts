@@ -109,7 +109,7 @@ export function registerTaskPlanner(api: OpenClawPluginApi) {
   // ── Tool: enhance_plan_task ──
   // 注意: 工厂函数类型在运行时通过 Jiti 解析，TS 类型仅为编译参考
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_plan_task",
       description:
@@ -160,7 +160,7 @@ export function registerTaskPlanner(api: OpenClawPluginApi) {
           content: [{ type: "text" as const, text: planText }],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_plan_task" },
   );
 

@@ -31,7 +31,7 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   const maxCtx = config?.maxContextEntries ?? 5;
 
   // ── Tool Factory: enhance_memory_store ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_store",
       description: [
@@ -75,12 +75,12 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
           ],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_memory_store" },
   );
 
   // ── Tool Factory: enhance_memory_search ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_search",
       description: "搜索当前 Agent 的结构化记忆。可按分类、关键词筛选。",
@@ -111,12 +111,12 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
           content: [{ type: "text" as const, text: `找到 ${entries.length} 条记忆 (agent: ${agentId})：\n\n${lines.join("\n\n")}` }],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_memory_search" },
   );
 
   // ── Tool Factory: enhance_memory_review ──
-  api.registerTool(
+  api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_review",
       description: "查看当前 Agent 的记忆统计和最近记忆，也可删除指定记忆。",
@@ -158,7 +158,7 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
           content: [{ type: "text" as const, text: `最近 ${entries.length} 条记忆 (agent: ${agentId})：\n${lines.join("\n")}` }],
         };
       },
-    }),
+    }) as any),
     { name: "enhance_memory_review" },
   );
 
