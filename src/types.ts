@@ -42,6 +42,8 @@ export interface SafetyConfig {
   enabled?: boolean;
   rules?: SafetyRule[];
   defaultAction?: SafetyAction;
+  /** 是否启用自动重试（429指数退避/5xx重试/网络超时重试），默认 true */
+  enableRetry?: boolean;
 }
 
 // ── 提示词增强 ──

@@ -53,3 +53,21 @@
 - 多 Agent 隔离：所有状态读取 `ctx.agentId`
 - SQLite 表结构不变，兼容现有数据
 - 仪表盘自动反映新模块的统计数据
+
+## 已完成（v2.0.0 — 第2次迭代）
+
+### ✅ `tool-safety.ts` 增强 — 自动重试
+- `after_tool_call` hook：错误分类（rate_limit/server_error/network_error/auth_error/timeout/unknown）
+- 429 → 指数退避（最多5次，baseDelay 1s，multiplier 2x）
+- 5xx → 重试3次（baseDelay 2s）
+- 网络超时 → 重试2-3次（baseDelay 1s）
+- 401/403 权限错误不重试（直接标记为 auth_error）
+- `enhance_retry_status` 工具：查询当前待重试任务
+- 配置项：`enableRetry: true`（默认开启）
+
+### ✅ `task-planner.ts`（执行编排 — P1）
+- Tool: `enhance_plan_task` — 目标 → 结构化子任务分解
+- Hook: `before_prompt_build` 自动检测触发词并注入规划提示
+- 启发式分解规则：代码开发、Odoo系统、反思模式、通用分解
+- 支持 mode: plan/analyze/reflect
+

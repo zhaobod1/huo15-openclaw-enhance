@@ -15,6 +15,7 @@
  */
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { registerStructuredMemory } from "./src/modules/structured-memory.js";
+import { registerTaskPlanner } from "./src/modules/task-planner.js";
 import { registerToolSafety } from "./src/modules/tool-safety.js";
 import { registerPromptEnhancer } from "./src/modules/prompt-enhancer.js";
 import { registerWorkflowHooks } from "./src/modules/workflow-hooks.js";
@@ -142,6 +143,11 @@ export default definePluginEntry({
         enabled: config.contextPruner?.enabled !== false,
         load: () => registerContextPruner(api, config.contextPruner),
       },
+      {
+        name: "任务规划",
+        enabled: true,
+        load: () => registerTaskPlanner(api),
+      },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
       //   name: "智能贴士",
@@ -193,6 +199,6 @@ export default definePluginEntry({
       }
     });
 
-    api.logger.info(`[enhance] 龙虾增强包 v1.9.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v2.0.0 已加载（多 Agent 隔离，不干涉 openclaw 内置功能），启用模块: ${loaded.join("、")}`);
   },
 });
