@@ -29,7 +29,7 @@
   "author": "jobzhao15",
   "license": "MIT",
   "peerDependencies": {
-    "openclaw": ">=2026.2.24"
+    "openclaw": ">=2026.0.0"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",
