@@ -173,9 +173,9 @@ export interface SelfCheckConfig {
 // ── Context 裁剪 ──
 export interface ContextPrunerConfig {
   enabled?: boolean;
-  /** 相关性阈值（0-1），低于此分数的记忆被过滤，默认 0.25 */
+  /** 相关性阈值（0-1），低于此分数的记忆被过滤，默认 0.5 */
   threshold?: number;
-  /** 最多注入多少条记忆，默认 10 */
+  /** 最多注入多少条记忆，默认 5 */
   maxEntries?: number;
   debug?: boolean;
 }

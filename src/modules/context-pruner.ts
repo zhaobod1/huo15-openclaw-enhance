@@ -22,9 +22,9 @@ import type { MemoryEntry } from "../types.js";
 export interface ContextPrunerConfig {
   /** 是否启用 */
   enabled?: boolean;
-  /** 相关性阈值（0-1），低于此分数的记忆被过滤，默认 0.25 */
+  /** 相关性阈值（0-1），低于此分数的记忆被过滤，默认 0.5 */
   threshold?: number;
-  /** 最多注入多少条记忆，默认 10 */
+  /** 最多注入多少条记忆，默认 5 */
   maxEntries?: number;
   /** 是否启用 debug 日志 */
   debug?: boolean;
@@ -130,9 +130,12 @@ export function registerContextPruner(api: OpenClawPluginApi, config?: ContextPr
   const enabled = config?.enabled !== false;
   if (!enabled) return;
 
-  const threshold = config?.threshold ?? 0.25;
-  const maxEntries = config?.maxEntries ?? 10;
+  const threshold = config?.threshold ?? 0.5;
+  const maxEntries = config?.maxEntries ?? 5;
   const debug = config?.debug ?? false;
+
+  // ── Session 缓存：同一次会话只搜索一次，对标 Claude Code findRelevantMemories 行为 ──
+  const sessionCache = new Map<string, { injected: string; timestamp: number }>();
 
   // ── Hook: before_prompt_build ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,6 +144,16 @@ export function registerContextPruner(api: OpenClawPluginApi, config?: ContextPr
       const query: string = (event as any)?.prompt ?? "";
 
       if (!query.trim()) return {};
+
+      // ── Session 缓存查找：同一 agent 只在首次消息时搜索，后续直接返回缓存 ──
+      const cacheKey = agentId;
+      const cached = sessionCache.get(cacheKey);
+      if (cached) {
+        if (debug) {
+          api.logger.info(`[enhance-pruner] 会话缓存命中 (agent: ${agentId})，跳过搜索`);
+        }
+        return { prependContext: cached.injected };
+      }
 
       // 1. 获取该 agent 的所有记忆
       const allMemories = searchMemories(db, agentId, { limit: 100 });
@@ -190,6 +203,13 @@ export function registerContextPruner(api: OpenClawPluginApi, config?: ContextPr
         `已从 ${allMemories.length} 条记忆中筛选出 ${selected.length} 条高相关性记忆：`,
         ...sections,
       ].join("\n\n");
+
+      // ── 写入 Session 缓存 ──
+      sessionCache.set(cacheKey, { injected, timestamp: Date.now() });
+
+      if (debug) {
+        api.logger.info(`[enhance-pruner] 会话缓存已写入 (agent: ${agentId})，后续消息将跳过搜索`);
+      }
 
       return { prependContext: injected };
     },
