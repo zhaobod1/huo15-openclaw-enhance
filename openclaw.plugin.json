@@ -1,14 +1,15 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "借鉴 Claude Code 优秀设计：结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
-  "version": "1.4.0",
+  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘",
+  "version": "2.2.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "memory": {
         "type": "object",
+        "description": "增强记忆：本地 SQLite 分类记忆 + 通过 corpus supplement 喂给龙虾原生记忆引擎（不绕过龙虾）",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
           "autoCapture": { "type": "boolean", "default": true },
@@ -17,6 +18,7 @@
       },
       "safety": {
         "type": "object",
+        "description": "工具安全补充：仅补充龙虾原生 tools.allow/deny 未覆盖的细粒度规则",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
           "rules": {
@@ -27,29 +29,68 @@
                 "tool": { "type": "string" },
                 "pattern": { "type": "string" },
                 "pathPattern": { "type": "string" },
-                "action": { "type": "string", "enum": ["block", "log", "allow"] },
+                "action": { "type": "string", "enum": ["block", "hardblock", "log", "allow"] },
                 "reason": { "type": "string" }
               },
               "required": ["tool", "action"]
             },
             "default": []
           },
-          "defaultAction": { "type": "string", "enum": ["allow", "log"], "default": "allow" }
+          "defaultAction": { "type": "string", "enum": ["allow", "log"], "default": "allow" },
+          "enableRetry": { "type": "boolean", "default": true }
         }
       },
       "prompt": {
         "type": "object",
+        "description": "提示词增强：仅注入龙虾内置系统提示词缺失的章节（qualityGuidelines）",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
           "sections": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["qualityGuidelines", "memoryContext"]
+            "items": { "type": "string", "enum": ["qualityGuidelines"] },
+            "default": ["qualityGuidelines"]
           }
         }
       },
       "workflows": {
         "type": "object",
+        "description": "工作流触发器（关键词 → 指令注入）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "todos": {
+        "type": "object",
+        "description": "Claude-Code 风格任务追踪（enhance_todo_write）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "chapters": {
+        "type": "object",
+        "description": "会话章节标记（enhance_mark_chapter，仪表盘可跳转）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "mode": {
+        "type": "object",
+        "description": "模式闸门：plan/explore 模式下自动拦截写入类工具",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "defaultMode": { "type": "string", "enum": ["normal", "plan", "explore"], "default": "normal" }
+        }
+      },
+      "statusline": {
+        "type": "object",
+        "description": "状态栏：项目/模式/记忆命中/宠物状态实时快照（HTTP /plugins/enhance/api/statusline）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "scheduledTasks": {
+        "type": "object",
+        "description": "定时任务桥：注册龙虾 cron-cli 可触发的工作流钩子",
         "properties": {
           "enabled": { "type": "boolean", "default": true }
         }
@@ -65,8 +106,45 @@
         "description": "小火苗宠物 + 智能贴士",
         "properties": {
           "enabled": { "type": "boolean", "default": true },
-          "showPet": { "type": "boolean", "default": true, "description": "显示小火苗状态" },
-          "showTip": { "type": "boolean", "default": true, "description": "显示今日贴士" }
+          "name": { "type": "string" },
+          "color": { "type": "string", "enum": ["orange", "blue", "purple", "green", "white"] }
+        }
+      },
+      "tips": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "injectInPrompt": { "type": "boolean", "default": false },
+          "cooldownMinutes": { "type": "number", "default": 30 }
+        }
+      },
+      "notifications": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "maxRetained": { "type": "number", "default": 200 }
+        }
+      },
+      "selfCheck": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "checkEmpty": { "type": "boolean", "default": true },
+          "checkNoReply": { "type": "boolean", "default": true },
+          "checkErrorKeywords": { "type": "boolean", "default": true },
+          "checkExcessiveLength": { "type": "boolean", "default": false },
+          "maxLength": { "type": "number", "default": 20000 },
+          "blockOnEmpty": { "type": "boolean", "default": false }
+        }
+      },
+      "contextPruner": {
+        "type": "object",
+        "description": "记忆相关性过滤（仅用于 corpus supplement 的 search 排序，不绕过龙虾原生注入）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "threshold": { "type": "number", "default": 0.5 },
+          "maxEntries": { "type": "number", "default": 5 },
+          "debug": { "type": "boolean", "default": false }
         }
       }
     }
