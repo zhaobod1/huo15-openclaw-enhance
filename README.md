@@ -26,7 +26,7 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v2.2** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.4** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
@@ -60,7 +60,7 @@ openclaw restart
 
 ---
 
-## 功能模块（v2.2 全量）
+## 功能模块（v5.4 全量）
 
 | 模块 | 说明 | Agent 工具 |
 |------|------|-----------|
@@ -92,7 +92,9 @@ openclaw restart
 
 ## 增强技能
 
-安装时会自动注入 4 个增强技能到 `workspace/skills/`：
+安装时会自动注入 8 个增强技能到 `workspace/skills/`（4 个工作流 + 4 个设计）：
+
+### 工作流模式
 
 | 技能 | 说明 | 灵感来源 |
 |------|------|---------|
@@ -100,6 +102,15 @@ openclaw restart
 | `huo15-openclaw-explore-mode` | 深度探索模式 — 只读调研代码库/系统/话题后再给出结论 | Claude Code Explore Agent |
 | `huo15-openclaw-verify-mode` | 验证检查模式 — 检查工作成果、运行测试、验证假设 | Claude Code Verification Agent |
 | `huo15-openclaw-memory-curator` | 记忆整理 — 定期审查记忆、提取洞察、清理过期条目 | Claude Code auto-memory |
+
+### 设计能力（v5.4 新增）
+
+| 技能 | 说明 | 灵感来源 |
+|------|------|---------|
+| `huo15-openclaw-frontend-design` | 高保真 Web UI 原型 + 5 美学流派 + 反 AI Slop 硬红线 + Junior/Full 两趟渲染 | Anthropic frontend-design skill |
+| `huo15-openclaw-design-director` | 设计方向顾问 — 5 流派 × 20 哲学 → 3 方向反差对比 + 强制推荐 | huashu-design 方向选型模式 |
+| `huo15-openclaw-brand-protocol` | 品牌规范抓取 — Ask/Search/Download/Verify/Codify 5 步 → brand-spec.md | huashu Brand Protocol 5-step |
+| `huo15-openclaw-design-critique` | 5 维设计评审 — 美学/可用性/品牌/内容/实现 + Keep/Fix/Quick Wins 三分类 | Web Design review 社区共识 |
 
 ---
 

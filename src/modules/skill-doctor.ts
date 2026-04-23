@@ -21,6 +21,10 @@ const EXPECTED_SKILLS = [
   "huo15-openclaw-memory-curator",
   "huo15-openclaw-plan-mode",
   "huo15-openclaw-verify-mode",
+  "huo15-openclaw-frontend-design",
+  "huo15-openclaw-design-director",
+  "huo15-openclaw-brand-protocol",
+  "huo15-openclaw-design-critique",
 ];
 
 interface SkillInfo {
@@ -59,7 +63,7 @@ export function registerSkillDoctor(api: OpenClawPluginApi) {
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_skill_doctor",
-      description: "巡检 enhance 自带的 4 个技能（explore-mode / memory-curator / plan-mode / verify-mode）是否齐全、可读，输出修复建议。",
+      description: "巡检 enhance 自带的 8 个配套技能（4 个工作流：explore/memory-curator/plan/verify + 4 个设计：frontend-design/design-director/brand-protocol/design-critique）是否齐全、可读，输出修复建议。",
       parameters: Type.Object({
         workspace: Type.Optional(Type.String({ description: "workspace 目录（可选），默认取龙虾全局 workspace。" })),
       }),

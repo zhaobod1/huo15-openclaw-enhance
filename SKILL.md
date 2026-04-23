@@ -1,12 +1,12 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.3 — OpenClaw 2026.4.11+ 的非侵入式增强：五类分类记忆（Why/How-to-apply 两段式 + 并入龙虾 memory 搜索）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、技能巡检、子任务一键 CLI 派发、定时任务桥"
-version: 5.3.2
+description: "火一五·克劳德·龙虾增强插件 v5.4 — OpenClaw 2026.4.11+ 的非侵入式增强：五类分类记忆（Why/How-to-apply 两段式 + 并入龙虾 memory 搜索）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、技能巡检、子任务一键 CLI 派发、定时任务桥；v5.4 新增 4 个设计能力 skill（frontend-design / design-director / brand-protocol / design-critique）"
+version: 5.4.0
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.3
+# 火一五·克劳德·龙虾增强插件 v5.4
 
 ## 简介
 
@@ -45,10 +45,19 @@ openclaw restart
 
 ## 增强技能（自动注入 `workspace/skills/`）
 
+**工作流模式（4 个）**
+
 - `huo15-openclaw-plan-mode` — 结构化规划模式
 - `huo15-openclaw-explore-mode` — 深度探索模式
 - `huo15-openclaw-verify-mode` — 验证检查模式
 - `huo15-openclaw-memory-curator` — 记忆整理
+
+**设计能力（v5.4 新增，对标 Anthropic frontend-design + huashu-design 生态）**
+
+- `huo15-openclaw-frontend-design` — 高保真 Web UI 原型 + 5 美学流派 + 反 AI Slop 硬红线
+- `huo15-openclaw-design-director` — 设计方向顾问（3 方向反差对比 + 强制推荐）
+- `huo15-openclaw-brand-protocol` — 品牌规范抓取（Ask/Search/Download/Verify/Codify 5 步）
+- `huo15-openclaw-design-critique` — 5 维设计评审（美学/可用性/品牌/内容/实现）
 
 详见 [README.md](./README.md) 与 [CHANGELOG.md](./CHANGELOG.md)。
 

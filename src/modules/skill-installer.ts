@@ -19,6 +19,11 @@ export const CLAW_HUB_SKILLS = [
   "huo15-openclaw-memory-curator",
   "huo15-openclaw-plan-mode",
   "huo15-openclaw-verify-mode",
+  // v5.4 新增：设计能力四件套（对标 Anthropic frontend-design + huashu-design 生态）
+  "huo15-openclaw-frontend-design",
+  "huo15-openclaw-design-director",
+  "huo15-openclaw-brand-protocol",
+  "huo15-openclaw-design-critique",
 ];
 
 export function registerSkillInstaller(api: OpenClawPluginApi) {
