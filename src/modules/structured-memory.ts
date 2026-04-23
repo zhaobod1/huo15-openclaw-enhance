@@ -50,7 +50,18 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
         category: Type.Union(VALID_CATEGORIES.map((c) => Type.Literal(c)), {
           description: "记忆类型: user|project|feedback|reference|decision",
         }),
-        content: Type.String({ description: "记忆内容（建议中文）" }),
+        content: Type.String({ description: "记忆内容主体（规则本身；建议中文）" }),
+        why: Type.Optional(
+          Type.String({
+            description:
+              "为什么值得记住（背景/约束/踩过的坑）。强烈推荐 feedback/project 类记忆填写，让未来会话可判断边缘情况。",
+          }),
+        ),
+        howToApply: Type.Optional(
+          Type.String({
+            description: "这条记忆在未来何时/如何套用（触发场景 + 具体实施办法）。",
+          }),
+        ),
         tags: Type.Optional(Type.String({ description: "逗号分隔的标签" })),
         importance: Type.Optional(
           Type.Number({ description: "重要性 1-10，默认 5", minimum: 1, maximum: 10 }),
@@ -65,6 +76,11 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
           params.content as string,
           (params.tags as string) ?? "",
           (params.importance as number) ?? 5,
+          "",
+          {
+            why: params.why as string | undefined,
+            howToApply: params.howToApply as string | undefined,
+          },
         );
         return {
           content: [
@@ -103,10 +119,16 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
         if (entries.length === 0) {
           return { content: [{ type: "text" as const, text: `未找到匹配的记忆 (agent: ${agentId})。` }] };
         }
-        const lines = entries.map(
-          (e) =>
-            `#${e.id} [${e.category}] (重要性:${e.importance}) ${e.created_at}\n  ${e.content}\n  标签: ${e.tags || "无"}`,
-        );
+        const lines = entries.map((e) => {
+          const body = [
+            `#${e.id} [${e.category}] (重要性:${e.importance}) ${e.created_at}`,
+            `  内容: ${e.content}`,
+          ];
+          if (e.why && e.why.trim()) body.push(`  原因(Why): ${e.why.trim()}`);
+          if (e.how_to_apply && e.how_to_apply.trim()) body.push(`  套用(How): ${e.how_to_apply.trim()}`);
+          body.push(`  标签: ${e.tags || "无"}`);
+          return body.join("\n");
+        });
         return {
           content: [{ type: "text" as const, text: `找到 ${entries.length} 条记忆 (agent: ${agentId})：\n\n${lines.join("\n\n")}` }],
         };
@@ -151,9 +173,13 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
         if (entries.length === 0) {
           return { content: [{ type: "text" as const, text: `暂无记忆 (agent: ${agentId})。` }] };
         }
-        const lines = entries.map(
-          (e) => `#${e.id} [${e.category}] ${e.created_at}: ${e.content.slice(0, 100)}`,
-        );
+        const lines = entries.map((e) => {
+          const extras: string[] = [];
+          if (e.why && e.why.trim()) extras.push(`why="${e.why.trim().slice(0, 60)}"`);
+          if (e.how_to_apply && e.how_to_apply.trim()) extras.push(`how="${e.how_to_apply.trim().slice(0, 60)}"`);
+          const suffix = extras.length > 0 ? ` · ${extras.join(" · ")}` : "";
+          return `#${e.id} [${e.category}] ${e.created_at}: ${e.content.slice(0, 100)}${suffix}`;
+        });
         return {
           content: [{ type: "text" as const, text: `最近 ${entries.length} 条记忆 (agent: ${agentId})：\n${lines.join("\n")}` }],
         };

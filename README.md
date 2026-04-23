@@ -26,18 +26,21 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件** 是 [OpenClaw](https://github.com/nicepkg/openclaw) 的非侵入式增强插件，借鉴 Claude Code 的优秀设计模式，为你的龙虾 AI Agent 注入结构化记忆、工具安全守卫、提示词工程、工作流自动化和可视化仪表盘等能力。
+**火一五·克劳德·龙虾增强插件 v2.2** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
-完全通过 OpenClaw 插件 API 实现，**不修改任何核心代码**，一键安装即可使用。
-(非龙虾开发)
+完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
+（非龙虾团队开发）
+
 ### 核心特性
 
-- **多 Agent 隔离** — 完美适配 WeCom 插件的动态 Agent 功能，每个企微用户/群组拥有独立的记忆空间、安全日志和工作流
-- **结构化记忆系统** — 借鉴 Claude Code auto-memory，按 user/project/feedback/reference/decision 五类分类存储
-- **工具安全守卫** — 借鉴 Claude Code 权限系统，可配置规则拦截危险工具调用并记录审计日志
-- **提示词增强** — 借鉴 Claude Code systemPromptSections，自动注入任务分类、质量指引和记忆上下文
-- **工作流自动化** — 借鉴 Claude Code hooks 事件驱动，通过触发词自动注入行为指令
-- **增强仪表盘** — Web UI 实时查看记忆/安全/工作流状态，支持按 Agent 筛选
+- **多 Agent 隔离** — 完美适配 WeCom 插件的动态 Agent 功能，每个企微用户/群组拥有独立的记忆、任务、章节、宠物与定时工作流
+- **结构化记忆（corpus supplement）** — 按 user/project/feedback/reference/decision 五类分类存储，**通过 `registerMemoryCorpusSupplement` 并入龙虾 `memory` 搜索结果**，不自建第二套向量库
+- **工具安全补丁** — 仅作为**观察员**存在（尊重龙虾原生 `tools.allow/deny`），统计错误分类、给出退避建议，从不擅自重试或硬拦截
+- **提示词增强** — 仅保留 `qualityGuidelines`，其它早已由龙虾系统提示词覆盖，不重复
+- **任务/章节/模式闸门** — Claude Code TodoWrite / mark_chapter / plan-explore 的龙虾化实现；模式闸门在 `before_tool_call` 阻止计划/探索模式误触写操作
+- **状态栏 / 技能巡检 / 子任务孵化** — 一行看全当前状态；诊断技能目录缺失；把"现在不该做"的副作用登记为延期任务
+- **定时任务桥** — 登记工作流时返回一条 `openclaw cron add` 命令，**调度归龙虾**，插件只负责触发时装填上下文
+- **增强仪表盘（含小火苗宠物）** — Web UI 实时查看记忆 / 任务 / 章节 / 定时 / 宠物状态，支持按 Agent 筛选
 
 ---
 
@@ -57,15 +60,33 @@ openclaw restart
 
 ---
 
-## 功能模块
+## 功能模块（v2.2 全量）
 
 | 模块 | 说明 | Agent 工具 |
 |------|------|-----------|
-| **结构化记忆** | 按类型分类存储记忆，按 Agent 隔离 | `enhance_memory_store` `enhance_memory_search` `enhance_memory_review` |
-| **工具安全** | 可配置的工具调用拦截规则 + 审计日志 | `enhance_safety_log` `enhance_safety_rules` |
-| **提示词增强** | 自动注入任务分类、质量指引、记忆上下文 | 自动（通过 hook） |
-| **工作流自动化** | 触发词驱动的行为指令注入 | `enhance_workflow_define` `enhance_workflow_list` `enhance_workflow_delete` |
-| **仪表盘** | Web UI 查看系统状态 | `http://localhost:18789/plugins/enhance/` |
+| **分类记忆（并入龙虾搜索）** | user/project/feedback/reference/decision 五类；作为 corpus supplement 与龙虾 `memory` 合并排名 | `enhance_memory_store` `enhance_memory_search` `enhance_memory_review` `enhance_memory_export` |
+| **工具安全观察** | 错误分类（429/5xx/网络）+ 指数退避建议；不拦截，不重试 | `enhance_safety_log` `enhance_retry_status` `enhance_safety_rules` |
+| **提示词段落** | 追加 `qualityGuidelines`，其它已由龙虾系统提示词覆盖 | 自动（hook 注入） |
+| **任务追踪** | Claude Code TodoWrite 语义；SQLite 持久化；会警告多 in_progress | `enhance_todo_write` `enhance_todo_update` `enhance_todo_list` |
+| **章节时间线** | session 级「mark_chapter」 | `enhance_mark_chapter` `enhance_chapter_list` |
+| **模式闸门** | plan / explore / normal；前两种下 `before_tool_call` 阻止写操作 | `enhance_set_mode` `enhance_current_mode` |
+| **状态栏** | 一行/详情/json 三格式快照（模式、任务、记忆、宠物、通知） | `enhance_statusline` |
+| **技能巡检** | 只读检查 4 个增强技能安装状态 + 给出 clawhub 修复命令 | `enhance_skill_doctor` |
+| **子任务孵化** | 把"该做但别现在"登记为延期任务 | `enhance_spawn_task` |
+| **定时任务桥** | 返回 `openclaw cron add` CLI 命令，尊重龙虾原生 cron-cli | `enhance_loop_register` `enhance_loop_list` `enhance_loop_disable` |
+| **工作流自动化** | 触发词 → 行为指令注入（旧式，保留兼容） | `enhance_workflow_define` `enhance_workflow_list` `enhance_workflow_delete` |
+| **增强仪表盘** | Web UI：记忆 / 任务 / 章节 / 定时 / 孵化子任务 / 小火苗 | `http://localhost:18789/plugins/enhance/` |
+
+## 与龙虾原生的关系（设计契约）
+
+| 能力 | 龙虾原生 | enhance 策略 |
+|------|---------|--------------|
+| 记忆向量库（LanceDB） | ✅ 龙虾负责 | **enhance 不自建**；改为 corpus supplement 并入搜索 |
+| 记忆系统提示词 | ✅ 龙虾负责 | enhance 只在段落底部追加一行工具说明（如果龙虾提供 `registerMemoryPromptSupplement`） |
+| 工具 allow/deny | ✅ 龙虾负责 | enhance 只**观察**结果、做错误分类；不拦截 |
+| 任务清单 / 计划文件 | ⚠️ 无对应原语 | enhance 独立实现（SQLite），语义对齐 Claude Code |
+| Cron 调度 | ✅ 龙虾 cron-cli | enhance 不管理调度；只在触发时注入 instructions |
+| 技能安装 | ✅ ClawHub | enhance 只读巡检，不擅自安装 |
 
 ---
 
@@ -168,6 +189,10 @@ openclaw restart
 | 工作流 | 17 个生命周期事件 | 触发词驱动 + before_prompt_build 注入 |
 
 ---
+
+## 版本历史
+
+见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## License
 

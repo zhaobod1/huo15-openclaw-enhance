@@ -13,6 +13,10 @@ export interface MemoryEntry {
   agent_id: string;
   category: MemoryCategory;
   content: string;
+  /** 该条记忆为什么值得记 — 通常是背景、约束、踩过的坑 */
+  why?: string;
+  /** 记忆适用场景 — 未来会话何时/如何套用这条 */
+  how_to_apply?: string;
   tags: string;
   importance: number;
   session_id: string;
@@ -180,6 +184,56 @@ export interface ContextPrunerConfig {
   debug?: boolean;
 }
 
+// ── Todos ──
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export interface TodoEntry {
+  id: number;
+  agent_id: string;
+  session_id: string;
+  content: string;
+  active_form: string;
+  status: TodoStatus;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TodoConfig {
+  enabled?: boolean;
+}
+
+// ── Chapter marks ──
+export interface ChapterMark {
+  id: number;
+  agent_id: string;
+  session_id: string;
+  title: string;
+  summary?: string;
+  created_at: string;
+}
+
+export interface ChapterConfig {
+  enabled?: boolean;
+}
+
+// ── Mode gate ──
+export type AgentMode = "normal" | "plan" | "explore";
+
+export interface ModeConfig {
+  enabled?: boolean;
+  defaultMode?: AgentMode;
+}
+
+// ── Statusline / Scheduled tasks ──
+export interface StatuslineConfig {
+  enabled?: boolean;
+}
+
+export interface ScheduledTasksConfig {
+  enabled?: boolean;
+}
+
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
   memory?: MemoryConfig;
@@ -192,4 +246,9 @@ export interface EnhancePluginConfig {
   notifications?: NotificationConfig;
   selfCheck?: SelfCheckConfig;
   contextPruner?: ContextPrunerConfig;
+  todos?: TodoConfig;
+  chapters?: ChapterConfig;
+  mode?: ModeConfig;
+  statusline?: StatuslineConfig;
+  scheduledTasks?: ScheduledTasksConfig;
 }
