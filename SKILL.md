@@ -1,7 +1,7 @@
 ---
 name: huo15-openclaw-enhance
 description: "火一五·克劳德·龙虾增强插件 v5.3 — OpenClaw 2026.4.11+ 的非侵入式增强：五类分类记忆（Why/How-to-apply 两段式 + 并入龙虾 memory 搜索）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、技能巡检、子任务一键 CLI 派发、定时任务桥"
-version: 5.3.1
+version: 5.3.2
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
