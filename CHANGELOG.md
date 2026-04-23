@@ -2,6 +2,34 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.5.0 — 2026-04-23（三层记忆/知识库协调）
+
+本次聚焦「龙虾原生 memory / enhance 结构化记忆 / KB wiki」三者的职责切分和聚合搜索。
+
+### 新增
+
+- **`src/modules/kb-corpus.ts`** — 新增 corpus supplement，把 huo15-openclaw-openai-knowledge-base 技能的**共享知识库**（`~/.openclaw/kb/shared/wiki/`）注册为龙虾 `memory` 的 `corpus="kb"`。调用 `memory_search` 会同时搜到 enhance-memory + shared KB wiki，无需切换工具。
+- **`types.ts: KbCorpusConfigType`** — 新配置段 `config.kbCorpus`，可调阈值、路径、debug。
+- **`index.ts`** — 注册「共享知识库语料」模块，默认启用（`kbCorpus.enabled !== false`）。
+
+### 变更
+
+- **`structured-memory.ts: enhance_memory_store` 的 tool description** — 增加 L2/L3 边界提示：「本工具只存规则/为什么/怎么做的短条目；长文档请走 `kb-ingest` 入共享 KB」。
+
+### 三层协调总览
+
+| 层 | 存什么 | 存储 | 隔离 | corpus |
+|----|--------|------|------|--------|
+| L1 龙虾原生 memory | 向量+FTS 底座 | `~/.openclaw/memory/<agent>.sqlite` | per-agent | `memory` |
+| L2 enhance 结构化记忆 | 规则/反馈/决策（短） | `enhance-memory.sqlite` | per-agent | `enhance` |
+| L3 共享知识库 | 事实/文档/教程（长） | `~/.openclaw/kb/shared/wiki/*.md` | 跨 agent | `kb` |
+
+### 配套更新
+
+- `huo15-openclaw-openai-knowledge-base` skill v2.5.0 — 所有 `kb-*` 脚本新增 `--scope agent|shared`；`kb-search` 默认聚合搜 agent+shared+obsidian；新增 `kb-scope.sh` 公共库。
+
+---
+
 ## 5.4.0 — 2026-04-23（对齐 2026 Q2 设计能力生态）
 
 本次聚焦"设计能力"这一纵向领域，对标 Anthropic 官方 `frontend-design` skill（277k+ 安装）与中文圈 `alchaincyf/huashu-design`（画术，4.6k★）的设计理念，但**全部内容自研**（避开 huashu 仅限个人使用的 license 限制）。

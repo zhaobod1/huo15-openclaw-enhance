@@ -184,6 +184,18 @@ export interface ContextPrunerConfig {
   debug?: boolean;
 }
 
+// ── KB Corpus（共享知识库 → 龙虾 memory corpus 桥接） ──
+export interface KbCorpusConfigType {
+  enabled?: boolean;
+  /** 共享 KB 根目录，默认 ~/.openclaw/kb/shared */
+  sharedKbPath?: string;
+  /** 相关性阈值（0-1），默认 0.3 */
+  threshold?: number;
+  /** 单次 search 最多返回几条，默认 5 */
+  maxResults?: number;
+  debug?: boolean;
+}
+
 // ── Todos ──
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -251,4 +263,5 @@ export interface EnhancePluginConfig {
   mode?: ModeConfig;
   statusline?: StatuslineConfig;
   scheduledTasks?: ScheduledTasksConfig;
+  kbCorpus?: KbCorpusConfigType;
 }

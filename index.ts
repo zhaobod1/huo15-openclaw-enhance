@@ -31,6 +31,7 @@ import { registerSpawnTask } from "./src/modules/spawn-task.js";
 import { registerSkillDoctor } from "./src/modules/skill-doctor.js";
 import { registerScheduledTasksBridge } from "./src/modules/scheduled-tasks-bridge.js";
 import { registerSkillInstaller, CLAW_HUB_SKILLS } from "./src/modules/skill-installer.js";
+import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -133,6 +134,11 @@ export default definePluginEntry({
         enabled: true,
         load: () => registerSkillInstaller(api),
       },
+      {
+        name: "共享知识库语料",
+        enabled: config.kbCorpus?.enabled !== false,
+        load: () => registerKbCorpus(api, config.kbCorpus),
+      },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
       //   name: "智能贴士",
@@ -169,6 +175,6 @@ export default definePluginEntry({
       // 静默跳过（非关键路径）
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v5.3.2 已加载（非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v5.5.0 已加载（非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
   },
 });

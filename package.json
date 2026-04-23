@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.4.0",
-  "description": "火一五·克劳德·龙虾增强插件 v5.4.0 — 对标 Claude Code Agent Harness + 设计能力套件，非侵入式增强 OpenClaw：记忆整合（corpus supplement + Why/How-to-apply 两段式）、工具安全补充、statusline 观测、spawn_task 一键 CLI 派发、ExitPlanMode 审批闭环、skill-installer 工具、工作流、任务/章节/触发器追踪、仪表盘、输出自检、模式闸门、定时任务桥接；v5.4 新增 4 个设计能力 skill（frontend-design / design-director / brand-protocol / design-critique），对标 Anthropic frontend-design + huashu-design 生态",
+  "version": "5.5.0",
+  "description": "火一五·克劳德·龙虾增强插件 v5.5.0 — 对标 Claude Code Agent Harness + 设计能力套件，非侵入式增强 OpenClaw：记忆整合（corpus supplement + Why/How-to-apply 两段式）+ 共享 KB 语料桥接（corpus=\"kb\"）、工具安全补充、statusline 观测、spawn_task 一键 CLI 派发、ExitPlanMode 审批闭环、skill-installer、工作流、任务/章节/触发器追踪、仪表盘、输出自检、模式闸门、定时任务桥接。v5.5 新增三层记忆协调：L1 龙虾原生 memory / L2 enhance 结构化规则 / L3 共享 KB wiki，通过 corpus supplement 让 memory_search 一次搜三层。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

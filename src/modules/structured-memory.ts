@@ -45,6 +45,12 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
         "",
         "使用场景：当你了解到值得在未来会话中记住的信息时调用此工具。",
         "不要存储可以从代码或 git 历史推导出的信息。",
+        "",
+        "**边界提示（重要）**：",
+        "- 本工具只存「规则/为什么/怎么做」这类短条目（几十~几百字）。",
+        "- 长文档 / 外部资料 / 教程 / 文章 → 请走 `kb-ingest` 入库到共享知识库 " +
+          "（corpus=\"kb\"，会被 memory_search 同时搜到），**不要**塞进 memory。",
+        "- 判断要点：「这是一条规则还是一份材料？」",
       ].join("\n"),
       parameters: Type.Object({
         category: Type.Union(VALID_CATEGORIES.map((c) => Type.Literal(c)), {
