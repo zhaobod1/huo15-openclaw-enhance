@@ -61,13 +61,12 @@ export function registerTodoTracker(api: OpenClawPluginApi, notifyQueue: Notific
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_todo_write",
-      description:
-        "维护 Claude-Code 风格的任务清单（覆盖式写入整组）。当任务≥3步或需要展示进度时使用；同一时间只应该有一项 in_progress。",
+      description: "维护任务清单（整组覆盖写入）；任务≥3步用，同时只一项 in_progress",
       parameters: Type.Object({
         todos: Type.Array(
           Type.Object({
-            content: Type.String({ description: "任务内容（祈使句，例如'添加校验'）" }),
-            activeForm: Type.String({ description: "进行中展示形式（例如'添加校验中'）" }),
+            content: Type.String({ description: "任务内容（祈使句）" }),
+            activeForm: Type.String({ description: "进行中展示形式" }),
             status: Type.Optional(
               Type.Union(
                 [Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")],
@@ -75,7 +74,7 @@ export function registerTodoTracker(api: OpenClawPluginApi, notifyQueue: Notific
               ),
             ),
           }),
-          { description: "覆盖式写入。传空数组等同于清空本 session 的任务。" },
+          { description: "覆盖式写入；空数组=清空" },
         ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
@@ -114,10 +113,9 @@ export function registerTodoTracker(api: OpenClawPluginApi, notifyQueue: Notific
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_todo_update",
-      description:
-        "更新单条任务状态（按 position 索引，不改变顺序）。完成任务后应立即调用，不要等到批量结束。",
+      description: "更新单条任务状态（按 position 索引，完成后立即调用）",
       parameters: Type.Object({
-        position: Type.Integer({ description: "任务在清单中的位置（从 0 开始）" }),
+        position: Type.Integer({ description: "位置（从 0 开始）" }),
         status: Type.Union(
           [Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")],
           { description: "目标状态" },

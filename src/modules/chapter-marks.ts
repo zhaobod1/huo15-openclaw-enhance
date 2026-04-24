@@ -32,11 +32,10 @@ export function registerChapterMarks(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_mark_chapter",
-      description:
-        "在会话中标记一个章节（长会话的里程碑）。何时使用：从探索切到实现、修复结束转向验证、话题切换。不要每个工具调用都标记。一般一个会话 3-8 个。",
+      description: "标记会话章节（阶段切换时用，一会话 3-8 个）",
       parameters: Type.Object({
-        title: Type.String({ description: "短名词短语，<40 字，例如'代码库勘察'、'鉴权修复'。" }),
-        summary: Type.Optional(Type.String({ description: "一行摘要，鼠标悬停时显示。" })),
+        title: Type.String({ description: "短名词短语，<40 字" }),
+        summary: Type.Optional(Type.String({ description: "一行摘要" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = pickAgentId(ctx);
@@ -64,14 +63,14 @@ export function registerChapterMarks(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_chapter_list",
-      description: "查看当前 session（或 Agent 全部）章节时间线。",
+      description: "查看 session 或 Agent 章节时间线",
       parameters: Type.Object({
         scope: Type.Optional(
           Type.Union([Type.Literal("session"), Type.Literal("agent")], {
-            description: "session（默认）或 agent（跨 session）",
+            description: "session(默认)|agent",
           }),
         ),
-        limit: Type.Optional(Type.Integer({ description: "返回条数，默认 50" })),
+        limit: Type.Optional(Type.Integer({ description: "默认 50" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = pickAgentId(ctx);

@@ -109,7 +109,8 @@ export function buildRecapText(
   if (decisions.length > 0) {
     lines.push("— 关键决定 —");
     for (const d of decisions) {
-      lines.push(`  · ${d.key}: ${d.rule.slice(0, 80)}${d.rule.length > 80 ? "..." : ""}`);
+      const text = (d.content ?? "").trim();
+      lines.push(`  · ${text.slice(0, 80)}${text.length > 80 ? "..." : ""}`);
     }
     lines.push("");
   }
@@ -188,12 +189,11 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_session_recap",
-      description:
-        "手动生成一次会话回顾（最近章节 + 待办 + 关键决定），无论距上次活动多久都产出。适合中途想回顾状态时调用。与龙虾原生的 session resume 不冲突：龙虾恢复会话上下文，本工具只汇总 enhance 记录的结构化状态。",
+      description: "手动生成会话回顾（章节+待办+关键决定）",
       parameters: Type.Object({
         scope: Type.Optional(
           Type.Union([Type.Literal("session"), Type.Literal("agent")], {
-            description: "session（默认，仅本次会话章节）或 agent（跨 session 全部章节）",
+            description: "session(默认)|agent",
           }),
         ),
       }),

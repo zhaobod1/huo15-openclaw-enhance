@@ -261,12 +261,12 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_safety_log",
-      description: "查看当前 Agent 的 enhance 安全补充规则的审计日志（与龙虾原生 tools.allow/deny 独立）。",
+      description: "查看 enhance 安全补充规则的审计日志",
       parameters: Type.Object({
         action: Type.Union([Type.Literal("recent"), Type.Literal("stats")], {
-          description: "recent: 最近事件 / stats: 统计摘要",
+          description: "recent|stats",
         }),
-        limit: Type.Optional(Type.Number({ description: "返回条数（仅 recent 模式）", default: 15 })),
+        limit: Type.Optional(Type.Number({ description: "recent 条数", default: 15 })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim();
@@ -300,7 +300,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_retry_status",
-      description: "查询最近一分钟内失败工具调用的错误分类和建议退避时间（观测性视图，不自动重试）。",
+      description: "查询最近一分钟失败工具调用的错误分类和建议退避（不自动重试）",
       parameters: Type.Object({}),
       async execute() {
         pruneObservations(Date.now());
@@ -328,7 +328,7 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_safety_rules",
-      description: "查看 enhance 安全补充规则清单（不包含龙虾原生 tools.allow/deny 配置）。",
+      description: "查看 enhance 补充安全规则清单（不含龙虾原生 tools.allow/deny）",
       parameters: Type.Object({}),
       async execute() {
         if (rules.length === 0) {

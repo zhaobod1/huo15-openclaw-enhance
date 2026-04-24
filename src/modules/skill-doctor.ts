@@ -66,9 +66,9 @@ export function registerSkillDoctor(api: OpenClawPluginApi) {
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_skill_doctor",
-      description: "巡检 enhance 自带的 11 个配套技能（4 个工作流：explore/memory-curator/plan/verify + 4 个设计：frontend-design/design-director/brand-protocol/design-critique + 3 个开发辅助：simplify/security-review/code-review）是否齐全、可读，输出修复建议。",
+      description: "巡检 enhance 11 个配套技能是否齐全可读，输出修复建议",
       parameters: Type.Object({
-        workspace: Type.Optional(Type.String({ description: "workspace 目录（可选），默认取龙虾全局 workspace。" })),
+        workspace: Type.Optional(Type.String({ description: "workspace 目录" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const openclawHome = resolveOpenClawHome(api);

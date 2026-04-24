@@ -149,8 +149,7 @@ export function registerModeGate(
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_set_mode",
-      description:
-        "切换当前 session 的运行模式：normal（默认，无限制）/ plan（只做规划、勘察，拦截写入）/ explore（只允许只读）。",
+      description: "切换 session 模式：normal(无限制)|plan(拦截写入)|explore(只读)",
       parameters: Type.Object({
         mode: Type.Union([Type.Literal("normal"), Type.Literal("plan"), Type.Literal("explore")], {
           description: "目标模式",
@@ -172,7 +171,7 @@ export function registerModeGate(
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_current_mode",
-      description: "查看当前 session 的运行模式。",
+      description: "查看当前 session 的运行模式",
       parameters: Type.Object({}),
       async execute() {
         const agentId = pickAgentId(ctx);
@@ -193,17 +192,12 @@ export function registerModeGate(
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_exit_plan_mode",
-      description: [
-        "提交 plan 给用户审批并退出 plan 模式。",
-        "使用时机：在 plan 模式下完成规划、准备开始写入前调用。",
-        "行为：保存计划为 decision 记忆（含 Why/How-to-apply）+ 附带 plan 模式下被拦截的写入操作清单，",
-        "如果 autoApprove=true 则直接切回 normal；否则保持 plan，等待用户调用 enhance_set_mode normal。",
-      ].join("\n"),
+      description: "提交 plan 给用户审批并退出 plan 模式（保存为 decision 记忆）",
       parameters: Type.Object({
-        plan: Type.String({ description: "完整的计划正文（Markdown），要列出打算改的文件/操作。" }),
-        why: Type.Optional(Type.String({ description: "为什么这么做（动机/约束）。" })),
+        plan: Type.String({ description: "计划正文（Markdown）" }),
+        why: Type.Optional(Type.String({ description: "动机/约束" })),
         autoApprove: Type.Optional(
-          Type.Boolean({ description: "是否直接切到 normal 并开始执行，默认 false（等待用户批准）。" }),
+          Type.Boolean({ description: "是否直接切到 normal，默认 false" }),
         ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {

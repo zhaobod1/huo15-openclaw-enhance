@@ -2,6 +2,66 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.6.0 — 2026-04-24（工具分层 + workflow 5→2 合并 + 描述压缩）
+
+针对实际使用中"long session 仅 15% 上下文使用率即触发 Context limit exceeded"的现象做容量优化。根因有二：(a) 用户的 `~/.openclaw/openclaw.json` 把 `compaction.reserveTokensFloor` 误设为 `200000`（>205k 总窗），每次压缩都失败 — 需要用户侧改回 `20000`；(b) 插件这边一次性暴露 29 个工具 schema，每轮 prompt 固定底座过重。本版本聚焦 (b)。
+
+### 新增
+
+- **`types.ts: ToolTier` 类型 + `EnhancePluginConfig.toolTier`** — 新增工具分层枚举 `"minimal" | "balanced" | "full"`，默认 `"balanced"`。
+- **`openclaw.plugin.json: configSchema.toolTier`** — 暴露给龙虾配置 UI，三档可选。
+
+### 变更
+
+- **`index.ts`** — 模块清单增加 `tier: 1 | 2 | 3` 字段；启动期按 `TIER_MAX[toolTier]` 过滤，超出层级的工具模块整个不 register（连 schema 都不进 prompt）。
+  - tier 1 常驻层（minimal 即可见，10 工具）：结构化记忆 / 状态栏 / spawn / 模式闸门 / 章节标记 / installer / integrator
+  - tier 2 均衡层（balanced 默认，+8 工具，共 18）：todo / 章节 / 定时任务桥
+  - tier 3 完整层（full，+8 工具，共 26）：workflow / safety / task-planner / session-recap / skill-doctor
+  - 非工具模块（仪表盘、通知、自检、prompt-enhancer、kb-corpus）一律 tier 1：它们不占 tool schema、不影响 per-turn 成本。
+- **`workflow-hooks.ts` 5→2 工具合并** — `enhance_workflow_define / _list / _delete` 三个独立工具合并为单一 `enhance_workflow`（`action=define/list/delete/tasks`）；`enhance_task` 保留独立但仍是 action 派发器。`before_prompt_build` 触发逻辑、所有工作流持久化和评估辅助函数全部保留。
+- **批量描述压缩** — 24 个工具的 description 字段从多行 `[...].join("\n")` 压成单行 ≤ 80 字符；总字符量 ~4610 → ~1750（-62%），按中文 ≈0.5 token/字 估算每轮 prompt 节省约 1400 token。压缩注重保留触发关键词，不改 parameters schema。
+  - 最大幅压缩：`enhance_memory_store`（~700 字 → 38 字）、`enhance_exit_plan_mode`、`enhance_install_skills`
+  - `enhance_todo_list` 已经 ≤ 80 字，未改
+
+### 行为变化
+
+- 默认 `balanced` 模式下 **不暴露** workflow / safety / task-planner / session-recap / skill-doctor 工具。如果你需要这些能力（特别是工作流自动化和 plan-mode-审批闭环），请在 `openclaw.json.plugins.enhance` 配置里加 `"toolTier": "full"` 并重启。
+- session-recap 的 `before_prompt_build` hook 在 balanced 下**不**生效（模块整体没注册）；如果你依赖 75min idle 自动回顾，需 `toolTier: "full"`。
+- 升级后总工具数 29 → 26（workflow 5→2），即使切回 full 也比 v5.5.1 少 3 个。
+
+### 配置示例
+
+```jsonc
+// ~/.openclaw/openclaw.json
+{
+  "plugins": {
+    "enhance": {
+      "toolTier": "minimal"   // 极致省 schema，仅留 10 工具
+      // "toolTier": "full"   // 全功能，26 工具
+    }
+  },
+  "compaction": {
+    "reserveTokensFloor": 20000   // ⚠️ 不要设 200000，会比总窗还大
+  }
+}
+```
+
+### 不破坏的兼容点
+
+- 所有工具名（`enhance_*`）都保留，旧的 `enhance_workflow_define` 等命名外部没用过（只在内部 register），改成 `enhance_workflow` 不破坏任何用户脚本。
+- SQLite schema 完全没动；现有记忆 / 任务 / 章节数据无需迁移。
+- npm 包对外 API 没变（`definePluginEntry` 出口不变）。
+
+### 修复（顺手）
+
+- **session-recap.ts** — `buildRecapText` 引用了 `MemoryEntry` 上不存在的 `key` / `rule` 字段（v5.5.1 编译错但未被 CI 拦下），全 full tier 场景下生成 decision 段会运行时抛 `TypeError`。修正为 `d.content` 后兼容正确字段并裁切 80 字符。
+
+### 调研依据
+
+参见本仓库 [`docs/v5.6-context-pressure-postmortem.md`](./docs/v5.6-context-pressure-postmortem.md)（如该文件存在），以及本地 KB 条目 `~/knowledge/huo15/2026-04-24-openclaw-context-pressure-postmortem.md`。
+
+---
+
 ## 5.5.1 — 2026-04-24（session-recap + 3 个开发辅助 skill）
 
 在 v5.5.0「三层记忆协调」基础上，对齐 Claude Code 2026 Q2 最新能力谱调研结果，补齐两块高频能力：**会话回顾**与**开发辅助三件套**。

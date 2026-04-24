@@ -151,11 +151,11 @@ export function registerStatusline(
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_statusline",
-      description: "查看当前 Agent/session 的状态快照（模式、任务、记忆命中、宠物、通知）。",
+      description: "查看 Agent/session 状态快照（模式、任务、记忆、宠物、通知）",
       parameters: Type.Object({
         format: Type.Optional(
           Type.Union([Type.Literal("line"), Type.Literal("detail"), Type.Literal("json")], {
-            description: "line(默认)/detail/json",
+            description: "line(默认)|detail|json",
           }),
         ),
       }),

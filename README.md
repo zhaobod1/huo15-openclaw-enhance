@@ -26,10 +26,26 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.5.1** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.6.0** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.6 新特性（2026-04-24）
+
+**针对 long session 提早爆 context 的容量优化**
+
+| 配置项 | 暴露工具数 | 适用场景 |
+|--------|-----------|---------|
+| `toolTier: "minimal"` | 10 | 上下文极紧 / 最小核心模式（记忆、状态栏、章节、模式、spawn） |
+| `toolTier: "balanced"` *(默认)* | 18 | 多数日常会话 — 加 todo / 章节标记 / 定时任务桥 |
+| `toolTier: "full"` | 26 | 需要工作流自动化 / safety / session-recap / skill-doctor 时 |
+
+- **工具分层（toolTier）** — 按需暴露 schema，每轮 prompt 减负
+- **Workflow 5→2 工具合并** — 用 `action=` 派发器收敛同类操作
+- **26 个工具描述压缩 -62%** — 每轮 prompt 节省约 1400 token
+
+> ⚠️ 如果你的 `~/.openclaw/openclaw.json` 中 `compaction.reserveTokensFloor` ≥ 100000，请改回 **20000**（>205k 总窗会让每次压缩都失败）。这是 openclaw 配置项，与本插件无关。
 
 ### 核心特性
 
@@ -60,22 +76,30 @@ openclaw restart
 
 ---
 
-## 功能模块（v5.5.1 全量）
+## 功能模块（v5.6.0 全量，标注分层）
 
-| 模块 | 说明 | Agent 工具 |
-|------|------|-----------|
-| **分类记忆（并入龙虾搜索）** | user/project/feedback/reference/decision 五类；作为 corpus supplement 与龙虾 `memory` 合并排名 | `enhance_memory_store` `enhance_memory_search` `enhance_memory_review` `enhance_memory_export` |
-| **工具安全观察** | 错误分类（429/5xx/网络）+ 指数退避建议；不拦截，不重试 | `enhance_safety_log` `enhance_retry_status` `enhance_safety_rules` |
-| **提示词段落** | 追加 `qualityGuidelines`，其它已由龙虾系统提示词覆盖 | 自动（hook 注入） |
-| **任务追踪** | Claude Code TodoWrite 语义；SQLite 持久化；会警告多 in_progress | `enhance_todo_write` `enhance_todo_update` `enhance_todo_list` |
-| **章节时间线** | session 级「mark_chapter」 | `enhance_mark_chapter` `enhance_chapter_list` |
-| **模式闸门** | plan / explore / normal；前两种下 `before_tool_call` 阻止写操作 | `enhance_set_mode` `enhance_current_mode` |
-| **状态栏** | 一行/详情/json 三格式快照（模式、任务、记忆、宠物、通知） | `enhance_statusline` |
-| **技能巡检** | 只读检查 4 个增强技能安装状态 + 给出 clawhub 修复命令 | `enhance_skill_doctor` |
-| **子任务孵化** | 把"该做但别现在"登记为延期任务 | `enhance_spawn_task` |
-| **定时任务桥** | 返回 `openclaw cron add` CLI 命令，尊重龙虾原生 cron-cli | `enhance_loop_register` `enhance_loop_list` `enhance_loop_disable` |
-| **工作流自动化** | 触发词 → 行为指令注入（旧式，保留兼容） | `enhance_workflow_define` `enhance_workflow_list` `enhance_workflow_delete` |
-| **增强仪表盘** | Web UI：记忆 / 任务 / 章节 / 定时 / 孵化子任务 / 小火苗 | `http://localhost:18789/plugins/enhance/` |
+> 标注 `[L1/L2/L3]` 的是工具模块，分别在 minimal / balanced / full 三档下暴露给模型；非工具模块（仪表盘 / 提示词 / kb-corpus / 自检）一律常驻。
+
+| 模块 | 分层 | 说明 | Agent 工具 |
+|------|------|------|-----------|
+| **分类记忆（并入龙虾搜索）** | L1 | user/project/feedback/reference/decision 五类；作为 corpus supplement 与龙虾 `memory` 合并排名 | `enhance_memory_store` `enhance_memory_search` `enhance_memory_review` |
+| **状态栏** | L1 | 一行/详情/json 三格式快照（模式、任务、记忆、宠物、通知） | `enhance_statusline` |
+| **子任务派发** | L1 | 返回可粘贴的 `openclaw agent` CLI 命令，跨 agent 派发 | `enhance_spawn_task` |
+| **模式闸门** | L1 | plan / explore / normal；前两种下 `before_tool_call` 阻止写操作；含 ExitPlanMode 审批 | `enhance_set_mode` `enhance_current_mode` `enhance_exit_plan_mode` |
+| **章节标记** | L2 | session 级「mark_chapter」 | `enhance_mark_chapter` `enhance_chapter_list` |
+| **任务追踪** | L2 | Claude Code TodoWrite 语义；SQLite 持久化；会警告多 in_progress | `enhance_todo_write` `enhance_todo_update` `enhance_todo_list` |
+| **定时任务桥** | L2 | 返回 `openclaw cron add` CLI 命令，尊重龙虾原生 cron-cli | `enhance_loop_register` `enhance_loop_list` `enhance_loop_disable` |
+| **工作流自动化（v5.6 合并）** | L3 | 触发词 → 行为指令注入；CRUD 收敛到单工具（action 派发） | `enhance_workflow` `enhance_task` |
+| **工具安全观察** | L3 | 错误分类（429/5xx/网络）+ 指数退避建议；不拦截，不重试 | `enhance_safety_log` `enhance_retry_status` `enhance_safety_rules` |
+| **任务规划** | L3 | 把多步任务拆解保存为 plan 工件 | `enhance_task_plan` |
+| **会话回顾（75min idle）** | L3 | idle 自动 prependContext「上次到这儿」 | `enhance_session_recap` |
+| **技能巡检** | L3 | 只读检查 11 个增强技能安装状态 + 给出 clawhub 修复命令 | `enhance_skill_doctor` |
+| **技能安装器** | L1 | 返回 11 个配套 skill 的一键安装 CLI 命令（不执行） | `enhance_install_skills` |
+| **记忆整合** | L1 | hook 注入：把命中的记忆与查询条件合成上下文片段 | `enhance_memory_consolidate` |
+| **提示词增强** | — | 追加 `qualityGuidelines`，其它已由龙虾系统提示词覆盖 | 自动（hook 注入） |
+| **共享知识库语料** | — | 桥接 `~/.openclaw/kb/shared/` 到龙虾 `memory_search`（corpus="kb"） | 自动（corpus supplement） |
+| **输出自检** | — | 空响应/错误关键词检查 | 自动（after-response hook） |
+| **增强仪表盘** | — | Web UI：记忆 / 任务 / 章节 / 定时 / 孵化子任务 / 小火苗 | `http://localhost:18789/plugins/enhance/` |
 
 ## 与龙虾原生的关系（设计契约）
 
@@ -126,6 +150,7 @@ openclaw restart
       "enhance": {
         "enabled": true,
         "config": {
+          "toolTier": "balanced",
           "memory": {
             "enabled": true,
             "autoCapture": true,
@@ -152,6 +177,16 @@ openclaw restart
   }
 }
 ```
+
+### `toolTier`（v5.6 新增）
+
+| 取值 | 工具数 | 暴露的工具模块 | 适用场景 |
+|------|--------|----------------|----------|
+| `"minimal"` | 10 | 记忆 + 状态栏 + spawn + 模式 + 章节安装器 + integrator | 上下文紧 / 长会话 / 极简核心 |
+| `"balanced"` *(默认)* | 18 | minimal + todo + 章节标记 + 定时任务桥 | 多数日常使用 |
+| `"full"` | 26 | 全部，含 workflow / safety / task-planner / session-recap / skill-doctor | 工作流自动化 / 完整 harness |
+
+修改 `toolTier` 后需要 `openclaw restart` 才能生效。
 
 ### 安全规则配置
 

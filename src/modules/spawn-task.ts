@@ -48,19 +48,18 @@ export function registerSpawnTask(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_spawn_task",
-      description:
-        "孵化一个可以另起 session 执行的子任务（例如发现的副作用清理、独立重构）。不会在当前上下文执行，只记录并提示；用户看到后决定是否新开会话处理。适用场景：当前任务已完成但你发现还有值得做的周边改动。",
+      description: "孵化新 session 执行的子任务（只记录，由用户决定是否新开会话）",
       parameters: Type.Object({
-        title: Type.String({ description: "动词短语标题（<60 字），例如'清理过期配置键'。" }),
-        prompt: Type.String({ description: "新 session 的完整提示词，要自包含（新会话没有当前对话的记忆）。" }),
-        tldr: Type.Optional(Type.String({ description: "1-2 句自然语言摘要，不要代码/路径，给用户看。" })),
-        tags: Type.Optional(Type.String({ description: "逗号分隔标签，例如 'cleanup,docs'。" })),
+        title: Type.String({ description: "动词短语标题（<60 字）" }),
+        prompt: Type.String({ description: "新 session 的完整自包含提示词" }),
+        tldr: Type.Optional(Type.String({ description: "1-2 句摘要" })),
+        tags: Type.Optional(Type.String({ description: "逗号分隔标签" })),
         targetAgent: Type.Optional(
-          Type.String({ description: "目标 agent id，默认沿用当前 agent；用于跨 agent 派发。" }),
+          Type.String({ description: "目标 agent id" }),
         ),
         thinking: Type.Optional(
           Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], {
-            description: "子任务运行时的思考档，默认 low（便宜）。",
+            description: "思考档，默认 low",
           }),
         ),
       }),

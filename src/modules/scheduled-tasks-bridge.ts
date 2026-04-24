@@ -67,16 +67,11 @@ export function registerScheduledTasksBridge(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_loop_register",
-      description:
-        "登记一个定时触发的增强工作流；返回一条 `openclaw cron add` 命令，用户复制执行即可挂到龙虾原生调度器。触发时 enhance 会把 instructions 当作上下文注入。",
+      description: "登记定时工作流，返回一条 openclaw cron add 命令供用户挂到调度器",
       parameters: Type.Object({
-        name: Type.String({ description: "任务名（agent 内唯一），例如 'daily-standup'" }),
-        cron: Type.String({
-          description: "cron 表达式，例如 '0 9 * * MON-FRI'（由龙虾 cron-cli 解析，本模块不做校验）",
-        }),
-        instructions: Type.String({
-          description: "触发时注入给 Agent 的完整指令；应自包含、不要依赖会话历史。",
-        }),
+        name: Type.String({ description: "任务名（agent 内唯一）" }),
+        cron: Type.String({ description: "cron 表达式" }),
+        instructions: Type.String({ description: "触发时注入给 Agent 的指令" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = pickAgentId(ctx);
@@ -125,7 +120,7 @@ export function registerScheduledTasksBridge(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_loop_list",
-      description: "列出当前 Agent 已登记的定时工作流。",
+      description: "列出当前 Agent 已登记的定时工作流",
       parameters: Type.Object({}),
       async execute() {
         const agentId = pickAgentId(ctx);
@@ -150,9 +145,9 @@ export function registerScheduledTasksBridge(api: OpenClawPluginApi) {
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_loop_disable",
-      description: "停用（软删除）一个定时工作流；不会删除已在龙虾 cron 里的条目，你还需要自己 `openclaw cron remove`。",
+      description: "停用定时工作流（软删除，仍需手动 openclaw cron remove）",
       parameters: Type.Object({
-        name: Type.String({ description: "登记时使用的 name" }),
+        name: Type.String({ description: "登记时的 name" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = pickAgentId(ctx);

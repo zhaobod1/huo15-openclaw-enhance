@@ -335,7 +335,7 @@ export function registerMemoryIntegrator(
   // enhance_memory_export — 导出为 JSON，方便同步到 Obsidian / KB
   api.registerTool(((ctx: any) => ({
     name: "enhance_memory_export",
-    description: "导出当前 Agent 的所有 enhance 记忆为 JSON（可用于同步到 Obsidian/KB 等外部系统）。",
+    description: "导出当前 Agent 全部 enhance 记忆为 JSON（可同步到 Obsidian/KB）",
     parameters: {},
     async execute(_id: string, _params: Record<string, unknown>): Promise<any> {
       const openclawDir = resolveOpenClawHome(api);

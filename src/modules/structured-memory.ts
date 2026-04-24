@@ -34,43 +34,21 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_store",
-      description: [
-        "存储一条结构化记忆（自动隔离到当前 Agent）。",
-        "分类说明：",
-        "- user: 用户偏好、角色、知识背景",
-        "- project: 项目状态、目标、决策、截止日期",
-        "- feedback: 用户对工作方式的反馈和纠正",
-        "- reference: 外部资源指针（链接、文档位置）",
-        "- decision: 重要的技术或业务决策及其原因",
-        "",
-        "使用场景：当你了解到值得在未来会话中记住的信息时调用此工具。",
-        "不要存储可以从代码或 git 历史推导出的信息。",
-        "",
-        "**边界提示（重要）**：",
-        "- 本工具只存「规则/为什么/怎么做」这类短条目（几十~几百字）。",
-        "- 长文档 / 外部资料 / 教程 / 文章 → 请走 `kb-ingest` 入库到共享知识库 " +
-          "（corpus=\"kb\"，会被 memory_search 同时搜到），**不要**塞进 memory。",
-        "- 判断要点：「这是一条规则还是一份材料？」",
-      ].join("\n"),
+      description: "存储结构化记忆（按 Agent 隔离）；规则/决策短条目，长文档走 kb-ingest",
       parameters: Type.Object({
         category: Type.Union(VALID_CATEGORIES.map((c) => Type.Literal(c)), {
-          description: "记忆类型: user|project|feedback|reference|decision",
+          description: "user|project|feedback|reference|decision",
         }),
-        content: Type.String({ description: "记忆内容主体（规则本身；建议中文）" }),
+        content: Type.String({ description: "记忆主体内容" }),
         why: Type.Optional(
-          Type.String({
-            description:
-              "为什么值得记住（背景/约束/踩过的坑）。强烈推荐 feedback/project 类记忆填写，让未来会话可判断边缘情况。",
-          }),
+          Type.String({ description: "为什么值得记住（背景/约束）" }),
         ),
         howToApply: Type.Optional(
-          Type.String({
-            description: "这条记忆在未来何时/如何套用（触发场景 + 具体实施办法）。",
-          }),
+          Type.String({ description: "何时/如何套用" }),
         ),
-        tags: Type.Optional(Type.String({ description: "逗号分隔的标签" })),
+        tags: Type.Optional(Type.String({ description: "逗号分隔标签" })),
         importance: Type.Optional(
-          Type.Number({ description: "重要性 1-10，默认 5", minimum: 1, maximum: 10 }),
+          Type.Number({ description: "1-10，默认 5", minimum: 1, maximum: 10 }),
         ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
@@ -105,15 +83,15 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_search",
-      description: "搜索当前 Agent 的结构化记忆。可按分类、关键词筛选。",
+      description: "搜索当前 Agent 的结构化记忆，可按分类/关键词筛选",
       parameters: Type.Object({
         category: Type.Optional(
           Type.Union(VALID_CATEGORIES.map((c) => Type.Literal(c)), {
-            description: "按分类筛选",
+            description: "分类筛选",
           }),
         ),
-        keyword: Type.Optional(Type.String({ description: "关键词搜索" })),
-        limit: Type.Optional(Type.Number({ description: "返回条数，默认 10", default: 10 })),
+        keyword: Type.Optional(Type.String({ description: "关键词" })),
+        limit: Type.Optional(Type.Number({ description: "默认 10", default: 10 })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = resolveAgentId(ctx);
@@ -147,13 +125,13 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   api.registerTool( (
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_memory_review",
-      description: "查看当前 Agent 的记忆统计和最近记忆，也可删除指定记忆。",
+      description: "查看 Agent 记忆统计/最近条目，或删除指定记忆",
       parameters: Type.Object({
         action: Type.Union([Type.Literal("stats"), Type.Literal("recent"), Type.Literal("delete")], {
-          description: "操作: stats(统计) / recent(最近) / delete(删除)",
+          description: "stats|recent|delete",
         }),
-        id: Type.Optional(Type.Number({ description: "要删除的记忆 ID（action=delete 时必填）" })),
-        limit: Type.Optional(Type.Number({ description: "recent 模式返回条数，默认 10" })),
+        id: Type.Optional(Type.Number({ description: "delete 必填的记忆 ID" })),
+        limit: Type.Optional(Type.Number({ description: "recent 条数，默认 10" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = resolveAgentId(ctx);

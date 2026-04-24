@@ -1,18 +1,27 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.5.1 — OpenClaw 2026.4.11+ 的非侵入式增强：三层记忆协调（L1 龙虾原生 / L2 enhance 结构化规则 / L3 共享 KB，corpus=kb 桥接并入 memory_search）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、session-recap（75min idle 自动回顾）、技能巡检、子任务一键 CLI 派发、定时任务桥；捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）"
-version: 5.5.1
+description: "火一五·克劳德·龙虾增强插件 v5.6.0 — OpenClaw 2026.4.11+ 的非侵入式增强：工具分层（toolTier=minimal/balanced/full，按需暴露 schema 降低每轮 prompt 开销）、workflow 5→2 工具合并（action 派发器）、26 个工具描述压缩（-62%）；三层记忆协调（L1 龙虾原生 / L2 enhance 结构化规则 / L3 共享 KB，corpus=kb 桥接并入 memory_search）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、session-recap（75min idle 自动回顾）、技能巡检、子任务一键 CLI 派发、定时任务桥；捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）"
+version: 5.6.0
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.5.1
+# 火一五·克劳德·龙虾增强插件 v5.6.0
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.11+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.6 新特性（2026-04-24）
+
+- **工具分层（toolTier）** — 按 minimal/balanced/full 三档暴露工具 schema，降低每轮 prompt 固定底座（解决长会话 context 提早爆满）
+  - `minimal`（10 工具）：仅核心层 — 记忆 / 状态栏 / spawn / 模式 / 章节 / installer / integrator
+  - `balanced`（18 工具，默认）：+ todo / 章节 / 定时任务桥
+  - `full`（26 工具）：+ workflow / safety / task-planner / session-recap / skill-doctor
+- **Workflow 5→2 工具合并** — `enhance_workflow_define / _list / _delete / _tasks / enhance_task` 合并为 `enhance_workflow`（action=define/list/delete/tasks）+ `enhance_task`（保留独立 action 派发器）
+- **工具描述全面压缩** — 26 个工具描述从 ~4610 字符 → ~1750 字符（-62%），每轮 prompt 节省约 1400 token，prompt cache 更稳
 
 ## 一键安装
 

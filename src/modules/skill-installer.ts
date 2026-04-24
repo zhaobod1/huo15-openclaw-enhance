@@ -37,20 +37,16 @@ export function registerSkillInstaller(api: OpenClawPluginApi) {
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_install_skills",
-      description: [
-        "返回一键安装 4 个配套技能（explore-mode / plan-mode / verify-mode / memory-curator）的 CLI 命令。",
-        "插件本身不执行任何外部进程，避免触发企业安全扫描器对『执行外部命令』的误报。",
-        "使用场景：首次安装插件、切换 openclaw_home、或技能目录被清空后。",
-      ].join("\n"),
+      description: "返回安装 enhance 配套技能的 clawhub install CLI 命令（不执行）",
       parameters: Type.Object({
         dir: Type.Optional(
           Type.String({
-            description: `安装目录，默认 ${defaultSkillsDir}（openclaw_home/workspace/skills）`,
+            description: `安装目录，默认 ${defaultSkillsDir}`,
           }),
         ),
         missingOnly: Type.Optional(
           Type.Boolean({
-            description: "只为未安装的技能生成命令，默认 true",
+            description: "只生成未安装的，默认 true",
           }),
         ),
       }),

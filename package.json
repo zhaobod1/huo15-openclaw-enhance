@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.5.1",
-  "description": "火一五·克劳德·龙虾增强插件 v5.5.1 — 对标 Claude Code Agent Harness + 设计套件 + 开发辅助套件，非侵入式增强 OpenClaw：三层记忆协调（L1 龙虾 / L2 enhance / L3 共享 KB + corpus=kb 桥接）、session-recap（75min idle 自动回顾）、statusline 观测、spawn_task 一键 CLI 派发、ExitPlanMode 审批闭环、skill-installer、工作流、仪表盘、模式闸门、定时任务桥接。v5.5.1 新增 3 个开发辅助 skill（simplify / security-review / code-review）和 session-recap 模块；捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）。",
+  "version": "5.6.0",
+  "description": "火一五·克劳德·龙虾增强插件 v5.6.0 — 对标 Claude Code Agent Harness + 设计套件 + 开发辅助套件，非侵入式增强 OpenClaw：三层记忆协调（L1 龙虾 / L2 enhance / L3 共享 KB + corpus=kb 桥接）、session-recap（75min idle 自动回顾）、statusline 观测、spawn_task 一键 CLI 派发、ExitPlanMode 审批闭环、skill-installer、工作流、仪表盘、模式闸门、定时任务桥接。v5.6.0 引入工具分层（toolTier=minimal/balanced/full）和 workflow 5→2 工具合并，每轮 prompt 减负约 1400 token；并压缩全部 26 个工具描述（-62%）。捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

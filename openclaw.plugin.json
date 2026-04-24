@@ -1,12 +1,18 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘",
-  "version": "2.2.0",
+  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 新增工具分层（toolTier）+ workflow 5→2 合并",
+  "version": "2.3.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "toolTier": {
+        "type": "string",
+        "enum": ["minimal", "balanced", "full"],
+        "default": "balanced",
+        "description": "工具分层（v5.6+）：minimal=10 工具仅核心 / balanced=18 工具默认 / full=26 工具完整。降低每轮 prompt 工具 schema 总量。修改后需重启 openclaw。"
+      },
       "memory": {
         "type": "object",
         "description": "增强记忆：本地 SQLite 分类记忆 + 通过 corpus supplement 喂给龙虾原生记忆引擎（不绕过龙虾）",

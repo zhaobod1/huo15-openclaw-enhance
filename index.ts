@@ -36,9 +36,24 @@ import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
-import type { EnhancePluginConfig } from "./src/types.js";
+import type { EnhancePluginConfig, ToolTier } from "./src/types.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+
+/**
+ * 工具分层映射（v5.6）：
+ * - L1 minimal: 记忆核心 / 状态栏 / spawn / 模式 / 章节 / installer / integrator
+ * - L2 balanced (default): +todo / 定时任务桥
+ * - L3 full: +workflow / safety / task-planner / session-recap / skill-doctor
+ *
+ * 只会载入 tier 内的模块，其他模块整个不 register（省下 tool schema 全部重量）。
+ */
+type Tier = 1 | 2 | 3;
+const TIER_MAX: Record<ToolTier, Tier> = {
+  minimal: 1,
+  balanced: 2,
+  full: 3,
+};
 
 export default definePluginEntry({
   id: "enhance",
@@ -47,122 +62,159 @@ export default definePluginEntry({
 
   register(api) {
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
+    const toolTier: ToolTier = config.toolTier ?? "balanced";
+    const maxTier: Tier = TIER_MAX[toolTier];
 
     // 初始化共享数据库和通知队列
     const openclawHome = resolveOpenClawHome(api);
     const db = getDb(openclawHome);
     const notifyQueue = createNotificationQueue(db, config.notifications);
 
-    const modules: Array<{ name: string; enabled: boolean; load: () => void }> = [
+    // 模块清单（v5.6 新增 tier 字段）：
+    // tier 1 = 常驻层（最高 ROI，任何时候都暴露）
+    // tier 2 = 均衡层（常用但非必须，默认启用）
+    // tier 3 = 完整层（专业场景，minimal/balanced 下不暴露）
+    // 非工具类模块（仪表盘、通知、自检、prompt-enhancer、kb-corpus）标 tier 1：它们不占工具 schema，不影响 per-turn 成本。
+    const modules: Array<{ name: string; tier: Tier; enabled: boolean; load: () => void }> = [
+      // ── 工具模块（占 tool schema）──
       {
         name: "结构化记忆",
+        tier: 1,
         enabled: config.memory?.enabled !== false,
         load: () => registerStructuredMemory(api, config.memory),
       },
       {
-        name: "工具安全",
-        enabled: config.safety?.enabled !== false,
-        load: () => registerToolSafety(api, config.safety),
-      },
-      {
-        name: "提示词增强",
-        enabled: config.prompt?.enabled !== false,
-        load: () => registerPromptEnhancer(api, config.prompt),
-      },
-      {
-        name: "工作流自动化",
-        enabled: config.workflows?.enabled !== false,
-        load: () => registerWorkflowHooks(api, config.workflows),
-      },
-      {
-        name: "仪表盘",
-        enabled: config.dashboard?.enabled !== false,
-        load: () => registerDashboard(api, config.dashboard, notifyQueue, db),
-      },
-
-      {
-        name: "输出自检",
-        enabled: config.selfCheck?.enabled !== false,
-        load: () => registerSelfCheck(api, config.selfCheck),
-      },
-      {
-        name: "任务规划",
-        enabled: true,
-        load: () => registerTaskPlanner(api),
-      },
-      {
-        name: "记忆整合",
-        enabled: config.memory?.enabled !== false,
-        load: () => registerMemoryIntegrator(api, config.contextPruner),
-      },
-      {
-        name: "任务追踪",
-        enabled: config.todos?.enabled !== false,
-        load: () => registerTodoTracker(api, notifyQueue),
-      },
-      {
-        name: "章节标记",
-        enabled: config.chapters?.enabled !== false,
-        load: () => registerChapterMarks(api),
-      },
-      {
-        name: "模式闸门",
-        enabled: config.mode?.enabled === true,
-        load: () => registerModeGate(api, config.mode, notifyQueue),
-      },
-      {
         name: "状态栏",
+        tier: 1,
         enabled: config.statusline?.enabled !== false,
         load: () => registerStatusline(api, db, notifyQueue),
       },
       {
         name: "子任务派发",
+        tier: 1,
         enabled: true,
         load: () => registerSpawnTask(api),
       },
       {
-        name: "技能巡检",
-        enabled: true,
-        load: () => registerSkillDoctor(api),
-      },
-      {
-        name: "定时任务桥",
-        enabled: config.scheduledTasks?.enabled !== false,
-        load: () => registerScheduledTasksBridge(api),
+        name: "模式闸门",
+        tier: 1,
+        enabled: config.mode?.enabled === true,
+        load: () => registerModeGate(api, config.mode, notifyQueue),
       },
       {
         name: "技能安装器",
+        tier: 1,
         enabled: true,
         load: () => registerSkillInstaller(api),
       },
       {
-        name: "共享知识库语料",
-        enabled: config.kbCorpus?.enabled !== false,
-        load: () => registerKbCorpus(api, config.kbCorpus),
+        name: "记忆整合",
+        tier: 1,
+        enabled: config.memory?.enabled !== false,
+        load: () => registerMemoryIntegrator(api, config.contextPruner),
+      },
+      {
+        name: "章节标记",
+        tier: 2,
+        enabled: config.chapters?.enabled !== false,
+        load: () => registerChapterMarks(api),
+      },
+      {
+        name: "任务追踪",
+        tier: 2,
+        enabled: config.todos?.enabled !== false,
+        load: () => registerTodoTracker(api, notifyQueue),
+      },
+      {
+        name: "定时任务桥",
+        tier: 2,
+        enabled: config.scheduledTasks?.enabled !== false,
+        load: () => registerScheduledTasksBridge(api),
+      },
+      {
+        name: "工作流自动化",
+        tier: 3,
+        enabled: config.workflows?.enabled !== false,
+        load: () => registerWorkflowHooks(api, config.workflows),
+      },
+      {
+        name: "工具安全",
+        tier: 3,
+        enabled: config.safety?.enabled !== false,
+        load: () => registerToolSafety(api, config.safety),
+      },
+      {
+        name: "任务规划",
+        tier: 3,
+        enabled: true,
+        load: () => registerTaskPlanner(api),
       },
       {
         name: "会话回顾",
+        tier: 3,
         enabled: config.sessionRecap?.enabled !== false,
         load: () => registerSessionRecap(api, config.sessionRecap),
+      },
+      {
+        name: "技能巡检",
+        tier: 3,
+        enabled: true,
+        load: () => registerSkillDoctor(api),
+      },
+
+      // ── 非工具模块（不占 tool schema，tier 不影响）──
+      {
+        name: "提示词增强",
+        tier: 1,
+        enabled: config.prompt?.enabled !== false,
+        load: () => registerPromptEnhancer(api, config.prompt),
+      },
+      {
+        name: "输出自检",
+        tier: 1,
+        enabled: config.selfCheck?.enabled !== false,
+        load: () => registerSelfCheck(api, config.selfCheck),
+      },
+      {
+        name: "仪表盘",
+        tier: 1,
+        enabled: config.dashboard?.enabled !== false,
+        load: () => registerDashboard(api, config.dashboard, notifyQueue, db),
+      },
+      {
+        name: "共享知识库语料",
+        tier: 1,
+        enabled: config.kbCorpus?.enabled !== false,
+        load: () => registerKbCorpus(api, config.kbCorpus),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
       //   name: "智能贴士",
+      //   tier: 3,
       //   enabled: config.tips?.enabled !== false,
       //   load: () => { console.error("[idx] loading spinner-tips..."); registerSpinnerTips(api, config.tips, notifyQueue); },
       // },
     ];
 
     const loaded: string[] = [];
+    const skipped: string[] = [];
     for (const mod of modules) {
-      if (mod.enabled) {
-        try {
-          mod.load();
-          loaded.push(mod.name);
-        } catch (err) {
-          api.logger.error(`[enhance] 模块「${mod.name}」加载失败: ${err instanceof Error ? err.message : String(err)}`);
-        }
+      if (!mod.enabled) continue;
+      if (mod.tier > maxTier) {
+        skipped.push(mod.name);
+        continue;
       }
+      try {
+        mod.load();
+        loaded.push(mod.name);
+      } catch (err) {
+        api.logger.error(`[enhance] 模块「${mod.name}」加载失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (skipped.length > 0) {
+      api.logger.info(
+        `[enhance] toolTier=${toolTier}：按分层策略跳过 ${skipped.length} 个模块（${skipped.join("、")}）。改 config.toolTier = "full" 可全部启用。`,
+      );
     }
 
     // 首次启动提示：配套技能需手动安装（插件不执行外部命令，只给提示）
@@ -181,6 +233,6 @@ export default definePluginEntry({
       // 静默跳过（非关键路径）
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v5.5.0 已加载（非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v5.6.0 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
   },
 });

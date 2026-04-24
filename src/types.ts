@@ -246,8 +246,23 @@ export interface ScheduledTasksConfig {
   enabled?: boolean;
 }
 
+// ── 工具分层（v5.6 新增） ──
+/**
+ * 工具分层：
+ * - minimal: 仅 L1 常驻层（~10 工具）— 仅核心功能（记忆 / 状态栏 / spawn / 模式 / 章节 / installer）
+ * - balanced: L1 + L2（~18 工具）— 默认值，加上 todo / chapter / 定时任务桥
+ * - full: 全部（~26 工具，workflow 合并后）— 完整功能
+ *
+ * 目的：降低每轮 prompt 里的工具 schema 总量，缓解 context 填满压力。
+ * 现象：所有工具 schema 每轮都会全量发给模型，工具越多，单轮固定底座越高。
+ * 修改 toolTier 后需重启 openclaw 生效。
+ */
+export type ToolTier = "minimal" | "balanced" | "full";
+
 // ── 插件总配置 ──
 export interface EnhancePluginConfig {
+  /** 工具分层预设，v5.6 新增。默认 "balanced"。 */
+  toolTier?: ToolTier;
   memory?: MemoryConfig;
   safety?: SafetyConfig;
   prompt?: PromptConfig;
