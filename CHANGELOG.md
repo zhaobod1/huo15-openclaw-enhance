@@ -2,6 +2,48 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.5.1 — 2026-04-24（session-recap + 3 个开发辅助 skill）
+
+在 v5.5.0「三层记忆协调」基础上，对齐 Claude Code 2026 Q2 最新能力谱调研结果，补齐两块高频能力：**会话回顾**与**开发辅助三件套**。
+
+### 新增（plugin 模块）
+
+- **`src/modules/session-recap.ts`** — 对齐 Claude Code 75min idle auto-summary。当检测到当前 agent/session 距上次活动 > `recapIdleMinutes`（默认 75），在 `before_prompt_build` 自动 prependContext 一段"你上次到这儿"的回顾（最近章节 + in_progress/pending todo + 最近 decision 记忆）。
+  - 工具 `enhance_session_recap` 支持手动触发（不受 idle 阈值限制）
+  - 进程内防抖表避免重复 recap：两次间隔 < `recapMinIntervalMinutes`（默认 30）直接 skip
+  - 非侵入：只读三张已有表（chapters / todos / memories），**不建新表、不改现有 schema**
+  - 可通过 `config.sessionRecap.enabled = false` 关闭
+- **`types.ts: SessionRecapConfigType`** — 新配置段 `config.sessionRecap`。
+
+### 新增（3 个开发辅助 skill，通过 huo15-skills 分发）
+
+对齐 Claude Code 原生 `/simplify` / `/security-review` / `/review` 三件套，全部自研、MIT：
+
+- **`huo15-openclaw-simplify` v1.0.0** — 代码简化三维审查（复用 / 质量 / 效率）+ 分级修复清单 + 🔴必改/🟡建议/🟢可选。严格硬红线：不跨文件重命名、不改测试断言、不引入新依赖、不跑格式化器、不碰 generated 代码。
+- **`huo15-openclaw-security-review` v1.0.0** — 六类漏洞矩阵（密钥 / 注入 / XSS / SSRF / 权限 / 危险依赖）+ CVSS-like 四档严重度（🔴Critical / 🟠High / 🟡Medium / 🟢Low）+ CWE 编号对照。硬红线：不 exec `npm audit`、不改历史、不明文打印密钥。
+- **`huo15-openclaw-code-review` v1.0.0** — PR 五维综合评审（设计 / 实现 / 测试 / 安全 / 可维护）+ 可粘贴 markdown 评论。`gh` CLI 命令走 return-cliCmd 模式（禁 child_process 铁律）。硬红线：不 `gh pr review --approve`、不 `gh pr merge`、不自动 `gh pr comment`。
+
+### 变更（enhance 插件内）
+
+- **`skill-installer.ts`**：`CLAW_HUB_SKILLS` 从 8 扩到 **11**（+simplify / security-review / code-review）。
+- **`skill-doctor.ts`**：`EXPECTED_SKILLS` 同步到 11；tool description 从"8 个"改"11 个"。
+- **`index.ts`**：新增「会话回顾」模块条目，默认启用。
+
+### 设计决策：为什么 session-recap 是 Plugin 而非 Skill
+
+参照 [MEMORY.md Plugin vs Skill Decision](../../../.claude/projects/-Users-jobzhao/memory/plugin_vs_skill_decision.md)：
+- 需要 `before_prompt_build` hook → Skill 做不了
+- 需要跨进程状态（lastRecapAt 防抖表 + SQLite 只读查询）→ Skill 做不了
+- 触发条件是"idle 时长"的系统级信号，不是用户语义意图 → Plugin 更合适
+
+反之，3 个开发辅助能力是"用户说'帮我 review'时自动加载最佳实践"的语义触发场景，天然 Skill。
+
+### 调研依据
+
+[2026-04-24 Claude Code 能力全景调研（115 条）](../../../knowledge/huo15/2026-04-24-claude-code-capability-survey-and-enhance-roadmap.md)：enhance v5.4 已覆盖 TodoWrite/mark_chapter/plan-mode/ExitPlanMode/statusline 等核心 harness；本版本补齐 session-recap；后续 v5.6/5.7 规划补 hook-observer / path-rules / transcript search。
+
+---
+
 ## 5.5.0 — 2026-04-23（三层记忆/知识库协调）
 
 本次聚焦「龙虾原生 memory / enhance 结构化记忆 / KB wiki」三者的职责切分和聚合搜索。

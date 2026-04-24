@@ -1,12 +1,12 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.4 — OpenClaw 2026.4.11+ 的非侵入式增强：五类分类记忆（Why/How-to-apply 两段式 + 并入龙虾 memory 搜索）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、技能巡检、子任务一键 CLI 派发、定时任务桥；v5.4 新增 4 个设计能力 skill（frontend-design / design-director / brand-protocol / design-critique）"
-version: 5.4.0
+description: "火一五·克劳德·龙虾增强插件 v5.5.1 — OpenClaw 2026.4.11+ 的非侵入式增强：三层记忆协调（L1 龙虾原生 / L2 enhance 结构化规则 / L3 共享 KB，corpus=kb 桥接并入 memory_search）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline（含模型/思考档/通道观测）、session-recap（75min idle 自动回顾）、技能巡检、子任务一键 CLI 派发、定时任务桥；捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）"
+version: 5.5.1
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.4
+# 火一五·克劳德·龙虾增强插件 v5.5.1
 
 ## 简介
 
@@ -58,6 +58,12 @@ openclaw restart
 - `huo15-openclaw-design-director` — 设计方向顾问（3 方向反差对比 + 强制推荐）
 - `huo15-openclaw-brand-protocol` — 品牌规范抓取（Ask/Search/Download/Verify/Codify 5 步）
 - `huo15-openclaw-design-critique` — 5 维设计评审（美学/可用性/品牌/内容/实现）
+
+**开发辅助（v5.5.1 新增，对标 Claude Code /simplify / /security-review / /review）**
+
+- `huo15-openclaw-simplify` — 代码简化三维审查（复用/质量/效率）+ 分级修复清单
+- `huo15-openclaw-security-review` — 六类漏洞矩阵（密钥/注入/XSS/SSRF/权限/依赖）+ CVSS 分级
+- `huo15-openclaw-code-review` — PR 五维综合评审（设计/实现/测试/安全/可维护）+ 可粘贴评论
 
 详见 [README.md](./README.md) 与 [CHANGELOG.md](./CHANGELOG.md)。
 

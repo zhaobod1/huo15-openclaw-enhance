@@ -24,6 +24,10 @@ export const CLAW_HUB_SKILLS = [
   "huo15-openclaw-design-director",
   "huo15-openclaw-brand-protocol",
   "huo15-openclaw-design-critique",
+  // v5.4.1 新增：开发辅助三件套（对标 Claude Code /simplify + /security-review + /review）
+  "huo15-openclaw-simplify",
+  "huo15-openclaw-security-review",
+  "huo15-openclaw-code-review",
 ];
 
 export function registerSkillInstaller(api: OpenClawPluginApi) {

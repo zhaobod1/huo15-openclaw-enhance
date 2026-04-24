@@ -32,6 +32,7 @@ import { registerSkillDoctor } from "./src/modules/skill-doctor.js";
 import { registerScheduledTasksBridge } from "./src/modules/scheduled-tasks-bridge.js";
 import { registerSkillInstaller, CLAW_HUB_SKILLS } from "./src/modules/skill-installer.js";
 import { registerKbCorpus } from "./src/modules/kb-corpus.js";
+import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -138,6 +139,11 @@ export default definePluginEntry({
         name: "共享知识库语料",
         enabled: config.kbCorpus?.enabled !== false,
         load: () => registerKbCorpus(api, config.kbCorpus),
+      },
+      {
+        name: "会话回顾",
+        enabled: config.sessionRecap?.enabled !== false,
+        load: () => registerSessionRecap(api, config.sessionRecap),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

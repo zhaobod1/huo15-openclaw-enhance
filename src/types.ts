@@ -264,4 +264,19 @@ export interface EnhancePluginConfig {
   statusline?: StatuslineConfig;
   scheduledTasks?: ScheduledTasksConfig;
   kbCorpus?: KbCorpusConfigType;
+  sessionRecap?: SessionRecapConfigType;
+}
+
+export interface SessionRecapConfigType {
+  enabled?: boolean;
+  /** idle 判定阈值（分钟），默认 75 */
+  recapIdleMinutes?: number;
+  /** 两次 recap 最小间隔（分钟），防抖，默认 30 */
+  recapMinIntervalMinutes?: number;
+  /** recap 里最多展示章节数，默认 1 */
+  maxChapters?: number;
+  /** recap 里最多展示 todo 数，默认 3 */
+  maxTodos?: number;
+  /** recap 里最多展示 decision 记忆数，默认 2 */
+  maxDecisions?: number;
 }
