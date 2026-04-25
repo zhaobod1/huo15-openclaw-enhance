@@ -15,6 +15,7 @@ import {
   getRecentMemories,
   deleteMemory,
   getMemoryStats,
+  purgeMemories,
 } from "../utils/sqlite-store.js";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { DEFAULT_AGENT_ID, type MemoryConfig, type MemoryCategory } from "../types.js";
@@ -177,26 +178,55 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
   // 和 before_agent_start hook 注入记忆上下文。本插件不重复注入，
   // 仅通过上面注册的 enhance_memory_* 工具提供结构化分类记忆的补充能力。
 
-  // ── Hook: before_compaction — 对话压缩前自动存档标记 ──
-  // openclaw 的 hook 名是 before_compaction（非 pre_compact），且为 void hook（纯副作用）
-  try {
-    api.on("before_compaction" as any, (_event: unknown, ctx: unknown) => {
-      const agentCtx = ctx as { agentId?: string } | undefined;
-      const agentId = (agentCtx?.agentId ?? DEFAULT_AGENT_ID).trim();
-
-      storeMemory(
-        db,
-        agentId,
-        "decision",
-        `[auto-compact] 对话上下文已压缩（${new Date().toISOString()}）。重要上下文可能已被截断，建议使用 enhance_memory_search 查找历史记忆。`,
-        "auto-compact",
-        3,
-      );
-      // void hook — 不返回任何值
-    });
-  } catch {
-    // before_compaction hook 不可用时静默跳过（兼容旧版 openclaw）
-  }
+  // ── Tool: enhance_memory_purge —— 按 tag/category 批量清理 ──
+  // 给 v5.7.1 hot-fix 使用：清掉之前 before_compaction hook 误存的 [auto-compact] 噪音
+  api.registerTool(
+    ((ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_memory_purge",
+      description: "按 tag 或 category 批量清理当前 Agent 的记忆（dry_run 默认 true，预览不删除）",
+      parameters: Type.Object({
+        tag: Type.Optional(Type.String({ description: "tag 子串匹配（LIKE %tag%）" })),
+        category: Type.Optional(
+          Type.Union(VALID_CATEGORIES.map((c) => Type.Literal(c)), {
+            description: "限定 category",
+          }),
+        ),
+        contentLike: Type.Optional(
+          Type.String({ description: "content LIKE %?% 子串匹配" }),
+        ),
+        dry_run: Type.Optional(Type.Boolean({ description: "默认 true，仅预览匹配条数" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const agentId = resolveAgentId(ctx);
+        const tag = params.tag as string | undefined;
+        const category = params.category as MemoryCategory | undefined;
+        const contentLike = params.contentLike as string | undefined;
+        const dryRun = params.dry_run !== false; // 默认 true 安全
+        if (!tag && !category && !contentLike) {
+          return {
+            content: [
+              { type: "text", text: "❌ 必须至少传一个过滤条件：tag / category / contentLike" },
+            ],
+          };
+        }
+        const result = purgeMemories(db, agentId, { tag, category, contentLike, dryRun });
+        const verb = dryRun ? "将匹配（未删除）" : "已删除";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${verb} ${result.matched} 条记忆（agent=${agentId}${tag ? `, tag~"${tag}"` : ""}${
+                category ? `, category=${category}` : ""
+              }${contentLike ? `, content~"${contentLike}"` : ""}）${
+                dryRun ? "\n— dry_run=true，加 dry_run=false 真实删除" : ""
+              }`,
+            },
+          ],
+        };
+      },
+    })) as any,
+    { name: "enhance_memory_purge" },
+  );
 
   api.logger.info("[enhance] 结构化记忆模块已加载（多 Agent 隔离，不干涉 openclaw 内置记忆）");
 }

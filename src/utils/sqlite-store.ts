@@ -291,6 +291,44 @@ export function deleteMemory(db: Database.Database, agentId: string, id: number)
   return result.changes > 0;
 }
 
+/**
+ * 按 tag / category / contentLike 批量清理记忆（agentId 隔离）。
+ * dry_run=true 时只 SELECT 不 DELETE，返回匹配条数（v5.7.1 hot-fix 用）。
+ */
+export function purgeMemories(
+  db: Database.Database,
+  agentId: string,
+  opts: {
+    tag?: string;
+    category?: MemoryCategory;
+    contentLike?: string;
+    dryRun?: boolean;
+  },
+): { matched: number } {
+  const conditions: string[] = ["agent_id = ?"];
+  const params: unknown[] = [agentId];
+  if (opts.tag) {
+    conditions.push("tags LIKE ?");
+    params.push(`%${opts.tag}%`);
+  }
+  if (opts.category) {
+    conditions.push("category = ?");
+    params.push(opts.category);
+  }
+  if (opts.contentLike) {
+    conditions.push("content LIKE ?");
+    params.push(`%${opts.contentLike}%`);
+  }
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const matched = (db.prepare(`SELECT COUNT(*) AS c FROM memories ${where}`).get(...params) as {
+    c: number;
+  }).c;
+  if (!opts.dryRun) {
+    db.prepare(`DELETE FROM memories ${where}`).run(...params);
+  }
+  return { matched };
+}
+
 export function getMemoryStats(db: Database.Database, agentId?: string): Record<string, number> {
   const query = agentId
     ? "SELECT category, COUNT(*) as count FROM memories WHERE agent_id = ? GROUP BY category"

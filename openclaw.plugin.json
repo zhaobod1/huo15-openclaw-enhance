@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层（toolTier）+ workflow 5→2 合并；v5.7 历史会话搜索（流式扫 jsonl）",
-  "version": "2.4.0",
+  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层（toolTier）+ workflow 5→2 合并；v5.7 历史会话搜索（流式扫 jsonl）；v5.7.1 移除 before_compaction 噪音 hook + 新增 enhance_memory_purge 清理工具",
+  "version": "2.4.1",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

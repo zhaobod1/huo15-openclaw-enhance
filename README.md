@@ -26,10 +26,18 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.0** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.1** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.1 hot-fix（2026-04-26）
+
+**修：删除把每次 auto-compact 事件作为 decision 类记忆插入的 `before_compaction` hook。**
+
+- 之前实测单 agent 24h 积累 **613 条全为噪音**（tag=auto-compact），关键词命中率 0.43-0.51 普遍过 0.5 阈值，把真正的决策记忆挤出 prompt 上下文
+- 新增工具 `enhance_memory_purge` — 按 `tag` / `category` / `contentLike` 批量清理，`dry_run` 默认 true（仅预览匹配数）
+- 历史噪音清理一行：`enhance_memory_purge tag="auto-compact" dry_run=false`，或 `sqlite3 ~/.openclaw/memory/enhance-memory.sqlite "DELETE FROM memories WHERE tags LIKE '%auto-compact%'; VACUUM;"`
 
 ### v5.7 新特性（2026-04-25）
 

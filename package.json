@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.0",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.0 — 对标 Claude Code Agent Harness + 设计套件 + 开发辅助套件，非侵入式增强 OpenClaw：v5.7 新增 transcript-search（流式扫 ~/.openclaw/agents/<agentId>/sessions/*.jsonl，照搬 Claude Desktop transcriptSearchWorker 算法，找『我上次怎么做的』，3-5 ms 全扫 30 个 session）；继承 v5.6 工具分层（toolTier=minimal/balanced/full）+ workflow 5→2 合并；三层记忆协调（L1 龙虾 / L2 enhance / L3 共享 KB + corpus=kb 桥接）、session-recap（75min idle 自动回顾）、statusline 观测、spawn_task 一键 CLI 派发、ExitPlanMode 审批闭环、skill-installer、工作流、仪表盘、模式闸门、定时任务桥接。捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）。",
+  "version": "5.7.1",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.1 — hot-fix：删除 before_compaction hook（误把每次 auto-compact 事件作为 decision 类记忆插入，单 agent 实测污染 613 条全表噪音），新增 enhance_memory_purge 工具（dry_run 默认 true，按 tag/category/contentLike 批量清理）；继承 v5.7 transcript-search、v5.6 工具分层（toolTier=minimal/balanced/full）、三层记忆协调（L1 龙虾 / L2 enhance / L3 共享 KB + corpus=kb 桥接）、session-recap、statusline、spawn_task、ExitPlanMode、skill-installer、工作流、仪表盘、模式闸门、定时任务桥接。捆绑 11 个配套 skill。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

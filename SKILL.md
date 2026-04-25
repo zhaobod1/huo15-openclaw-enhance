@@ -1,18 +1,24 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.0 — OpenClaw 2026.4.11+ 的非侵入式增强：v5.7 新增 transcript-search（流式扫 ~/.openclaw/agents/<agent>/sessions/*.jsonl，照搬 Claude Desktop transcriptSearchWorker 算法，3-5 ms 全扫 30 个 session），找『我上次怎么做的』；继承 v5.6 工具分层（toolTier=minimal/balanced/full）+ workflow 5→2 合并；三层记忆协调（L1 龙虾原生 / L2 enhance 结构化规则 / L3 共享 KB，corpus=kb 桥接并入 memory_search）、工具安全观察员、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode 审批闭环）、statusline、session-recap（75min idle 自动回顾）、技能巡检、子任务一键 CLI 派发、定时任务桥；捆绑 11 个配套 skill（4 工作流 + 4 设计 + 3 开发辅助）"
-version: 5.7.0
+description: "火一五·克劳德·龙虾增强插件 v5.7.1 — hot-fix：删除 before_compaction 噪音 hook（误把每次 auto-compact 事件作为 decision 类记忆插入，实测单 agent 污染 613 条噪音）+ 新增 enhance_memory_purge 工具（按 tag/category 批量清理，dry_run 默认 true）；继承 v5.7 transcript-search（流式扫 jsonl 照搬 Claude Desktop 算法）+ v5.6 工具分层（toolTier）+ workflow 5→2 合并；三层记忆协调（L1 龙虾原生 / L2 enhance 结构化 / L3 共享 KB）、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode）、statusline、session-recap（75min idle 自动回顾）、技能巡检、spawn_task、定时任务桥；捆绑 11 个配套 skill"
+version: 5.7.1
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.0
+# 火一五·克劳德·龙虾增强插件 v5.7.1
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.11+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.1 hot-fix（2026-04-26）
+
+- **删除 `before_compaction` 噪音 hook** — 之前每次 openclaw auto-compact 都会以 `decision` 类、`auto-compact` tag 写入一条「[auto-compact] 对话上下文已压缩…」记忆。实测单 agent 24 小时积累 613 条全是噪音，关键词命中率虚高 0.4-0.5（过 corpus pruner 默认 0.5 阈值），把真正的 user/project/feedback 决策记忆挤出 prompt 上下文
+- **新增工具 `enhance_memory_purge`** — 按 `tag` / `category` / `contentLike` 批量清理当前 agent 记忆，`dry_run` 默认 true（仅预览匹配数）。一键清理历史噪音：`enhance_memory_purge tag="auto-compact" dry_run=false`
+- **首次启动自动迁移**：升级到 5.7.1 后即不再生成新噪音；旧噪音留待用户用 purge 工具或直接 SQL 清
 
 ## v5.7 新特性（2026-04-25）
 

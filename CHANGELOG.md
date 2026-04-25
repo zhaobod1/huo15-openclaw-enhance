@@ -2,6 +2,41 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.1 — 2026-04-26（hot-fix：删除 before_compaction 噪音 hook + 新增 memory_purge 工具）
+
+**线上 bug 修复**：v5.5.x 引入的 `before_compaction` hook 会在每次 openclaw auto-compact 时把"已压缩"事件作为 `decision` 类、`auto-compact` tag 写入 SQLite — 单条信息量为 0，但因为 tag/content 含 `auto / compact / enhance_memory_search` 等通用词，相关度普遍 0.43-0.51，过 corpus pruner 默认 0.5 阈值。**用户实测库里 613 条全是这种噪音**，把真正的 user/project/feedback 决策完全挤出了 prompt 上下文。
+
+### 删除
+
+- **`src/modules/structured-memory.ts`** — 移除 `api.on("before_compaction", ...)` 那段 hook（22 行）。从此 enhance 不再因为 compact 事件本身写入任何记忆。如果用户真要审计「啥时候 compact 过」，应当走 openclaw 自己的 session 日志，不该污染 enhance 结构化记忆库。
+
+### 新增
+
+- **`src/utils/sqlite-store.ts: purgeMemories()`** — 按 `agentId + tag/category/contentLike` 批量删除 + 可选 dry-run。`tag`/`contentLike` 用 SQL `LIKE %?%` 子串匹配。
+- **工具：`enhance_memory_purge`** — 暴露给 agent。`tag` / `category` / `contentLike` 至少传一个；`dry_run` 默认 true（仅返回匹配数，不删除）。一键清理本 bug 历史残留：
+  ```
+  enhance_memory_purge tag="auto-compact" dry_run=false
+  ```
+
+### 用户侧手工清理（如果还没升级）
+
+```bash
+sqlite3 ~/.openclaw/memory/enhance-memory.sqlite \
+  "DELETE FROM memories WHERE tags LIKE '%auto-compact%'; VACUUM;"
+```
+
+### 经验沉淀
+
+- **不要在 `before_compaction` / `before_agent_reply` / `after_tool_call` 这类高频 hook 里无脑写记忆**。本来想做"留时间戳方便回查"的好心，结果变成 noise factory
+- **写记忆前过 importance + tag 黑名单**：以后 enhance 自动写入的记忆必须在 corpus supplement 检索阶段再过一遍黑名单（计划 v5.8 实施）
+- **审计能力 ≠ 决策记忆**：审计性事件（compact / mode 切换 / hook 触发统计）应该单独写到 audit log 文件或独立表，不能跟 user/project/feedback/reference/decision 这五类决策性记忆混存
+
+### 调研依据
+
+参见本仓库 [`docs/SELF_ITERATE.md`](./docs/SELF_ITERATE.md) v5.7.1 条目，本地 KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v571-memory-noise-bug-postmortem.md`。
+
+---
+
 ## 5.7.0 — 2026-04-25（transcript-search：照搬 Claude Desktop 算法）
 
 延续 v5.5.1 路线图里的 v5.7 候选「⭐ transcript search 会话搜索」。**反编译参考**了 `/Applications/Claude.app/Contents/Resources/app.asar` 里的 `transcript-search-worker/transcriptSearchWorker.js`（94 行官方实现），发现 Claude Desktop **不用 SQL FTS5**，是流式扫 JSONL + `indexOf` 的极简方案。直接照搬到 openclaw 的 session 目录，省下了 v5.5.1 路线图里"建 session_messages 新表 + FTS"的工作量。
