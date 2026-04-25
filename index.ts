@@ -33,6 +33,7 @@ import { registerScheduledTasksBridge } from "./src/modules/scheduled-tasks-brid
 import { registerSkillInstaller, CLAW_HUB_SKILLS } from "./src/modules/skill-installer.js";
 import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { registerSessionRecap } from "./src/modules/session-recap.js";
+import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -130,6 +131,12 @@ export default definePluginEntry({
         tier: 2,
         enabled: config.scheduledTasks?.enabled !== false,
         load: () => registerScheduledTasksBridge(api),
+      },
+      {
+        name: "历史会话搜索",
+        tier: 2,
+        enabled: config.transcriptSearch?.enabled !== false,
+        load: () => registerTranscriptSearch(api),
       },
       {
         name: "工作流自动化",

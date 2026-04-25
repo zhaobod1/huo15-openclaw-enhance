@@ -2,6 +2,51 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.0 — 2026-04-25（transcript-search：照搬 Claude Desktop 算法）
+
+延续 v5.5.1 路线图里的 v5.7 候选「⭐ transcript search 会话搜索」。**反编译参考**了 `/Applications/Claude.app/Contents/Resources/app.asar` 里的 `transcript-search-worker/transcriptSearchWorker.js`（94 行官方实现），发现 Claude Desktop **不用 SQL FTS5**，是流式扫 JSONL + `indexOf` 的极简方案。直接照搬到 openclaw 的 session 目录，省下了 v5.5.1 路线图里"建 session_messages 新表 + FTS"的工作量。
+
+### 新增
+
+- **`src/modules/transcript-search.ts`** — 流式扫 `~/.openclaw/agents/<agentId>/sessions/*.jsonl`：
+  - `extractText`：兼容 `string` / `[{type:"text", text}]` 数组 / 单 block 对象三种 content 形态（与 Anthropic 标准对齐）
+  - `makeSnippet`：±80 字符 radius，开头/结尾用 `…` 表示截断
+  - `listSessionFiles`：mtime 倒序，跳过 `.deleted.` / `.checkpoint.` / `.trajectory.`，可选包含 `.reset.`（默认不包含）
+  - `scanFile`：单文件 first-match 策略 — 每个 session 只贡献一条 hit（与 Claude Desktop 一致），保证 limit=10 是"找 10 个不同 session"
+  - 实测：79 个 session 中扫 30 个 → **3-5 ms** 找到 5 hits
+- **工具：`enhance_transcript_search`** — `query` 必填，可选 `agentId / limit (1-50) / includeReset / caseSensitive`
+- **`types.ts: TranscriptSearchConfig`** — 新配置段 `config.transcriptSearch.enabled`
+- **`openclaw.plugin.json`** — `configSchema.transcriptSearch` 暴露给龙虾配置 UI
+- **`index.ts`** — 模块清单加「历史会话搜索」，**tier=2**（balanced 默认就启用，minimal 下不暴露）
+
+### 设计原则
+
+- **零侵入**：完全只读 openclaw session 目录，不建表、不建索引、不写任何文件
+- **零依赖**：用 `node:fs` + `node:readline` + `node:path`，没引新包
+- **零侵犯隐私**：搜索范围严格限制在当前 ctx.agentId（除非显式传 agentId 参数）
+
+### 设计决策：为什么不用 SQL FTS5
+
+参照 Claude Desktop 反编译实现：
+
+| 维度 | SQL FTS5 | 流式扫 JSONL（照搬） |
+|------|---------|---------------------|
+| 实现复杂度 | 高（建表 + 触发器同步 + 索引重建） | 低（一个 worker，~200 行） |
+| 写入开销 | 每次消息要 INSERT FTS | 0 |
+| 跟 openclaw 同步 | 容易 drift（agent reset / 删除时索引脏） | 永远是源数据 |
+| 性能 | 查询 ms 级，但需要持续维护 | 3-5 ms（79 个 session 扫 30 个）— **同 SLA** |
+| 故障域 | 索引坏了影响搜索 | 单文件坏了不影响其它 session |
+
+结论：在 session 数量级 ≤ 100 的场景下，FTS5 没有任何价值。Claude Desktop 用了几年都没建 FTS，我们也不建。
+
+### 不破坏的兼容点
+
+- 不改任何 openclaw 文件、不动 enhance 自己的 SQLite 库
+- 工具 schema 极简（5 个参数），不增加 prompt 负担
+- minimal toolTier 用户不会看到这个工具
+
+---
+
 ## 5.6.0 — 2026-04-24（工具分层 + workflow 5→2 合并 + 描述压缩）
 
 针对实际使用中"long session 仅 15% 上下文使用率即触发 Context limit exceeded"的现象做容量优化。根因有二：(a) 用户的 `~/.openclaw/openclaw.json` 把 `compaction.reserveTokensFloor` 误设为 `200000`（>205k 总窗），每次压缩都失败 — 需要用户侧改回 `20000`；(b) 插件这边一次性暴露 29 个工具 schema，每轮 prompt 固定底座过重。本版本聚焦 (b)。

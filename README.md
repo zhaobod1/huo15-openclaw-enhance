@@ -26,20 +26,34 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.6.0** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.0** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7 新特性（2026-04-25）
+
+**📜 历史会话搜索 — 照搬 Claude Desktop 实现**
+
+> 反编译参考 `/Applications/Claude.app/Contents/Resources/app.asar` 里的 `transcriptSearchWorker.js`（94 行官方实现）— 发现 Claude Desktop 不用 SQL FTS5，纯流式扫 JSONL + indexOf。直接搬到 openclaw 的 `~/.openclaw/agents/<agent>/sessions/*.jsonl`。
+
+| 工具 | 用途 | 实测性能 |
+|------|------|---------|
+| `enhance_transcript_search` | 全文搜历史会话，找『我上次怎么做的』 | 79 个 session 中扫 30 个 → **3-5 ms** 找到 5 hits |
+
+参数：`query` 必填；可选 `agentId / limit (1-50) / includeReset / caseSensitive`。
+
+模块 `tier=2`（balanced/full 默认启用，minimal 下不暴露）。
 
 ### v5.6 新特性（2026-04-24）
 
 **针对 long session 提早爆 context 的容量优化**
 
-| 配置项 | 暴露工具数 | 适用场景 |
+| 配置项 | 暴露工具数 (v5.7) | 适用场景 |
 |--------|-----------|---------|
 | `toolTier: "minimal"` | 10 | 上下文极紧 / 最小核心模式（记忆、状态栏、章节、模式、spawn） |
-| `toolTier: "balanced"` *(默认)* | 18 | 多数日常会话 — 加 todo / 章节标记 / 定时任务桥 |
-| `toolTier: "full"` | 26 | 需要工作流自动化 / safety / session-recap / skill-doctor 时 |
+| `toolTier: "balanced"` *(默认)* | 19 | 多数日常会话 — 加 todo / 章节标记 / 定时任务桥 / **transcript-search** |
+| `toolTier: "full"` | 27 | 需要工作流自动化 / safety / session-recap / skill-doctor 时 |
 
 - **工具分层（toolTier）** — 按需暴露 schema，每轮 prompt 减负
 - **Workflow 5→2 工具合并** — 用 `action=` 派发器收敛同类操作
@@ -89,6 +103,7 @@ openclaw restart
 | **章节标记** | L2 | session 级「mark_chapter」 | `enhance_mark_chapter` `enhance_chapter_list` |
 | **任务追踪** | L2 | Claude Code TodoWrite 语义；SQLite 持久化；会警告多 in_progress | `enhance_todo_write` `enhance_todo_update` `enhance_todo_list` |
 | **定时任务桥** | L2 | 返回 `openclaw cron add` CLI 命令，尊重龙虾原生 cron-cli | `enhance_loop_register` `enhance_loop_list` `enhance_loop_disable` |
+| **历史会话搜索（v5.7）** | L2 | 流式扫 `~/.openclaw/agents/<agent>/sessions/*.jsonl`，照搬 Claude Desktop 算法（无索引、无新表） | `enhance_transcript_search` |
 | **工作流自动化（v5.6 合并）** | L3 | 触发词 → 行为指令注入；CRUD 收敛到单工具（action 派发） | `enhance_workflow` `enhance_task` |
 | **工具安全观察** | L3 | 错误分类（429/5xx/网络）+ 指数退避建议；不拦截，不重试 | `enhance_safety_log` `enhance_retry_status` `enhance_safety_rules` |
 | **任务规划** | L3 | 把多步任务拆解保存为 plan 工件 | `enhance_task_plan` |
@@ -183,8 +198,8 @@ openclaw restart
 | 取值 | 工具数 | 暴露的工具模块 | 适用场景 |
 |------|--------|----------------|----------|
 | `"minimal"` | 10 | 记忆 + 状态栏 + spawn + 模式 + 章节安装器 + integrator | 上下文紧 / 长会话 / 极简核心 |
-| `"balanced"` *(默认)* | 18 | minimal + todo + 章节标记 + 定时任务桥 | 多数日常使用 |
-| `"full"` | 26 | 全部，含 workflow / safety / task-planner / session-recap / skill-doctor | 工作流自动化 / 完整 harness |
+| `"balanced"` *(默认)* | 19 | minimal + todo + 章节标记 + 定时任务桥 + **transcript-search (v5.7)** | 多数日常使用 |
+| `"full"` | 27 | 全部，含 workflow / safety / task-planner / session-recap / skill-doctor | 工作流自动化 / 完整 harness |
 
 修改 `toolTier` 后需要 `openclaw restart` 才能生效。
 

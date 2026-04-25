@@ -246,6 +246,16 @@ export interface ScheduledTasksConfig {
   enabled?: boolean;
 }
 
+// ── Transcript search (v5.7) ──
+/**
+ * 历史会话全文搜索（流式扫 ~/.openclaw/agents/<agentId>/sessions/*.jsonl）。
+ * 算法照搬 Claude Desktop 的 transcriptSearchWorker：行级 JSON.parse + indexOf + ±80 字符 snippet。
+ * 完全只读 openclaw session 目录，不建表、不建索引。
+ */
+export interface TranscriptSearchConfig {
+  enabled?: boolean;
+}
+
 // ── 工具分层（v5.6 新增） ──
 /**
  * 工具分层：
@@ -280,6 +290,7 @@ export interface EnhancePluginConfig {
   scheduledTasks?: ScheduledTasksConfig;
   kbCorpus?: KbCorpusConfigType;
   sessionRecap?: SessionRecapConfigType;
+  transcriptSearch?: TranscriptSearchConfig;
 }
 
 export interface SessionRecapConfigType {
