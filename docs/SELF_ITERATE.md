@@ -48,6 +48,7 @@ ls /tmp/claude-app-extract/.vite/build/
 | # | 候选 | 来源 | 形态 | 估算 | 状态 |
 |---|------|------|------|------|------|
 | ✅ | **transcript-search** | Claude Desktop transcriptSearchWorker | Plugin 模块 | ~200 行 | 已落地 v5.7.0 |
+| ✅ | **before_compaction 噪音 hook 删除 + memory_purge 工具** | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix | ~80 行净改动 | 已落地 **v5.7.1**（2026-04-26 计划外 hot-fix）|
 | 1 | **auto-memory-curator cron 触发** | enhance 已有 skill，缺定时器 | Plugin 模块 | ~40 行 + cron 命令 | 待选 |
 | 2 | **path-rules**（plan/explore 写入静态参数白名单）| Claude Code Settings | Plugin 模块 | ~150 行 | 待选 |
 | 3 | **WeCom push notification 桥接** | Claude Code Notifications | Plugin 模块 + WeCom webhook | ~100 行（需 @huo15/wecom 协作）| 待选 |
@@ -163,9 +164,21 @@ clawhub search huo15-openclaw-<name>
 | 2026-04-24 | v5.5.0 | 三层记忆/KB 协调（corpus="kb"） | Claude Code memory 文档 | Plugin 模块 |
 | 2026-04-24 | v5.5.1 | 开发辅助三件套 + session-recap | Claude Code /simplify /security-review /review + idle recap | 3 Skills + 1 Plugin 模块 |
 | 2026-04-24 | v5.6.0 | 工具分层 + workflow 5→2 + 描述压缩 | Long session context pressure 实测 | Plugin 容量优化 |
-| 2026-04-25 | **v5.7.0** | **transcript-search**（流式扫 jsonl） | **反编译 Claude Desktop transcriptSearchWorker** | **Plugin 模块** |
+| 2026-04-25 | v5.7.0 | transcript-search（流式扫 jsonl） | 反编译 Claude Desktop transcriptSearchWorker | Plugin 模块 |
+| 2026-04-26 | **v5.7.1** | **hot-fix：删 before_compaction 噪音 hook + 加 memory_purge** | **用户实测 enhance 库 613 条全为 auto-compact 噪音** | **Plugin hot-fix** |
 
-下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 提前触发）。
+下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 或线上 bug 反馈提前触发）。
+
+### 关于 hot-fix 的额外约束（v5.7.1 启示）
+
+线上 bug（用户截图反馈）属于 **calendar 外触发** — 不等 cron 任务，立刻按照下面 fast-track 流程处理：
+
+1. 用 Grep 直接定位 bug 代码（不要 Plan）
+2. 修复 + typecheck（不要 release plan）
+3. SQL 直接清用户残留数据（如本次 613 条），先 `cp ... .bak.before-vX.Y.Z-hotfix` 备份
+4. 走标准发布流程（commit → tag → push 双 remote → npm + clawhub）
+5. 把 bug 加进 SELF_ITERATE.md 候选池标 ✅，写一篇 KB post-mortem
+6. 不影响下次 cron 调度（cron 还是 2026-04-28 跑）
 
 ---
 
