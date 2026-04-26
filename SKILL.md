@@ -1,7 +1,7 @@
 ---
 name: huo15-openclaw-enhance
 description: "火一五·克劳德·龙虾增强插件 v5.7.5 — skill-recommender：按用户需求自动挑已装 skill（扫 ~/.openclaw/skills + workspace-*/skills 多路径，含 WeCom 多 agent 隔离的子工作区）+ 推荐 ClawHub 上未装的 huo15-* 候选（含安装命令）+ 没有合适 skill 时给自建规划（frontmatter 模板 + 触发词建议 + 内容大纲 + 红线 #3 ClawHub 优先发布提醒）。算法源自反编译 Claude Desktop loadSkills（"Available skills: ${list}." prompt 注入），CJK 双字滑窗 + alias exact 命中强 boost。继承 v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
-version: 5.7.5
+version: 5.7.6
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

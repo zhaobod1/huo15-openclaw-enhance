@@ -2,7 +2,7 @@
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
   "description": "非侵入式增强 OpenClaw：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除噪音 hook；v5.7.2 hardening；v5.7.3 诊断 openclaw.json 陷阱；v5.7.4 扫 bare pluginApi；v5.7.5 skill-recommender（按需求挑已装 / 推荐未装 / 给自建规划，算法源自反编译 Claude Desktop loadSkills）",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
