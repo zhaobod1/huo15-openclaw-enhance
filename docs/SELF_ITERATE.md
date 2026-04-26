@@ -49,6 +49,7 @@ ls /tmp/claude-app-extract/.vite/build/
 |---|------|------|------|------|------|
 | ✅ | **transcript-search** | Claude Desktop transcriptSearchWorker | Plugin 模块 | ~200 行 | 已落地 v5.7.0 |
 | ✅ | **before_compaction 噪音 hook 删除 + memory_purge 工具** | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix | ~80 行净改动 | 已落地 **v5.7.1**（2026-04-26 计划外 hot-fix）|
+| ✅ | **hardening 套件**（Map LRU + safety_log TTL + corpus tag 黑名单）| Explore agent 全代码审计 + 防御未来类似 v5.7.1 的 noise factory | Plugin patch | ~120 行 | 已落地 **v5.7.2**（2026-04-26 同日延伸防御）|
 | 1 | **auto-memory-curator cron 触发** | enhance 已有 skill，缺定时器 | Plugin 模块 | ~40 行 + cron 命令 | 待选 |
 | 2 | **path-rules**（plan/explore 写入静态参数白名单）| Claude Code Settings | Plugin 模块 | ~150 行 | 待选 |
 | 3 | **WeCom push notification 桥接** | Claude Code Notifications | Plugin 模块 + WeCom webhook | ~100 行（需 @huo15/wecom 协作）| 待选 |
@@ -165,7 +166,8 @@ clawhub search huo15-openclaw-<name>
 | 2026-04-24 | v5.5.1 | 开发辅助三件套 + session-recap | Claude Code /simplify /security-review /review + idle recap | 3 Skills + 1 Plugin 模块 |
 | 2026-04-24 | v5.6.0 | 工具分层 + workflow 5→2 + 描述压缩 | Long session context pressure 实测 | Plugin 容量优化 |
 | 2026-04-25 | v5.7.0 | transcript-search（流式扫 jsonl） | 反编译 Claude Desktop transcriptSearchWorker | Plugin 模块 |
-| 2026-04-26 | **v5.7.1** | **hot-fix：删 before_compaction 噪音 hook + 加 memory_purge** | **用户实测 enhance 库 613 条全为 auto-compact 噪音** | **Plugin hot-fix** |
+| 2026-04-26 | v5.7.1 | hot-fix：删 before_compaction 噪音 hook + 加 memory_purge | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix |
+| 2026-04-26 | **v5.7.2** | **hardening：Map LRU + safety_log TTL + corpus tag 黑名单 + peerDep 4.22** | **Explore agent 全代码审计后挑 4 项 ROI 最高的批量修** | **Plugin patch** |
 
 下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 或线上 bug 反馈提前触发）。
 
