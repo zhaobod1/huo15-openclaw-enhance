@@ -214,7 +214,26 @@ export function getDb(openclawDir: string): Database.Database {
   // v4 → v5: memories 加 why / how_to_apply
   migrateV4ToV5(_db);
 
+  // v5.7.2: 启动期清理 safety_log / notifications 90 天前的旧记录，避免无限增长
+  // 异步 fire-and-forget，不阻塞插件加载
+  try {
+    _db.exec(`
+      DELETE FROM safety_log WHERE created_at < datetime('now', '-90 days');
+      DELETE FROM notifications WHERE created_at < datetime('now', '-90 days');
+    `);
+  } catch {
+    // 静默失败 — 旧表不存在或权限错误不影响插件正常工作
+  }
+
   return _db;
+}
+
+/** v5.7.2: 暴露给运维 / enhance_memory_purge 调用的清理函数 */
+export function purgeOldSafetyLogs(db: Database.Database, retentionDays: number = 90): { deleted: number } {
+  const result = db
+    .prepare(`DELETE FROM safety_log WHERE created_at < datetime('now', ?)`)
+    .run(`-${retentionDays} days`);
+  return { deleted: result.changes };
 }
 
 // ── 记忆操作（全部按 agentId 隔离）──

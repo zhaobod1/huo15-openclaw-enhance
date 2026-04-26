@@ -22,6 +22,23 @@ import { DEFAULT_AGENT_ID, type MemoryConfig, type MemoryCategory } from "../typ
 
 const VALID_CATEGORIES: MemoryCategory[] = ["user", "project", "feedback", "reference", "decision"];
 
+// v5.7.2: 跟 memory-integrator 的 TAG_BLACKLIST 保持一致 — store 时拒绝写入这些 tag
+const RESERVED_TAGS = new Set([
+  "auto-compact",
+  "auto-checkpoint",
+  "audit",
+  "internal",
+]);
+
+function hasReservedTag(tags: string): string | null {
+  if (!tags) return null;
+  for (const t of tags.split(",")) {
+    const trimmed = t.trim().toLowerCase();
+    if (RESERVED_TAGS.has(trimmed)) return trimmed;
+  }
+  return null;
+}
+
 function resolveAgentId(ctx: OpenClawPluginToolContext): string {
   return (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
 }
@@ -54,12 +71,24 @@ export function registerStructuredMemory(api: OpenClawPluginApi, config?: Memory
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const agentId = resolveAgentId(ctx);
+        const tagsRaw = (params.tags as string) ?? "";
+        const reserved = hasReservedTag(tagsRaw);
+        if (reserved) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ 拒绝存储：tag "${reserved}" 是 enhance 保留的系统类标签（${[...RESERVED_TAGS].join(" / ")}），不允许在用户决策记忆中使用。请改用业务相关 tag。`,
+              },
+            ],
+          };
+        }
         const entry = storeMemory(
           db,
           agentId,
           params.category as MemoryCategory,
           params.content as string,
-          (params.tags as string) ?? "",
+          tagsRaw,
           (params.importance as number) ?? 5,
           "",
           {

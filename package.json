@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.1",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.1 — hot-fix：删除 before_compaction hook（误把每次 auto-compact 事件作为 decision 类记忆插入，单 agent 实测污染 613 条全表噪音），新增 enhance_memory_purge 工具（dry_run 默认 true，按 tag/category/contentLike 批量清理）；继承 v5.7 transcript-search、v5.6 工具分层（toolTier=minimal/balanced/full）、三层记忆协调（L1 龙虾 / L2 enhance / L3 共享 KB + corpus=kb 桥接）、session-recap、statusline、spawn_task、ExitPlanMode、skill-installer、工作流、仪表盘、模式闸门、定时任务桥接。捆绑 11 个配套 skill。",
+  "version": "5.7.2",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.2 — hardening：(1) mode-gate / session-recap 进程内 Map 加 LRU 上限（防长时间运行内存泄漏），(2) safety_log / notifications 启动期清理 90 天前旧记录（防 SQLite 无限增长），(3) memory corpus 加 tag 黑名单（auto-compact / audit / internal 永不召回），(4) enhance_memory_store 拒收保留 tag（防御未来 noise hook），(5) bump openclaw peerDep ^2026.4.22；继承 v5.7.1 移除 before_compaction 噪音 hook + memory_purge 工具；v5.7 transcript-search；v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
@@ -29,7 +29,7 @@
   "author": "jobzhao15",
   "license": "MIT",
   "peerDependencies": {
-    "openclaw": ">=2026.4.11"
+    "openclaw": "^2026.4.22"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",

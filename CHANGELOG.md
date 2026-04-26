@@ -2,6 +2,42 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.2 — 2026-04-26（hardening：审计 + 4 类潜在 bug 修复 + 升 peerDep ^2026.4.22）
+
+继 v5.7.1 hot-fix 之后，对全代码库做了一次彻底审计（详见 `docs/SELF_ITERATE.md` 第 4 节 fast-track 流程 + KB post-mortem），用 Explore agent 列了 15 项候选，挑了 4 项 ROI 最高的批量修复。**这是 v5.7.1 的延伸防御层 — 修的都是"现在还没炸但长期运行会炸"的渐进式退化 bug**。
+
+### 修复
+
+- **`src/modules/mode-gate.ts`** — `modeState` / `plannedActions` 两个进程内 Map 之前 keyed by `agentId::sessionId` 永不清理（plan→normal 只清 plannedActions 不清 modeState）。WeCom 多 agent 场景 24h 内可能累积数千 session 状态。
+  - 加 `MAX_STATE_ENTRIES = 200` / `MAX_PLANNED_ENTRIES = 200`
+  - 新增 `evictOldest()` helper：利用 Map 的 insertion-order 迭代特性，FIFO 淘汰最早 entry
+  - 写入前 `if (map.has(key)) map.delete(key)` 让活跃 session 刷新到队尾，避免被误淘汰
+- **`src/modules/session-recap.ts`** — 同上，`lastRecapAt` Map 加 `MAX_RECAP_ENTRIES = 500` cap
+- **`src/utils/sqlite-store.ts`** — `getDb()` 启动时跑一次 `DELETE FROM safety_log/notifications WHERE created_at < datetime('now', '-90 days')`，try-catch 包裹失败静默；新增 `purgeOldSafetyLogs(db, retentionDays = 90)` helper 给运维 / 工具调用
+- **`src/modules/memory-integrator.ts`** — 新增 `TAG_BLACKLIST = {auto-compact, auto-checkpoint, audit, internal}`，`scoreRelevance()` 入口若 `isBlacklisted(memory.tags)` 直接 `return 0`。**这是 v5.7.1 修复的最终兜底**：即便未来某个 hook 又写入 noise，pruner 也不会召回到 prompt
+- **`src/modules/structured-memory.ts`** — `enhance_memory_store` 工具检查 tags，若含保留词立即返回错误 `❌ 拒绝存储：tag "..." 是 enhance 保留的系统类标签` 而非写入。防止用户/agent 显式滥用保留 tag
+- **`package.json`** — `peerDependencies.openclaw` 从 `>=2026.4.11` 升到 `^2026.4.22`；本地 node_modules openclaw 同步到 4.22；typecheck 通过；hook 名验证全部存在无破坏性变更
+
+### 设计决策
+
+- **为什么 cap 选 200 / 200 / 500**：mode-gate 状态比较"决策性"（200 个活跃 session 对单 agent 已经很多），session-recap 防抖表偏审计性（500 个 session 的 lastRecapAt 也只有 ~12KB 内存）。值故意保守以防误淘活跃数据
+- **为什么 TTL 选 90 天而非 30**：safety_log 是审计性数据，跨季度排查事故场景需要保留至少 1 季度。90 天是"季度复盘 + 一周缓冲"
+- **为什么 corpus 黑名单做兜底而非依赖 v5.7.1 的删 hook**：删 hook 只解决了已知一个 noise 来源，未来若有新模块又自动写入 audit/internal tag，黑名单这一层能保证 prompt 不被污染。**深度防御**
+
+### 不破坏
+
+- 所有现有 SQLite schema 没改（v5 schema 兼容）；老用户升级无需迁移
+- 所有工具名 / API 没改；老脚本兼容
+- LRU cap 只影响进程内 Map，重启后恢复，**不影响任何持久化数据**
+- 升 peerDep 后老用户仍跑 4.11 的话仍可用（`as any` 屏蔽类型差异，hook 名都还在）
+
+### 调研依据
+
+- 用 Explore agent 跑了一遍审计（详见 KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v572-hardening-postmortem.md`），输出 15 项候选 bug 清单 + ROI top 3
+- 升级 openclaw 4.22 后看 `dist/plugin-sdk/*.d.ts` 确认 hook 名和 ctx 字段无破坏性变更
+
+---
+
 ## 5.7.1 — 2026-04-26（hot-fix：删除 before_compaction 噪音 hook + 新增 memory_purge 工具）
 
 **线上 bug 修复**：v5.5.x 引入的 `before_compaction` hook 会在每次 openclaw auto-compact 时把"已压缩"事件作为 `decision` 类、`auto-compact` tag 写入 SQLite — 单条信息量为 0，但因为 tag/content 含 `auto / compact / enhance_memory_search` 等通用词，相关度普遍 0.43-0.51，过 corpus pruner 默认 0.5 阈值。**用户实测库里 613 条全是这种噪音**，把真正的 user/project/feedback 决策完全挤出了 prompt 上下文。

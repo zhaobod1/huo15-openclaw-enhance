@@ -26,10 +26,19 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.1** 是 [OpenClaw 2026.4.11+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.2** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.2 hardening（2026-04-26 同日，继 v5.7.1）
+
+对全代码库做了一次审计，修 4 类潜在 bug + 升 peerDep `^2026.4.22`：
+
+- **进程内 Map LRU 上限** — `mode-gate` / `session-recap` 之前跨 session 永不清，多 agent 场景会泄漏；现在加 200/200/500 三档 cap + FIFO 淘汰
+- **safety_log / notifications 启动期 TTL** — `getDb()` 自动清 90 天前旧记录
+- **memory corpus tag 黑名单** — `auto-compact / auto-checkpoint / audit / internal` 永不召回，防御未来 noise hook
+- **enhance_memory_store 拒收保留 tag** — 用户/agent 显式滥用保留词时立即报错
 
 ### v5.7.1 hot-fix（2026-04-26）
 

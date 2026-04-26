@@ -1,18 +1,31 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.1 — hot-fix：删除 before_compaction 噪音 hook（误把每次 auto-compact 事件作为 decision 类记忆插入，实测单 agent 污染 613 条噪音）+ 新增 enhance_memory_purge 工具（按 tag/category 批量清理，dry_run 默认 true）；继承 v5.7 transcript-search（流式扫 jsonl 照搬 Claude Desktop 算法）+ v5.6 工具分层（toolTier）+ workflow 5→2 合并；三层记忆协调（L1 龙虾原生 / L2 enhance 结构化 / L3 共享 KB）、TodoWrite / mark_chapter / plan-explore 模式闸门（含 ExitPlanMode）、statusline、session-recap（75min idle 自动回顾）、技能巡检、spawn_task、定时任务桥；捆绑 11 个配套 skill"
-version: 5.7.1
+description: "火一五·克劳德·龙虾增强插件 v5.7.2 — hardening：(1) mode-gate / session-recap 进程内 Map 加 LRU 上限防长时间运行内存泄漏，(2) safety_log / notifications 启动期清理 90 天前旧记录，(3) memory corpus 加 tag 黑名单（auto-compact / audit / internal 永不召回），(4) enhance_memory_store 拒收保留 tag 防御未来 noise hook，(5) bump openclaw peerDep ^2026.4.22；继承 v5.7.1 移除 before_compaction 噪音 hook + memory_purge 工具；v5.7 transcript-search 流式扫 jsonl；v5.6 工具分层（toolTier）；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
+version: 5.7.2
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.1
+# 火一五·克劳德·龙虾增强插件 v5.7.2
 
 ## 简介
 
-`@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.11+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
+`@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.2 hardening（2026-04-26 同日）
+
+继 v5.7.1 hot-fix 之后，对全代码库做了一次审计，修复 4 类潜在 bug：
+
+- **进程内 Map LRU 上限** — `mode-gate` 的 `modeState` / `plannedActions` 和 `session-recap` 的 `lastRecapAt` 之前 keyed by `agentId::sessionId` **跨 session 永不清**。WeCom 多用户场景下 100+ session 会无限累积。现在加 200/200/500 三档 LRU cap，活跃 session 重新插入刷新顺序，老 session 自动淘汰
+- **safety_log / notifications 启动期 TTL** — `getDb()` 时跑一次 `DELETE WHERE created_at < datetime('now', '-90 days')`，避免长期运行库无限增长。新增 `purgeOldSafetyLogs(retentionDays)` helper 给运维调
+- **memory corpus tag 黑名单** — `auto-compact` / `auto-checkpoint` / `audit` / `internal` 这 4 个保留 tag 在 `scoreRelevance()` 入口直接 return 0，永不召回到 prompt（防御未来 hook 万一又写入 noise）
+- **enhance_memory_store 拒收保留 tag** — 用户/agent 显式调 store 时若 tags 含保留词，立即返回错误而非写入
+
+### bump openclaw peerDep `^2026.4.22`
+
+之前 peerDep `>=2026.4.11`，但 npm global 已升到 2026.4.22（差 11 个 patch）。本地 SDK 类型定义同步升级；hook 名验证全部仍存在（`before_prompt_build` / `before_tool_call` / `after_tool_call` / `before_compaction` / `before_agent_reply`），无破坏性变更。
 
 ## v5.7.1 hot-fix（2026-04-26）
 

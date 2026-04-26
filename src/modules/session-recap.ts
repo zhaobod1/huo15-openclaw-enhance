@@ -154,7 +154,9 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
   const maxDecisions = config?.maxDecisions ?? 2;
 
   // 进程内防抖表：agentId + sessionId → lastRecapAt(ms)
+  // v5.7.2: 加 LRU cap 防止跨 session 永不清造成内存泄漏
   const lastRecapAt = new Map<string, number>();
+  const MAX_RECAP_ENTRIES = 500;
 
   // ── Hook: before_prompt_build ── 自动 recap
   api.on("before_prompt_build" as any, (_event: unknown, ctx: unknown): unknown => {
@@ -181,6 +183,13 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
     );
     if (!text) return {};
 
+    // LRU eviction: 重新插入 key 让活跃 session 不被淘汰
+    if (lastRecapAt.has(key)) lastRecapAt.delete(key);
+    while (lastRecapAt.size >= MAX_RECAP_ENTRIES) {
+      const oldest = lastRecapAt.keys().next().value;
+      if (oldest === undefined) break;
+      lastRecapAt.delete(oldest);
+    }
     lastRecapAt.set(key, now);
     return { prependContext: text };
   });

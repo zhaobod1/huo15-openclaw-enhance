@@ -49,6 +49,21 @@ interface PlannedAction {
 const plannedActions = new Map<string, PlannedAction[]>();
 const MAX_PLANNED = 50;
 
+/**
+ * v5.7.2: LRU caps to prevent unbounded growth across long-lived processes (agents 跨 session 永不清).
+ * Map iteration is insertion order, so deleting `keys().next()` evicts the oldest entry.
+ */
+const MAX_STATE_ENTRIES = 200;
+const MAX_PLANNED_ENTRIES = 200;
+
+function evictOldest<K, V>(map: Map<K, V>, capacity: number) {
+  while (map.size >= capacity) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 function stateKey(agentId: string, sessionId: string): string {
   return `${agentId}::${sessionId}`;
 }
@@ -58,14 +73,21 @@ function getMode(agentId: string, sessionId: string, fallback: AgentMode): Agent
 }
 
 function setMode(agentId: string, sessionId: string, mode: AgentMode) {
-  modeState.set(stateKey(agentId, sessionId), mode);
+  const key = stateKey(agentId, sessionId);
+  // Refresh insertion order on update so active sessions don't get evicted.
+  if (modeState.has(key)) modeState.delete(key);
+  evictOldest(modeState, MAX_STATE_ENTRIES);
+  modeState.set(key, mode);
   // Leaving plan mode clears the captured plan (a fresh plan mode starts clean).
-  if (mode !== "plan") plannedActions.delete(stateKey(agentId, sessionId));
+  if (mode !== "plan") plannedActions.delete(key);
 }
 
 function recordPlannedAction(agentId: string, sessionId: string, toolName: string, params: Record<string, unknown>) {
   const key = stateKey(agentId, sessionId);
   const arr = plannedActions.get(key) ?? [];
+  if (!plannedActions.has(key)) {
+    evictOldest(plannedActions, MAX_PLANNED_ENTRIES);
+  }
   const summary = (() => {
     const keyPairs = Object.entries(params).slice(0, 3);
     if (keyPairs.length === 0) return "";

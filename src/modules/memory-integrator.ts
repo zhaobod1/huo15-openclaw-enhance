@@ -79,6 +79,26 @@ export interface MemoryIntegratorOptions {
   debug?: boolean;
 }
 
+// ── v5.7.2 防御性 tag 黑名单 ──
+// 任何带有这些 tag 的记忆条目在 corpus.search 中直接 score=0（永不召回）。
+// 防止类似 v5.7.1 修复的 [auto-compact] noise 再次混进 prompt。
+// 即便未来 enhance 又冒出"高频 hook 自动写入"，这层兜底也能消除其影响。
+const TAG_BLACKLIST = new Set([
+  "auto-compact",
+  "auto-checkpoint",
+  "audit",
+  "internal",
+]);
+
+function isBlacklisted(tags: string): boolean {
+  if (!tags) return false;
+  // tags 是逗号分隔字符串
+  return tags
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .some((t) => TAG_BLACKLIST.has(t));
+}
+
 // ── 相关性评分（沿用原 context-pruner 权重模型） ──
 const STOP_WORDS = new Set([
   "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
@@ -94,6 +114,9 @@ const STOP_WORDS = new Set([
 ]);
 
 function scoreRelevance(memory: MemoryEntry, query: string): number {
+  // v5.7.2: tag 黑名单兜底——audit / auto-compact 等系统类记忆永不召回
+  if (isBlacklisted(memory.tags)) return 0;
+
   const queryLower = query.toLowerCase();
   const contentLower = memory.content.toLowerCase();
   const tagsLower = memory.tags.toLowerCase();
