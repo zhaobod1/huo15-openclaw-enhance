@@ -256,6 +256,20 @@ export interface TranscriptSearchConfig {
   enabled?: boolean;
 }
 
+// ── Skill Recommender (v5.7.5) ──
+/**
+ * 按用户需求挑已装 skill / 推荐未装 huo15-* / 给自建规划。
+ * 算法灵感：反编译 Claude Desktop loadSkills + "Available skills: ${list}." prompt 注入；
+ * enhance 改成按需工具避免每轮 prompt 占 schema。
+ */
+export interface SkillRecommenderConfig {
+  enabled?: boolean;
+  /** 已装 skill 命中相关度的阈值（< 阈值视为"没找到"，触发未装/自建建议），默认 0.25 */
+  installedThreshold?: number;
+  /** 启动期扫描结果缓存 TTL（秒），默认 60 */
+  cacheTtlSec?: number;
+}
+
 // ── Config doctor (v5.7.3) ──
 /**
  * 启动期诊断 ~/.openclaw/openclaw.json 的常见配置陷阱：
@@ -312,6 +326,8 @@ export interface EnhancePluginConfig {
   transcriptSearch?: TranscriptSearchConfig;
   /** v5.7.3: 启动期诊断 openclaw.json 陷阱配置 */
   configDoctor?: ConfigDoctorConfig;
+  /** v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划 */
+  skillRecommender?: SkillRecommenderConfig;
 }
 
 export interface SessionRecapConfigType {

@@ -1,18 +1,55 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.4 — config-doctor 扩展：扫所有已装插件的 bare pluginApi（违反 '>=X.Y.Z' 规则会被 openclaw 拒绝，报错"插件要求 X.Y.Z"）；扫 ~/.openclaw/extensions/ + node_modules/@huo15/* 等路径，给 python3 inline 修复命令。继承 v5.7.3 openclaw.json 陷阱诊断（reserveTokensFloor / model maxTokens）+ v5.7.2 hardening（Map LRU + safety_log TTL + corpus tag 黑名单）+ v5.7.1 移除 before_compaction 噪音 hook + memory_purge + v5.7 transcript-search + v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
-version: 5.7.4
+description: "火一五·克劳德·龙虾增强插件 v5.7.5 — skill-recommender：按用户需求自动挑已装 skill（扫 ~/.openclaw/skills + workspace-*/skills 多路径，含 WeCom 多 agent 隔离的子工作区）+ 推荐 ClawHub 上未装的 huo15-* 候选（含安装命令）+ 没有合适 skill 时给自建规划（frontmatter 模板 + 触发词建议 + 内容大纲 + 红线 #3 ClawHub 优先发布提醒）。算法源自反编译 Claude Desktop loadSkills（"Available skills: ${list}." prompt 注入），CJK 双字滑窗 + alias exact 命中强 boost。继承 v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
+version: 5.7.5
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.4
+# 火一五·克劳德·龙虾增强插件 v5.7.5
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.5 skill-recommender（2026-04-26 同日）
+
+**用户反馈**："新增自动根据用户的需求自动挑选已经安装的技能，如果没有技能就把规划方案给出来。看看 Claude 是如何做的"
+
+**调研**：反编译 `/Applications/Claude.app/Contents/Resources/app.asar`，发现 Claude 的 skill auto-discovery **本质是把所有 skill 的 name+description 拼成 `"Available skills: ${list}."` 注入到 specialist agent 的 system prompt** —— 没有复杂算法，让 LLM 自己挑。
+
+**enhance 改造**：照搬 name+description 匹配思路，但**改成按需工具**避免每轮 prompt 占 schema。新增模块 `skill-recommender` + 工具 `enhance_skill_recommend(query, limit?, includeUninstalled?, includePlanning?)`：
+
+1. **启动期扫多路径**（WeCom / DingTalk 多 agent 场景关键）：
+   - `~/.openclaw/skills/`
+   - `~/.openclaw/workspace/skills/`
+   - `~/.openclaw/workspace-*/skills/` ← **WeCom 多 agent 动态 workspace**（一开始漏扫，烟测才发现）
+   - `~/.openclaw/agents/*/skills/`
+   - `<cwd>/.claude/skills/`、`~/.claude/skills/`
+   - 实测用户机器扫到 56 个 skill 跨 27 个路径
+2. **解析 SKILL.md frontmatter**（轻量正则，无 yaml 依赖）：name + description + aliases
+3. **CJK 双字滑窗 + alias 强 boost** 评分：
+   - JS `\w` 不含中日韩，直接 split `\s\W` 会让"代码简化"分成空数组
+   - 解决：CJK 连续段当整体 phrase + 长 ≥4 时滑动 2-grams
+   - alias 的 token 严格命中（如 "规划" === alias "规划"）→ 保底 0.7 分
+4. **三段式输出**：
+   - 🎯 已装 skill（命中 ≥ threshold=0.25）+ 召唤建议
+   - 📦 ClawHub 上未装的 huo15-* 候选（含 `openclaw skills install` 命令）
+   - 🛠️ 都没合适 → **自建 skill 规划**：建议 slug + frontmatter 模板 + 触发关键词 + 内容大纲 + **红线 #3 提醒**（必须先 ClawHub publish 再让 enhance 引用 slug，插件不内嵌 skill 内容）
+
+**实测**：
+
+| 查询 | 命中 | 分数 |
+|---|---|---|
+| "帮我 review 这个 PR" | huo15-openclaw-code-review | 0.60 |
+| "设计一个 Web UI 原型" | huo15-openclaw-frontend-design | 0.94 |
+| "代码简化" | huo15-openclaw-simplify | 1.00 |
+| "做安全审查" | huo15-openclaw-security-review | 0.96 |
+| "规划这个任务" | huo15-openclaw-plan-mode | 0.70（alias exact 命中保底）|
+
+模块 `tier=2`（balanced 默认启用，minimal 不暴露 — 用户多半已知道用什么 skill）。
 
 ## v5.7.4 config-doctor 扩展：扫已装插件 bare pluginApi（2026-04-26 同日）
 

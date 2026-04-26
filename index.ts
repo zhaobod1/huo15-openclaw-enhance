@@ -35,6 +35,7 @@ import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { registerConfigDoctor } from "./src/modules/config-doctor.js";
+import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -202,6 +203,14 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.configDoctor?.enabled !== false,
         load: () => registerConfigDoctor(api, config.configDoctor, notifyQueue),
+      },
+      {
+        // v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划
+        // tier=2 balanced 默认启用；minimal 不暴露（用户多半已经知道用啥 skill）
+        name: "技能推荐",
+        tier: 2,
+        enabled: config.skillRecommender?.enabled !== false,
+        load: () => registerSkillRecommender(api, config.skillRecommender),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

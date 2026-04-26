@@ -26,10 +26,32 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.4** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.5** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.5 skill-recommender：按需求挑 skill / 推荐未装 / 给自建规划（2026-04-26 同日）
+
+调研：反编译 Claude Desktop 发现 skill auto-discovery 本质是 `"Available skills: ${list}."` 注入到 system prompt。enhance 改成**按需工具**避免每轮 prompt 占 schema：
+
+工具 `enhance_skill_recommend(query, ...)` 三段式输出：
+
+| 段 | 内容 | 触发条件 |
+|---|---|---|
+| 🎯 已装 skill | 按相关度排序 + 召唤建议 | 命中 ≥ threshold |
+| 📦 ClawHub 未装候选 | 11 个 huo15-* + `openclaw skills install <slug>` | 默认包含 |
+| 🛠️ 自建规划 | slug + frontmatter 模板 + 触发词 + 内容大纲 + 红线 #3 提醒 | 已装命中 < threshold |
+
+实测精度：
+
+| 查询 | 命中 | 分数 |
+|---|---|---|
+| "帮我 review 这个 PR" | huo15-openclaw-code-review | 0.60 |
+| "代码简化" | huo15-openclaw-simplify | 1.00 |
+| "做安全审查" | huo15-openclaw-security-review | 0.96 |
+
+关键修复：扫 `~/.openclaw/workspace-*/skills/`（WeCom 多 agent 隔离的子工作区）— 用户机器实测扫到 **56 个 skill 跨 27 个路径**。
 
 ### v5.7.4 config-doctor 扩展：扫已装插件 bare pluginApi（2026-04-26 同日）
 

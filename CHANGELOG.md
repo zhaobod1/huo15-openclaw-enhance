@@ -2,6 +2,78 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.5 — 2026-04-26（skill-recommender：按需求自动挑 skill / 推荐未装 / 给自建规划）
+
+**用户反馈**："新增自动根据用户的需求自动挑选已经安装的技能，如果没有技能就把规划方案给出来。看看 Claude 是如何做的"
+
+### 调研：反编译 Claude Desktop 看它怎么做的
+
+反编译 `/Applications/Claude.app/Contents/Resources/app.asar`（参见 SELF_ITERATE.md 第 1 节"反编译 Claude Desktop"）发现：
+
+- `index.js` 里有 `loadSkills()` / `loadSkillContent()` 函数
+- system prompt 拼接处有这一句：`"Available skills: ${i.join(", ")}."`
+- 也就是说 Claude Desktop 的 skill auto-discovery 算法**本质是 "name+description 列表注入 system prompt 让 LLM 自己挑"**——没有复杂算法
+
+但 enhance 不能照搬"每轮 prompt 注入"——会增加每轮 token 量、抹掉 v5.6 toolTier 减负的努力。所以改成**按需工具**。
+
+### 新增
+
+- **`src/modules/skill-recommender.ts`** — 三段式推荐器：
+  1. **启动期扫多路径**（关键修复，WeCom 多 agent 场景）：
+     - `~/.openclaw/skills/`
+     - `~/.openclaw/workspace/skills/`
+     - `~/.openclaw/workspace-*/skills/` ← **WeCom / DingTalk 多 agent 动态 workspace**
+     - `~/.openclaw/agents/*/skills/`
+     - `<cwd>/.claude/skills/`、`~/.claude/skills/`
+     - 用户实测扫到 56 个 skill 跨 27 个路径（一开始只扫 4 个固定路径漏扫，烟测才发现）
+  2. **解析 SKILL.md frontmatter**：轻量正则提取 `name` / `description` / `aliases`，**无 yaml 依赖**（zero-deps 红线）
+  3. **CJK-aware 评分**：
+     - 问题：JS `\w` 不含中日韩，直接 `split(/\s\W/)` 会让"代码简化"变成空数组
+     - 解决：连续 CJK 段当整体 phrase + 长 ≥4 时滑动 2-grams（`"代码简化" → ["代码简化","代码","码简","简化"]`）
+     - alias exact 命中保底 0.7（典型场景：query "规划XX" → alias "规划" 严格命中）
+  4. **未装候选 + 自建规划**（fallback 阶梯）：
+     - 已装命中 < threshold=0.25 → 列 ClawHub 上未装的 huo15-* + `openclaw skills install <slug>` 命令
+     - 都没合适 → **自建 skill 规划**：建议 slug（含中文 placeholder） + frontmatter 模板 + 触发关键词 + 内容大纲 6 章 + **红线 #3 提醒**（先 ClawHub publish 再让 enhance 引用，插件绝不内嵌 skill 内容）
+
+- **工具：`enhance_skill_recommend`** — `query` 必填，可选 `limit`(1-20) / `includeUninstalled`(默认 true) / `includePlanning`(默认 true)
+- **`types.ts: SkillRecommenderConfig`** — `enabled` / `installedThreshold` / `cacheTtlSec`
+- **`openclaw.plugin.json`** configSchema 加 `skillRecommender` 段
+- **`KNOWN_HUO15_SKILLS` 内置 metadata 表** — 11 个 huo15-openclaw-* skill 的 description + aliases 硬编码兜底（避免运行时查 ClawHub 网络依赖）
+
+### 实测精度
+
+| 查询 | 命中 skill | 分数 |
+|---|---|---|
+| "帮我 review 这个 PR" | huo15-openclaw-code-review | 0.60（首位）|
+| "设计一个 Web UI 原型" | huo15-openclaw-frontend-design | 0.94（首位）|
+| "代码简化" | huo15-openclaw-simplify | 1.00（满分）|
+| "做安全审查" | huo15-openclaw-security-review | 0.96（首位）|
+| "规划这个任务" | huo15-openclaw-plan-mode | 0.70（alias exact 命中保底）|
+| "深度探索这块代码" | huo15-openclaw-explore-mode | 0.30（首位）|
+
+### 设计决策
+
+- **为什么按需工具而非每轮 prompt 注入**：v5.6 toolTier 已经在为 prompt cache 减负，注入 56 个 skill 描述会让每轮多 ~3-5k token；改成工具用户/agent 主动调更省
+- **为什么 tier=2 而非 tier=1**：用户多半已知道自己装了什么 skill，按需查询不是常驻刚需；balanced/full 默认可见即可
+- **为什么内置 KNOWN_HUO15_SKILLS metadata 表**：未装的 skill 没有 SKILL.md 可解析，但要给推荐就需要 description；硬编码 11 个 huo15-* 的 metadata 跟 `CLAW_HUB_SKILLS` 列表保持一致，零网络依赖
+- **为什么 CJK 双字滑窗而非真正分词**：上 jieba 是 ~5MB 词典 + 1MB 引擎；双字滑窗虽然有少量误命中（"代码简化" 也产 "码简"），但召回率显著提升且 zero-deps
+- **为什么自建规划在结尾强调红线 #3**：用户硬约束"skill 必须先发 ClawHub 再让 enhance 引用，插件不内嵌"，每次给规划都要复刻这个工作流
+
+### 不破坏
+
+- 完全只读 skill 目录，不修改任何 SKILL.md
+- 没改 SQLite schema、没引入新 npm 依赖
+- 启动期 fire-and-forget 扫描，缓存 60 秒（可调）；扫不到不影响插件正常工作
+- 工具 schema 极简（4 参数）；按需调用不占常驻 prompt
+
+### 调研依据
+
+- 反编译 Claude Desktop loadSkills + "Available skills: ${list}." 注入模式
+- 用户实测 query 烟测：6 类查询全部首位命中
+- 详见 KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v575-skill-recommender-postmortem.md`
+
+---
+
 ## 5.7.4 — 2026-04-26（config-doctor 扩展：扫已装插件 bare pluginApi）
 
 用户反馈：**"提示插件要求 2026.2.24，但是我的 openclaw 已经是 2026.4.22"**。第一反应是 enhance 自己的问题，但实际是另外两个插件违反了 openclaw plugin compat 规则。
