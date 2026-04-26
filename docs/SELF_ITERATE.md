@@ -54,6 +54,7 @@ ls /tmp/claude-app-extract/.vite/build/
 | ✅ | **config-doctor 扩展扫已装插件 bare pluginApi** | 用户报"提示插件要求 2026.2.24"实际是其它插件违反 ">=X.Y.Z" 规则；扫所有装的 plugin package.json 检测 bare → 给 fix 命令 | Plugin 模块扩展 | ~80 行净增 | 已落地 **v5.7.4**（2026-04-26 同日，calendar 外第 4 次 hot-fix）|
 | ✅ | **skill-recommender 按需求自动挑 skill** | 用户提"看看 Claude 是怎么做的"——反编译发现 Claude Desktop 就是 name+description 注入 system prompt 让 LLM 挑；enhance 改成按需工具：扫多路径（含 WeCom workspace-*）+ CJK 双字滑窗 + alias 强 boost + 三段式（已装 / 未装 / 自建规划） | Plugin 模块 + 工具 | ~270 行 | 已落地 **v5.7.5/6**（2026-04-26 同日第 5 次）|
 | ✅ | **session-lifecycle 接 openclaw 4.22 五个 hook** | 用户要求"结合 claude 官网+本地源码看 enhance 还能补啥"——跑完整 SOP 发现 openclaw 4.22 暴露 29 hook，enhance 只用 4 个；接 session_start/end/before_reset/subagent_*/ended 闭环生命周期 | Plugin 模块 | ~250 行 | 已落地 **v5.7.7**（2026-04-26 同日第 6 次）|
+| ✅ | **全面适配 openclaw 4.24（typed hooks + manifest 元数据）** | 用户要求"enhance 帮我全面适配 openclaw 最新版"——发现 api.on 是完全 typed 但 enhance 14 处 as any 屏蔽；全部清理 + 升 peerDep + 加 enabledByDefault/uiHints/activation | Plugin 全面适配 | ~600 行 diff | 已落地 **v5.7.8/9**（2026-04-26 同日第 7 次）|
 | 1 | **tool-result-optimizer**（接 tool_result_persist 大结果截断+摘要）| openclaw 4.22 hook | Plugin 模块 | ~100 行 | 待选（长 session 减负）|
 | 2 | **artifacts 多版本管理（轻量）** | Claude Desktop artifacts 表 | Plugin 模块 + SQLite | ~250 行 | 待选（v5.8）|
 | 3 | **frames 父子 session 关系** | Claude Desktop frames 表 | Plugin 模块 + SQLite | ~150 行 | 待选（v5.8）|
@@ -178,7 +179,8 @@ clawhub search huo15-openclaw-<name>
 | 2026-04-26 | v5.7.3 | config-doctor：启动期诊断 openclaw.json 陷阱（reserveTokensFloor 缺失 / model maxTokens 过大）| 用户实测装 v5.7.2 仍爆 'Context limit exceeded'，根因在 openclaw 配置而非插件 | Plugin 模块 |
 | 2026-04-26 | v5.7.4 | config-doctor 扫已装插件 bare pluginApi | 用户报"插件要求 2026.2.24"实际是其它插件违反 ranged spec 规则 | Plugin 模块扩展 |
 | 2026-04-26 | v5.7.5/6 | skill-recommender：按需求挑已装 skill / 推荐未装 / 给自建规划 | 用户提"看看 Claude 是怎么做的"——反编译 Claude Desktop loadSkills 启发 | Plugin 模块 |
-| 2026-04-26 | **v5.7.7** | **session-lifecycle：接入 openclaw 4.22 的 session_start/end/before_reset/subagent_*/ended 五个 hook 闭环生命周期** | **跑完整 SOP 发现 openclaw 4.22 暴露 29 hook，enhance 只用 4 个；ROI top 5 候选 #1** | **Plugin 模块** |
+| 2026-04-26 | v5.7.7 | session-lifecycle：接入 openclaw 4.22 的 session_start/end/before_reset/subagent_*/ended 五个 hook 闭环生命周期 | 跑完整 SOP 发现 openclaw 4.22 暴露 29 hook，enhance 只用 4 个；ROI top 5 候选 #1 | Plugin 模块 |
+| 2026-04-26 | **v5.7.8/9** | **全面适配 openclaw 2026.4.24（typed hooks + manifest 元数据）** | **用户要求"全面适配最新版"——发现 api.on 完全 typed 但 enhance 14 处 as any 屏蔽** | **Plugin 全面适配** |
 
 下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 或线上 bug 反馈提前触发）。
 
