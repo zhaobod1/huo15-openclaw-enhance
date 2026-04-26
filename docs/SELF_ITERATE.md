@@ -50,6 +50,7 @@ ls /tmp/claude-app-extract/.vite/build/
 | ✅ | **transcript-search** | Claude Desktop transcriptSearchWorker | Plugin 模块 | ~200 行 | 已落地 v5.7.0 |
 | ✅ | **before_compaction 噪音 hook 删除 + memory_purge 工具** | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix | ~80 行净改动 | 已落地 **v5.7.1**（2026-04-26 计划外 hot-fix）|
 | ✅ | **hardening 套件**（Map LRU + safety_log TTL + corpus tag 黑名单）| Explore agent 全代码审计 + 防御未来类似 v5.7.1 的 noise factory | Plugin patch | ~120 行 | 已落地 **v5.7.2**（2026-04-26 同日延伸防御）|
+| ✅ | **config-doctor 启动期诊断** | 用户装 v5.7.2 仍爆 'Context limit exceeded'，根因是 openclaw 配置陷阱（缺 reserveTokensFloor / model maxTokens 过大），enhance 主动诊断把信号给到用户 | Plugin 模块 + 工具 | ~200 行 | 已落地 **v5.7.3**（2026-04-26 同日，calendar 外第 3 次 hot-fix）|
 | 1 | **auto-memory-curator cron 触发** | enhance 已有 skill，缺定时器 | Plugin 模块 | ~40 行 + cron 命令 | 待选 |
 | 2 | **path-rules**（plan/explore 写入静态参数白名单）| Claude Code Settings | Plugin 模块 | ~150 行 | 待选 |
 | 3 | **WeCom push notification 桥接** | Claude Code Notifications | Plugin 模块 + WeCom webhook | ~100 行（需 @huo15/wecom 协作）| 待选 |
@@ -167,9 +168,19 @@ clawhub search huo15-openclaw-<name>
 | 2026-04-24 | v5.6.0 | 工具分层 + workflow 5→2 + 描述压缩 | Long session context pressure 实测 | Plugin 容量优化 |
 | 2026-04-25 | v5.7.0 | transcript-search（流式扫 jsonl） | 反编译 Claude Desktop transcriptSearchWorker | Plugin 模块 |
 | 2026-04-26 | v5.7.1 | hot-fix：删 before_compaction 噪音 hook + 加 memory_purge | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix |
-| 2026-04-26 | **v5.7.2** | **hardening：Map LRU + safety_log TTL + corpus tag 黑名单 + peerDep 4.22** | **Explore agent 全代码审计后挑 4 项 ROI 最高的批量修** | **Plugin patch** |
+| 2026-04-26 | v5.7.2 | hardening：Map LRU + safety_log TTL + corpus tag 黑名单 + peerDep 4.22 | Explore agent 全代码审计后挑 4 项 ROI 最高的批量修 | Plugin patch |
+| 2026-04-26 | **v5.7.3** | **config-doctor：启动期诊断 openclaw.json 陷阱（reserveTokensFloor 缺失 / model maxTokens 过大）** | **用户实测装 v5.7.2 仍爆 'Context limit exceeded'，根因在 openclaw 配置而非插件** | **Plugin 模块** |
 
 下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 或线上 bug 反馈提前触发）。
+
+### 关于"诊断 vs 修复"的边界
+
+v5.7.3 严格遵守"**诊断不修复**" — 即便 enhance 完全有能力 read/write `~/.openclaw/openclaw.json`，也只 `readFileSync` 不 `writeFileSync`。理由：
+1. 红线 #1：不侵入式修改 openclaw（配置文件属于 openclaw 控制范围）
+2. 用户对配置的掌控感 — 自己复制粘贴一行 python3 命令，至少看到改了啥
+3. 排除责任 — 万一 fix 命令出错（比如把字段值打错），损失只是用户那一刻的副作用，不会让 enhance 担责"我装了插件配置就被改坏了"
+
+**未来若加任何"建议改 openclaw 配置"的功能，硬约束：return-cliCmd 模式（输出 fix 命令字符串），永不 fs.writeFileSync 用户配置**。
 
 ### 关于 hot-fix 的额外约束（v5.7.1 启示）
 
