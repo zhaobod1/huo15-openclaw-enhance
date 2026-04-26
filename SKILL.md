@@ -1,18 +1,37 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.2 — hardening：(1) mode-gate / session-recap 进程内 Map 加 LRU 上限防长时间运行内存泄漏，(2) safety_log / notifications 启动期清理 90 天前旧记录，(3) memory corpus 加 tag 黑名单（auto-compact / audit / internal 永不召回），(4) enhance_memory_store 拒收保留 tag 防御未来 noise hook，(5) bump openclaw peerDep ^2026.4.22；继承 v5.7.1 移除 before_compaction 噪音 hook + memory_purge 工具；v5.7 transcript-search 流式扫 jsonl；v5.6 工具分层（toolTier）；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
-version: 5.7.2
+description: "火一五·克劳德·龙虾增强插件 v5.7.3 — config-doctor：启动期主动诊断 ~/.openclaw/openclaw.json 陷阱配置 → 缺失 agents.defaults.compaction.reserveTokensFloor / model maxTokens 占 contextWindow 一半以上等导致 'Context limit exceeded' 的根因；只读不改配置，给可粘贴 fix 命令；新增 enhance_config_doctor 工具按需重检。继承 v5.7.2 hardening（Map LRU + safety_log TTL + corpus tag 黑名单）+ v5.7.1 移除 before_compaction 噪音 hook + memory_purge + v5.7 transcript-search + v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
+version: 5.7.3
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.2
+# 火一五·克劳德·龙虾增强插件 v5.7.3
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.3 config-doctor（2026-04-26 同日）
+
+直击用户高频反馈"装上插件还是 'Context limit exceeded'" — 根因往往不在插件，而在 `~/.openclaw/openclaw.json` 的两处陷阱：
+
+1. **缺失 `agents.defaults.compaction.reserveTokensFloor`** — openclaw 4.22 把这个字段嵌套到 `agents.defaults` 里（4.11 时是顶层 `compaction`），老用户配置文件没自动迁移，用 4.22 默认值（很小）→ 长 session 必爆
+2. **某个 model 的 `maxTokens` 占 `contextWindow` 一半以上** — 例如 MiniMax-M2.7 默认 maxTokens=131072 / contextWindow=204800，每轮预留输出就吃掉 64% budget。openclaw 把 maxTokens 当作"必须留给输出的 reserve"，剩 73k 给 input/tools/memory，**任意几轮就爆**
+
+### 新增
+
+- **`src/modules/config-doctor.ts`** — 启动期 sync 读 openclaw.json 检查上述两类陷阱，发现后用 `notifyQueue.emit("config-doctor", ...)` 推到仪表盘 + log warn + 给可粘贴的 fix 命令（python3 一行原地改 JSON，**不调 child_process**）
+- **工具：`enhance_config_doctor`** — 无参数，agent / 用户随时调一下，重新跑诊断（修完了配置可以再跑确认 ✅）
+- **配置项：`config.configDoctor`** — `enabled` / `minReserveTokensFloor`（默认 5000）/ `maxReserveTokensFloor`（默认 100000）/ `maxModelMaxTokens`（默认 32000）
+
+### 红线遵守
+
+- **完全只读** ~/.openclaw/openclaw.json（红线 #1：不侵入式修改 openclaw）
+- **不调 child_process**（红线 #4） — 修复命令是 python3 inline，由用户/cron-cli 执行
+- **不暴露在 minimal 之外**？反过来：**tier=1 minimal 也启用** — 这是关键的"防爆 context"诊断，每个用户都该有
 
 ## v5.7.2 hardening（2026-04-26 同日）
 

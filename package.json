@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.2",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.2 — hardening：(1) mode-gate / session-recap 进程内 Map 加 LRU 上限（防长时间运行内存泄漏），(2) safety_log / notifications 启动期清理 90 天前旧记录（防 SQLite 无限增长），(3) memory corpus 加 tag 黑名单（auto-compact / audit / internal 永不召回），(4) enhance_memory_store 拒收保留 tag（防御未来 noise hook），(5) bump openclaw peerDep ^2026.4.22；继承 v5.7.1 移除 before_compaction 噪音 hook + memory_purge 工具；v5.7 transcript-search；v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode。",
+  "version": "5.7.3",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.3 — config-doctor：启动期诊断 ~/.openclaw/openclaw.json 陷阱配置（缺失 agents.defaults.compaction.reserveTokensFloor / model maxTokens 占 contextWindow 一半以上）解决 'Context limit exceeded' 高频反馈，只读不改配置，给可粘贴 fix 命令 + enhance_config_doctor 工具按需诊断。继承 v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层 + 三层记忆协调。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

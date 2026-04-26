@@ -2,6 +2,44 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.3 — 2026-04-26（config-doctor：'Context limit exceeded' 高频反馈兜底）
+
+用户实测：装了 v5.7.2 之后仍然报 `Context limit exceeded. ... agents.defaults.compaction.reserveTokensFloor to 20000 or higher`。**这不是 enhance 插件的问题**，而是 openclaw 自身配置：(1) 缺失 `agents.defaults.compaction.reserveTokensFloor`（4.22 把这个字段从顶层 `compaction.*` 移到 `agents.defaults.compaction.*`，老用户配置文件没自动迁移）；(2) MiniMax-M2.7 maxTokens=131072 / contextWindow=204800，每轮预留输出吃 64% budget，剩 73k 给 input + tools + memory + history，几轮必爆。但用户**装的就是 enhance**，看到爆 context 第一反应是"插件的锅"，所以 enhance 必须主动诊断 + 报警把根因信号给到用户。
+
+### 新增
+
+- **`src/modules/config-doctor.ts`** — 启动期同步读 `~/.openclaw/openclaw.json` 检查：
+  1. `agents.defaults.compaction.reserveTokensFloor` 缺失 / < `minReserveTokensFloor`(default 5000) / > `maxReserveTokensFloor`(default 100000)
+  2. 任意 `models.providers[*].models[*].maxTokens ≥ contextWindow/2 && > maxModelMaxTokens`(default 32000)
+  - 检查到问题：`api.logger.warn` + `notifyQueue.emit(level=warn, source="config-doctor", ...)` 推仪表盘
+  - **完全只读，绝不修改用户配置**（红线 #1）
+  - 修复命令是 python3 inline JSON 改写一行（红线 #4：不调 child_process / 红线 #5：不在插件里 exec 安装命令）
+- **工具：`enhance_config_doctor`** — 无参数，按需重跑诊断（修完用来确认 ✅）
+- **`types.ts: ConfigDoctorConfig`** + **`openclaw.plugin.json: configSchema.configDoctor`**
+- **`NotificationSource`** 加 `"config-doctor"` 通道
+
+### 设计决策
+
+- **不让插件自动改配置** — 违反零侵入红线 + 用户失去掌控感。给可粘贴命令是平衡点
+- **tier=1 minimal 也启用** — 这是关键防爆 context 诊断；minimal 用户更需要这个警告
+- **fix 命令选 python3 而非 jq** — python3 macOS/Linux 默认装；jq 不一定有
+- **maxModelMaxTokens 默认 32000** — 常用模型 maxTokens 8192-16384，32000 是合理保守阈值
+
+### 不破坏
+
+- 没改任何 openclaw 文件 / enhance SQLite schema 没动
+- 新工具 schema 极简（0 参数），单轮 prompt 增加约 30 token
+- 老配置无 `configDoctor` 段时默认 enabled=true（用户被动获益）
+
+### 调研依据
+
+- 用户反馈截图：`Context limit exceeded. ... reserveTokensFloor to 20000 or higher`
+- 用户当前 `~/.openclaw/openclaw.json` 实测：缺 `agents.defaults.compaction` 段；MiniMax-M2.7 配置 wizard 默认 maxTokens=131072 太大
+- 已修用户配置（备份在 `~/.openclaw/openclaw.json.bak.before-compaction-fix-*`）
+- 详见 KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v573-config-doctor-postmortem.md`
+
+---
+
 ## 5.7.2 — 2026-04-26（hardening：审计 + 4 类潜在 bug 修复 + 升 peerDep ^2026.4.22）
 
 继 v5.7.1 hot-fix 之后，对全代码库做了一次彻底审计（详见 `docs/SELF_ITERATE.md` 第 4 节 fast-track 流程 + KB post-mortem），用 Explore agent 列了 15 项候选，挑了 4 项 ROI 最高的批量修复。**这是 v5.7.1 的延伸防御层 — 修的都是"现在还没炸但长期运行会炸"的渐进式退化 bug**。

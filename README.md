@@ -26,10 +26,23 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.2** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.3** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.3 config-doctor（2026-04-26 同日，继 v5.7.2）
+
+直击高频反馈"装上插件还是 'Context limit exceeded'"。**这不是 enhance 的锅**，是 openclaw 自身配置陷阱：
+
+- **缺失 `agents.defaults.compaction.reserveTokensFloor`** — openclaw 4.22 把字段从顶层 `compaction.*` 挪到嵌套路径，老用户配置文件没自动迁移 → 用 4.22 默认值（很小） → 长 session 必爆
+- **某 model maxTokens ≥ contextWindow/2** — 例如 MiniMax-M2.7 默认 maxTokens=131072 / contextWindow=204800，每轮预留输出吃 64% budget → 剩 73k 给 input/tools/memory/history 几轮必爆
+
+**新增 `enhance_config_doctor` 模块（tier=1，minimal 也启用）**：
+
+- 启动期 sync 读 `~/.openclaw/openclaw.json` 检查上述两类陷阱
+- 发现问题：log warn + 推仪表盘通知 + 给可粘贴 fix 命令（python3 inline JSON 改写，**不调 child_process**，**不擅自改用户配置**）
+- 工具 `enhance_config_doctor` 按需重检（修完用来确认 ✅）
 
 ### v5.7.2 hardening（2026-04-26 同日，继 v5.7.1）
 

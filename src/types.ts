@@ -136,7 +136,7 @@ export interface TipsConfig {
 
 // ── 通知中心 ──
 export type NotificationLevel = "info" | "warn" | "success";
-export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow";
+export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow" | "config-doctor";
 
 export interface Notification {
   id: number;
@@ -256,6 +256,25 @@ export interface TranscriptSearchConfig {
   enabled?: boolean;
 }
 
+// ── Config doctor (v5.7.3) ──
+/**
+ * 启动期诊断 ~/.openclaw/openclaw.json 的常见配置陷阱：
+ * - 缺失 agents.defaults.compaction.reserveTokensFloor（4.22 默认值过小）
+ * - reserveTokensFloor < 5000 或 > 100000
+ * - 各 model maxTokens ≥ contextWindow/2 且 > 32000（吃掉太多输出预算导致 'Context limit exceeded'）
+ * 工具 enhance_config_doctor 让用户主动诊断并拿到 fix 命令。
+ * 完全只读 openclaw.json，不修改用户配置。
+ */
+export interface ConfigDoctorConfig {
+  enabled?: boolean;
+  /** 推荐的 reserveTokensFloor 下限阈值，默认 5000 */
+  minReserveTokensFloor?: number;
+  /** 推荐的 reserveTokensFloor 上限阈值，默认 100000 */
+  maxReserveTokensFloor?: number;
+  /** 推荐 model maxTokens 上限，默认 32000；超过会警告 */
+  maxModelMaxTokens?: number;
+}
+
 // ── 工具分层（v5.6 新增） ──
 /**
  * 工具分层：
@@ -291,6 +310,8 @@ export interface EnhancePluginConfig {
   kbCorpus?: KbCorpusConfigType;
   sessionRecap?: SessionRecapConfigType;
   transcriptSearch?: TranscriptSearchConfig;
+  /** v5.7.3: 启动期诊断 openclaw.json 陷阱配置 */
+  configDoctor?: ConfigDoctorConfig;
 }
 
 export interface SessionRecapConfigType {

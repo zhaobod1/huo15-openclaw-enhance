@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement，不复制龙虾原生记忆）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层（toolTier）；v5.7 历史会话搜索；v5.7.1 移除 before_compaction 噪音 hook；v5.7.2 hardening（Map LRU 上限 / safety_log TTL / corpus tag 黑名单 / 升 openclaw 4.22 peerDep）",
-  "version": "2.4.2",
+  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除 before_compaction 噪音 hook；v5.7.2 hardening；v5.7.3 启动期诊断 openclaw.json 配置陷阱（缺失 reserveTokensFloor / model maxTokens 过大）",
+  "version": "2.4.3",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -106,6 +106,16 @@
         "description": "v5.7 历史会话全文搜索：流式扫 ~/.openclaw/agents/<agent>/sessions/*.jsonl，照搬 Claude Desktop transcriptSearchWorker 算法（无索引、无新表、纯只读）",
         "properties": {
           "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "configDoctor": {
+        "type": "object",
+        "description": "v5.7.3 启动期诊断 openclaw.json 陷阱配置（缺失 reserveTokensFloor / model maxTokens 过大），只读不修改用户配置",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "minReserveTokensFloor": { "type": "number", "default": 5000 },
+          "maxReserveTokensFloor": { "type": "number", "default": 100000 },
+          "maxModelMaxTokens": { "type": "number", "default": 32000 }
         }
       },
       "dashboard": {

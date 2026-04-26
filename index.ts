@@ -34,6 +34,7 @@ import { registerSkillInstaller, CLAW_HUB_SKILLS } from "./src/modules/skill-ins
 import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
+import { registerConfigDoctor } from "./src/modules/config-doctor.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -193,6 +194,14 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.kbCorpus?.enabled !== false,
         load: () => registerKbCorpus(api, config.kbCorpus),
+      },
+      {
+        // v5.7.3: 启动期诊断 ~/.openclaw/openclaw.json 陷阱配置
+        // tier=1，minimal 也启用——这是关键的 'Context limit exceeded' 兜底诊断
+        name: "配置诊断",
+        tier: 1,
+        enabled: config.configDoctor?.enabled !== false,
+        load: () => registerConfigDoctor(api, config.configDoctor, notifyQueue),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
