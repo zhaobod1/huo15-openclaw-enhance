@@ -58,16 +58,12 @@ function pickObservability(ctx: unknown): ObservabilityContext {
   };
 }
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
-function pickSessionId(ctx: unknown): string {
-  return (
-    ((ctx as any)?.sessionKey as string | undefined) ??
-    ((ctx as any)?.sessionId as string | undefined) ??
-    ""
-  ).trim();
+function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefined): string {
+  return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
 function summariseTodos(todos: TodoEntry[]): { done: number; total: number; active?: string } {

@@ -27,19 +27,13 @@ import {
 import type { SessionLifecycleConfig, NotificationQueue } from "../types.js";
 import { DEFAULT_AGENT_ID } from "../types.js";
 
-interface CtxLike {
-  agentId?: string;
-  sessionKey?: string;
-  sessionId?: string;
+/** v5.7.8: typed ctx — openclaw 4.24 暴露的具体 context 类型 */
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as CtxLike | undefined)?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
-}
-
-function pickSessionId(ctx: unknown): string {
-  const c = ctx as CtxLike | undefined;
-  return ((c?.sessionKey ?? c?.sessionId ?? "") + "").trim();
+function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefined): string {
+  return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
 /** 限流去重表：避免短时间多次触发同一 hook 重复写记录（v5.7.1 反思：高频 hook 写持久化是 noise factory） */
@@ -80,7 +74,7 @@ export function registerSessionLifecycle(
   // 不做：不自动 inject prompt 上下文（那是 session-recap 模块的职责，避免重复）
   if (enableSessionStart) {
     try {
-      api.on("session_start" as any, (_event: unknown, ctx: unknown): unknown => {
+      api.on("session_start", (_event, ctx) => {
         try {
           const agentId = pickAgentId(ctx);
           const sessionId = pickSessionId(ctx);
@@ -115,7 +109,7 @@ export function registerSessionLifecycle(
   // 用途：会话结束自动 mark_chapter + flush 未结束的 in_progress todo 到 decision memory
   if (enableSessionEnd) {
     try {
-      api.on("session_end" as any, (_event: unknown, ctx: unknown): unknown => {
+      api.on("session_end", (_event, ctx) => {
         try {
           const agentId = pickAgentId(ctx);
           const sessionId = pickSessionId(ctx);
@@ -162,7 +156,7 @@ export function registerSessionLifecycle(
   // 区别于 session_end：reset 是用户主动清理，更激进，需要更彻底的"最后挽救"
   if (enableBeforeReset) {
     try {
-      api.on("before_reset" as any, (_event: unknown, ctx: unknown): unknown => {
+      api.on("before_reset", (_event, ctx) => {
         try {
           const agentId = pickAgentId(ctx);
           const sessionId = pickSessionId(ctx);
@@ -224,50 +218,50 @@ export function registerSessionLifecycle(
   // 跟 enhance_spawn_task 闭环（之前只返回 CLI 命令，现在也跟踪生命周期）
   if (enableSubagent) {
     try {
-      api.on("subagent_spawned" as any, (event: unknown, ctx: unknown): unknown => {
+      // subagent_spawned: ctx 字段是 { runId?, childSessionKey?, requesterSessionKey? }（无 agentId）
+      // event 字段是 { agentId, label?, mode, requester?, threadRequested, runId, childSessionKey }
+      api.on("subagent_spawned", (event, ctx) => {
         try {
-          const agentId = pickAgentId(ctx);
-          const sessionId = pickSessionId(ctx);
-          const ev = event as { childAgentId?: string; agentName?: string; reason?: string } | undefined;
-          const child = ev?.childAgentId ?? ev?.agentName ?? "?";
-          const dedupKey = `spawn:${agentId}:${sessionId}:${child}`;
-          if (!shouldFire(dedupKey)) return undefined;
+          // ctx 没 agentId — 用 requesterSessionKey 当 sessionId 关联到父 session 的 chapter
+          const sessionId = (ctx?.requesterSessionKey ?? "") + "";
+          const child = event?.label ?? event?.agentId ?? "?";
+          const childAgentId = event?.agentId ?? DEFAULT_AGENT_ID;
+          const dedupKey = `spawn:${childAgentId}:${sessionId}:${child}`;
+          if (!shouldFire(dedupKey)) return;
           addChapter(
             db,
-            agentId,
+            DEFAULT_AGENT_ID, // 父章节挂在 main agent（subagent ctx 拿不到 requester agentId）
             sessionId,
             `🤖 派生子 agent: ${child}`,
-            ev?.reason ? `原因：${ev.reason.slice(0, 200)}` : "subagent_spawned hook 自动标记",
+            event?.requester
+              ? `mode=${event.mode}, channel=${event.requester.channel ?? "?"}, runId=${event.runId?.slice(0, 12) ?? "?"}`
+              : "subagent_spawned hook 自动标记",
           );
           if (debug) api.logger.info(`[enhance-lifecycle] subagent_spawned → ${child}`);
         } catch (err) {
           api.logger.error(`[enhance-lifecycle] subagent_spawned handler 错误: ${(err as Error).message}`);
         }
-        return undefined;
       });
 
-      api.on("subagent_ended" as any, (event: unknown, ctx: unknown): unknown => {
+      api.on("subagent_ended", (event, ctx) => {
         try {
-          const agentId = pickAgentId(ctx);
-          const sessionId = pickSessionId(ctx);
-          const ev = event as { childAgentId?: string; agentName?: string; success?: boolean; result?: string } | undefined;
-          const child = ev?.childAgentId ?? ev?.agentName ?? "?";
-          const dedupKey = `end-spawn:${agentId}:${sessionId}:${child}`;
-          if (!shouldFire(dedupKey)) return undefined;
-          const ok = ev?.success !== false;
-          const icon = ok ? "✅" : "❌";
+          const sessionId = (ctx?.requesterSessionKey ?? event?.targetSessionKey ?? "") + "";
+          const child = event?.targetSessionKey?.slice(-12) ?? "?";
+          const dedupKey = `end-spawn:${sessionId}:${child}`;
+          if (!shouldFire(dedupKey)) return;
+          const outcome = event?.outcome ?? "ok";
+          const icon = outcome === "ok" ? "✅" : outcome === "error" ? "❌" : "⚠️";
           addChapter(
             db,
-            agentId,
+            DEFAULT_AGENT_ID,
             sessionId,
             `${icon} 子 agent 结束: ${child}`,
-            ev?.result ? `结果：${String(ev.result).slice(0, 200)}` : "subagent_ended hook 自动标记",
+            `outcome=${outcome}, reason=${event?.reason?.slice(0, 100) ?? "?"}`,
           );
-          if (debug) api.logger.info(`[enhance-lifecycle] subagent_ended → ${child} (${ok ? "ok" : "fail"})`);
+          if (debug) api.logger.info(`[enhance-lifecycle] subagent_ended → ${child} (${outcome})`);
         } catch (err) {
           api.logger.error(`[enhance-lifecycle] subagent_ended handler 错误: ${(err as Error).message}`);
         }
-        return undefined;
       });
     } catch {
       // 静默

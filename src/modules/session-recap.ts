@@ -39,16 +39,12 @@ export interface SessionRecapConfig {
   maxDecisions?: number;
 }
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
-function pickSessionId(ctx: unknown): string {
-  return (
-    ((ctx as any)?.sessionKey as string | undefined) ??
-    ((ctx as any)?.sessionId as string | undefined) ??
-    ""
-  ).trim();
+function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefined): string {
+  return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
 function parseSqliteTs(s: string | undefined): number {
@@ -159,20 +155,21 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
   const MAX_RECAP_ENTRIES = 500;
 
   // ── Hook: before_prompt_build ── 自动 recap
-  api.on("before_prompt_build" as any, (_event: unknown, ctx: unknown): unknown => {
+  // v5.7.8: typed via openclaw 4.24 SDK
+  api.on("before_prompt_build", (_event, ctx) => {
     const agentId = pickAgentId(ctx);
     const sessionId = pickSessionId(ctx);
     const key = `${agentId}::${sessionId}`;
 
     const now = Date.now();
     const lastActivity = getLastActivityMs(db, agentId, sessionId);
-    if (!lastActivity) return {};
+    if (!lastActivity) return;
 
     const idleMs = now - lastActivity;
-    if (idleMs < idleMinutes * 60_000) return {};
+    if (idleMs < idleMinutes * 60_000) return;
 
     const lastRecap = lastRecapAt.get(key) ?? 0;
-    if (now - lastRecap < minIntervalMinutes * 60_000) return {};
+    if (now - lastRecap < minIntervalMinutes * 60_000) return;
 
     const text = buildRecapText(
       db,
@@ -181,7 +178,7 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
       { maxChapters, maxTodos, maxDecisions },
       idleMs,
     );
-    if (!text) return {};
+    if (!text) return;
 
     // LRU eviction: 重新插入 key 让活跃 session 不被淘汰
     if (lastRecapAt.has(key)) lastRecapAt.delete(key);

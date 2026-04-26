@@ -26,10 +26,22 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.7** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.8** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.8 全面适配 openclaw 2026.4.24（2026-04-26 同日）
+
+| 维度 | 改动 |
+|---|---|
+| `peerDependencies.openclaw` | `^2026.4.22` → **`^2026.4.24`** |
+| `build.openclawVersion` | `2026.4.11` → **`2026.4.24`** |
+| `compat.pluginApi` | `>=2026.4.11` → **`>=2026.4.24`** |
+| `api.on(...as any)` 14 处 → **0 处** | 全部改成 typed hook，让 SDK PluginHookHandlerMap[K] 自动推断 event/ctx |
+| `(event: any, ctx: any)` 5 处 → **0 处** | 同上 |
+| `openclaw.plugin.json` 加 3 字段 | `enabledByDefault: true` / `uiHints` / `activation.onAgentHarnesses` |
+| 修隐藏 bug | self-check.ts 的 `PluginHookBeforeAgentReplyResult.handled` 必填问题之前被 `as any` 屏蔽，现在 typecheck 强制修对 |
 
 ### v5.7.7 session-lifecycle：接入 openclaw 4.22 五个 hook 闭环 session 生命周期（2026-04-26 同日）
 

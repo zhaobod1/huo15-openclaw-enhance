@@ -474,7 +474,7 @@ export function registerWorkflowHooks(api: OpenClawPluginApi, _config?: Workflow
   })) as any, { name: "enhance_task" });
 
   // ── Hook: before_prompt_build — 增强版触发评估 ──
-  api.on("before_prompt_build" as any, (event: any, ctx: any): any => {
+  api.on("before_prompt_build", (event: any, ctx: any) => {
     const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
     const userMessage: string = (event as any)?.prompt ?? "";
     if (!userMessage) return {};

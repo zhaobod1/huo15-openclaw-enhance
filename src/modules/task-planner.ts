@@ -164,7 +164,7 @@ export function registerTaskPlanner(api: OpenClawPluginApi) {
   );
 
   // ── Hook: before_prompt_build — 自动触发规划 ──
-  api.on("before_prompt_build" as any, (event: any, ctx: any): any => {
+  api.on("before_prompt_build", (event: any, ctx: any) => {
     const query: string = (event as any)?.prompt ?? "";
     const agentId = (ctx?.agentId ?? "main") as string;
 

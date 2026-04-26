@@ -19,16 +19,12 @@ import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import { getDb, storeMemory } from "../utils/sqlite-store.js";
 import { DEFAULT_AGENT_ID } from "../types.js";
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
-function pickSessionId(ctx: unknown): string {
-  return (
-    ((ctx as any)?.sessionKey as string | undefined) ??
-    ((ctx as any)?.sessionId as string | undefined) ??
-    ""
-  ).trim();
+function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefined): string {
+  return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
 /** POSIX 单引号 shell-escape，安全嵌入多行 prompt。 */

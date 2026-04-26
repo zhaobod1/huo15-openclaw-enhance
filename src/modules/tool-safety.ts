@@ -158,10 +158,11 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   const enableRetry = config?.enableRetry ?? true;
 
   // ── Hook: before_tool_call — 补充式规则匹配（不重写龙虾原生决策） ──
-  api.on("before_tool_call" as any, (event: unknown, ctx: unknown): unknown => {
-    const agentId = (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim();
-    const toolName = ((event as any)?.toolName as string | undefined) ?? "";
-    const params = (((event as any)?.params as Record<string, unknown> | undefined) ?? {});
+  // v5.7.8: typed via openclaw 4.24 SDK (PluginHookBeforeToolCallEvent + PluginHookToolContext)
+  api.on("before_tool_call", (event, ctx) => {
+    const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
+    const toolName = event?.toolName ?? "";
+    const params = event?.params ?? {};
     const matchText = extractMatchText(params);
     const pathText = extractPathText(params);
 
@@ -198,12 +199,13 @@ export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig
   }, { priority: 900 } as any);
 
   // ── Hook: after_tool_call — 错误观察（不自动重试，只给建议） ──
+  // v5.7.8: typed via openclaw 4.24 SDK (PluginHookAfterToolCallEvent + PluginHookToolContext)
   if (enableRetry) {
-    api.on("after_tool_call" as any, (event: unknown, ctx: unknown) => {
-      const agentId = (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim();
-      const toolName = ((event as any)?.toolName as string | undefined) ?? "";
-      const rawError = ((event as any)?.error as string | undefined) ?? "";
-      const durationMs = ((event as any)?.durationMs as number | undefined) ?? 0;
+    api.on("after_tool_call", (event, ctx) => {
+      const agentId = (ctx?.agentId ?? DEFAULT_AGENT_ID).trim();
+      const toolName = event?.toolName ?? "";
+      const rawError = event?.error ?? "";
+      const durationMs = event?.durationMs ?? 0;
       if (!rawError) return;
 
       const statusMatch = rawError.match(/\b(4\d{2}|5\d{2})\b/);

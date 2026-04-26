@@ -32,8 +32,8 @@ import { DEFAULT_AGENT_ID } from "../types.js";
 
 const LOOP_MARKER_RE = /^\[enhance-loop:([^\]]+)\]/;
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
 function quote(s: string): string {
@@ -45,15 +45,16 @@ export function registerScheduledTasksBridge(api: OpenClawPluginApi) {
   const db = getDb(openclawDir);
 
   // ── Hook: before_prompt_build ── 识别 loop 前缀并注入对应 binding 的 instructions
-  api.on("before_prompt_build" as any, (event: unknown, ctx: unknown): unknown => {
-    const prompt = String((event as any)?.prompt ?? "");
+  // v5.7.8: typed via openclaw 4.24 SDK
+  api.on("before_prompt_build", (event, ctx) => {
+    const prompt = String((event as { prompt?: string } | undefined)?.prompt ?? "");
     const match = prompt.match(LOOP_MARKER_RE);
-    if (!match) return {};
+    if (!match) return;
 
     const agentId = pickAgentId(ctx);
     const name = match[1].trim();
     const binding = listScheduledBindings(db, agentId).find((b) => b.name === name && b.enabled === 1);
-    if (!binding) return {};
+    if (!binding) return;
 
     touchScheduledBindingFired(db, binding.id);
 

@@ -2,6 +2,108 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.8 — 2026-04-26（全面适配 openclaw 2026.4.24：typed hooks + manifest 元数据补齐）
+
+**用户反馈**："enhance 插件帮我全面适配 openclaw 最新版本"
+
+跑 SOP 第 1+2 步：(a) `npm view openclaw version` → **2026.4.24**（latest，比当前用的 4.22 多 1 个 minor）；(b) 升级本地 SDK + 跑 typecheck 看不兼容点；(c) 盘点 `as any` 找清理空间。
+
+### 关键发现
+
+读 openclaw 4.24 SDK 类型定义 `node_modules/openclaw/dist/plugin-sdk/src/plugins/types.d.ts`：
+
+```typescript
+on: <K extends PluginHookName>(
+  hookName: K,
+  handler: PluginHookHandlerMap[K],
+  opts?: { priority?: number }
+) => void;
+```
+
+`api.on` 是**完全 typed**！每个 hook 名都对应具体的 `(event, ctx)` 类型：
+- `before_tool_call: (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext) => PluginHookBeforeToolCallResult | void`
+- `session_start: (event: PluginHookSessionStartEvent, ctx: PluginHookSessionContext) => void`
+- `subagent_spawned: (event: PluginHookSubagentSpawnedEvent, ctx: PluginHookSubagentContext) => void`
+- ... 全 29 个 hook 都有 typed signature
+
+但 enhance 当前 **14 处 `api.on(...as any, (event: any, ctx: any) => ...)`** —— 把 SDK 的 typed 体验全屏蔽了。这是历史遗留，因为最早期某些版本的 openclaw SDK 没有 typed hook。现在 SDK 完全支持，enhance 该跟上。
+
+### 新增
+
+- **`peerDependencies.openclaw: ^2026.4.22 → ^2026.4.24`** — 跟随 latest tag
+- **`openclaw.build.openclawVersion: 2026.4.11 → 2026.4.24`** — 同步（落后了 13 个 patch）
+- **`openclaw.compat.pluginApi: >=2026.4.11 → >=2026.4.24`** — 同步
+- **`openclaw.plugin.json` 加 3 个新字段**：
+  - `enabledByDefault: true` — 装上后默认启用，免去用户手工 `enabled: true` 配置
+  - `uiHints` — control-ui 渲染配置面板时用的 widget 提示（switch / select / 中文 label）
+  - `activation.onAgentHarnesses: ["claude", "openclaw-default"]` — 声明在哪些 agent harness 下激活
+
+### 修改
+
+- **`api.on(...as any) → api.on(...)` 14 处全清理**：
+  - `src/modules/session-lifecycle.ts`（5 个 hook：session_start/end/before_reset/subagent_spawned/subagent_ended）
+  - `src/modules/scheduled-tasks-bridge.ts`（before_prompt_build）
+  - `src/modules/self-check.ts`（before_agent_reply）
+  - `src/modules/session-recap.ts`（before_prompt_build）
+  - `src/modules/task-planner.ts`（before_prompt_build）
+  - `src/modules/workflow-hooks.ts`（before_prompt_build）
+  - `src/modules/tool-safety.ts`（before_tool_call + after_tool_call）
+  - `src/modules/mode-gate.ts`（before_tool_call）
+- **`(event: any, ctx: any) → (event, ctx)` 5 处**：让 TS 自动从 PluginHookHandlerMap[K] 推断
+- **`(ctx as any)?.agentId → ctx?.agentId` 9 处**：每个 PluginHook*Context 都有 `agentId?: string` 字段，无需 cast
+- **`pickAgentId(ctx: unknown) → pickAgentId(ctx: { agentId?: string } | undefined)`** 6 个文件：structural typing 兼容 hook ctx 和 tool ctx 两种调用源
+
+### 修复（typecheck 暴露的隐藏 bug）
+
+- **`src/modules/self-check.ts`**：去掉 `as any` 后 TS 报 `Type '{ handled?: undefined; ... }' is not assignable to PluginHookBeforeAgentReplyResult`。根因是 `PluginHookBeforeAgentReplyResult.handled: boolean` **必填**，但 enhance 之前在"不接管"分支返回 `{};`。修法：所有 "不接管"分支改成 `return;`（void），仅"阻断空回复"分支返回 `{ handled: true, reply: {...}, reason: "..." }`。
+
+### 不破坏
+
+- 全部 14 处 hook handler **return undefined（void）** 时跟之前 `return {}` 行为完全一致 —— openclaw 把"void 返回值"和"空对象"等同视为"不接管"
+- typed handler 跟 untyped 运行时无差异，只是编译期能 narrow 类型
+- 没改任何 SQLite schema、没引入新 npm 依赖
+- 老用户从 v5.7.7 升级零成本
+
+### 剩余 `as any` 统计
+
+| 用途 | 数量 | 是否合理 |
+|---|---|---|
+| `api.on(...as any)` | **0**（之前 14） | ✅ 完全清理 |
+| SQLite `.get() as any[]` / `.all() as any[]` | 8 | ✅ better-sqlite3 设计返回 unknown，必须 cast |
+| `registerTool factory ((ctx) => ({...})) as any` | 8 | ✅ SDK factory 模式 type-erasure 限制 |
+| `(globalThis as any).process` | 1 | ✅ globalThis 类型限制 |
+| `(event as any).prompt` | 2 | ⚠️ 待 SDK 暴露 PluginHookBeforePromptBuildEvent 类型时清 |
+| `(ctx as any)` 在 helper 内部 | 4 | ⚠️ structural typing 不收紧也可（runtime 行为正确） |
+| 其它（错误/边界） | ~32 | 大多是 ts-pattern 风格的边界处理 |
+| **总计** | **55** | （从 v5.7.7 的 ~98 降到 55，约 -44%）|
+
+### 设计决策
+
+- **为什么不再追求 0 个 `as any`**：剩下的 55 处都是 SDK / 第三方库设计限制（better-sqlite3 / TypeBox factory），强行清理会引入运行时风险或 schema 复杂度
+- **为什么 manifest 加 `activation.onAgentHarnesses`**：当 openclaw 之后引入 lazy plugin loading（现在还没），enhance 能精确声明在哪种 agent 类型下激活，避免 `claude` 之外的 agent harness 误加载
+- **为什么 typed handler return `void` 而非 `{}`**：openclaw runtime 对 hook 返回值的处理是 `if (result && typeof result === "object") { ...apply hints... }`，`undefined` 跟 `{}` 行为一致；但 typed signature 要求 `PluginHookXxxResult | void`，`{}` 不满足"必填字段都填"
+- **为什么不展开 `(event as any).prompt`**：`PluginHookBeforePromptBuildEvent` 类型存在但 SDK 没顶层 export；强制从子路径导入会增加耦合，等下次 SDK 升级 export 表了再清
+
+### 不冲突 openclaw 4.24 的检查清单
+
+| 检查项 | 状态 |
+|---|---|
+| 不修改 openclaw 源码 | ✅ |
+| 所有 hook handler return void / 已知合法 result | ✅（已通过 typecheck 验证）|
+| openclaw 4.24 hook 名都仍存在 | ✅（PluginHookName union 包含全部 29 个）|
+| 不复制龙虾原生 memory / cron / tools.allow/deny / channel manifest | ✅ |
+| `enabledByDefault` / `uiHints` / `activation` 字段在 4.24 manifest type 里都已定义 | ✅（PluginManifest 含这三个字段）|
+| 模块清单中没有跟 openclaw 4.x 重叠的功能 | ✅（之前 v5.2 重写已经把 context-pruner 删了改成 corpus supplement，本轮再次 verify） |
+
+### 调研依据
+
+- `npm view openclaw version` → 2026.4.24
+- `node_modules/openclaw/dist/plugin-sdk/src/plugins/hook-types.d.ts: PluginHookHandlerMap`：29 个 hook 完整 typed signature
+- `node_modules/openclaw/dist/plugin-sdk/src/plugins/manifest.d.ts: PluginManifest`：完整 manifest 字段（含未用过的 enabledByDefault / uiHints / activation）
+- 详见 KB `~/knowledge/huo15/2026-04-27-openclaw-enhance-v578-typed-hooks-postmortem.md`
+
+---
+
 ## 5.7.7 — 2026-04-26（session-lifecycle：接入 openclaw 4.22 五个 hook 闭环 session 生命周期）
 
 **用户反馈**："结合 claude 官网的能力描述和本地 claude code 源码看看我们的 enhance 插件还有哪些可以完善的。但是不能干扰 openclaw 最新版的既有能力和跟 openclaw 最新版冲突。"

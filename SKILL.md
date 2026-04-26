@@ -1,18 +1,43 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.7 — session-lifecycle：接入 openclaw 4.22 的 session_start / session_end / before_reset / subagent_spawned / subagent_ended 五个 hook 闭环 session 生命周期。新会话起点 idle > 30min 自动加章节占位；会话结束自动 mark_chapter + flush in_progress todo 到 project memory；reset 前最后机会抢救 in_progress + 最近章节到 decision memory；subagent 派生/结束自动落 chapter。所有 hook 30 秒 dedup 防 noise factory + 仅写入 enhance 自有表（不污染龙虾原生 memory）。继承 v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
-version: 5.7.7
+description: "火一五·克劳德·龙虾增强插件 v5.7.8 — 全面适配 openclaw 2026.4.24：peerDep ^4.24 + build/compat 同步到 4.24 + 14 处 api.on 全部去掉 as any 改成 typed hook（hookName 联合类型 + handler 自动推断 PluginHookHandlerMap[K]） + manifest 加 enabledByDefault/uiHints/activation 元数据 + 修 self-check 之前被 as any 屏蔽的 PluginHookBeforeAgentReplyResult 类型不匹配 bug。继承 v5.7.7 session-lifecycle + v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
+version: 5.7.8
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.7
+# 火一五·克劳德·龙虾增强插件 v5.7.8
 
 ## 简介
 
-`@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
+`@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.24+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.8 全面适配 openclaw 2026.4.24（2026-04-26 同日）
+
+跑完整 SOP 第 1+2 步发现 openclaw 4.24 的 `api.on` 是**完全 typed**（`<K extends PluginHookName>(hookName: K, handler: PluginHookHandlerMap[K])`），enhance 之前 14 处 `api.on(...as any)` 都能去掉 cast。这是真正的"全面适配"——不是简单升 peerDep，而是让 enhance 利用 SDK 的全部类型信息。
+
+| 维度 | v5.7.7 | v5.7.8 |
+|---|---|---|
+| `peerDependencies.openclaw` | `^2026.4.22` | **`^2026.4.24`** |
+| `build.openclawVersion` | `2026.4.11`（落后 13 patch）| **`2026.4.24`** |
+| `compat.pluginApi` | `>=2026.4.11` | **`>=2026.4.24`** |
+| `api.on(...as any)` 使用次数 | 14 处 | **0 处** |
+| `(event: any, ctx: any)` 使用次数 | 5 处 | **0 处** |
+| `(ctx as any)?.agentId` 模式（hook 内部）| 9 处 | **0 处**（仅余 4 处 helper 函数内部，工具 ctx 用） |
+| typecheck 错误数 | 0 | **0** |
+| openclaw.plugin.json 顶层字段 | 5 | **8**（加 `enabledByDefault` / `uiHints` / `activation`）|
+
+### 隐藏 bug 修复
+
+去掉 `as any` 后 typecheck 暴露 **self-check.ts 长期被屏蔽的类型不匹配**：之前 `return {};` 试图返回 `PluginHookBeforeAgentReplyResult`，但该类型 `handled: boolean` 是必填的——空对象不合规。修法：所有"不接管"分支改成 `return;`（void），仅"阻断空回复"分支返回 `{ handled: true, reply: ..., reason: ... }`。
+
+### 不破坏 openclaw 原生
+
+- 所有 hook handler **return undefined（void）** — 不返回 `{block, prependContext}` 等控制信号时 → enhance 仅观察+附加，绝不改变 openclaw 决策
+- typed hook handler 实际行为跟 untyped 完全一致 — 只是 TS 编译期能 narrow 类型，运行时无差异
+- manifest 新加的 `enabledByDefault` / `uiHints` / `activation` 都是 openclaw 4.x 已有字段，不引入新依赖
 
 ## v5.7.7 session-lifecycle（2026-04-26 同日，跑完整 gap 调研后落地）
 

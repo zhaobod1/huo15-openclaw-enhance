@@ -118,16 +118,12 @@ function isMutatingTool(toolName: string, params: Record<string, unknown>): bool
   return false;
 }
 
-function pickAgentId(ctx: unknown): string {
-  return (((ctx as any)?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
+function pickAgentId(ctx: { agentId?: string } | undefined): string {
+  return ((ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID);
 }
 
-function pickSessionId(ctx: unknown): string {
-  return (
-    ((ctx as any)?.sessionKey as string | undefined) ??
-    ((ctx as any)?.sessionId as string | undefined) ??
-    ""
-  ).trim();
+function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefined): string {
+  return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
 export function registerModeGate(
@@ -137,21 +133,22 @@ export function registerModeGate(
 ) {
   const defaultMode: AgentMode = config?.defaultMode ?? "normal";
 
+  // v5.7.8: typed via openclaw 4.24 SDK
   api.on(
-    "before_tool_call" as any,
-    (event: unknown, ctx: unknown): unknown => {
+    "before_tool_call",
+    (event, ctx) => {
       const agentId = pickAgentId(ctx);
       const sessionId = pickSessionId(ctx);
       const mode = getMode(agentId, sessionId, defaultMode);
-      if (mode === "normal") return {};
+      if (mode === "normal") return;
 
-      const toolName = ((event as any)?.toolName as string | undefined) ?? "";
-      const params = ((event as any)?.params as Record<string, unknown> | undefined) ?? {};
+      const toolName = event?.toolName ?? "";
+      const params = event?.params ?? {};
       if (toolName.startsWith("enhance_set_mode") || toolName.startsWith("enhance_current_mode")) {
-        return {};
+        return;
       }
 
-      if (!isMutatingTool(toolName, params)) return {};
+      if (!isMutatingTool(toolName, params)) return;
 
       const reason =
         mode === "plan"
@@ -165,7 +162,7 @@ export function registerModeGate(
       notifyQueue.emit(agentId, "warn", "workflow", `${mode} 模式拦截`, `工具 ${toolName} 被 ${mode} 模式拦截。`);
       return { block: true, blockReason: reason };
     },
-    { priority: 950 } as any,
+    { priority: 950 },
   );
 
   api.registerTool(
