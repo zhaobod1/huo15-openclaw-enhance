@@ -52,6 +52,7 @@ ls /tmp/claude-app-extract/.vite/build/
 | ✅ | **hardening 套件**（Map LRU + safety_log TTL + corpus tag 黑名单）| Explore agent 全代码审计 + 防御未来类似 v5.7.1 的 noise factory | Plugin patch | ~120 行 | 已落地 **v5.7.2**（2026-04-26 同日延伸防御）|
 | ✅ | **config-doctor 启动期诊断** | 用户装 v5.7.2 仍爆 'Context limit exceeded'，根因是 openclaw 配置陷阱（缺 reserveTokensFloor / model maxTokens 过大），enhance 主动诊断把信号给到用户 | Plugin 模块 + 工具 | ~200 行 | 已落地 **v5.7.3**（2026-04-26 同日，calendar 外第 3 次 hot-fix）|
 | ✅ | **config-doctor 扩展扫已装插件 bare pluginApi** | 用户报"提示插件要求 2026.2.24"实际是其它插件违反 ">=X.Y.Z" 规则；扫所有装的 plugin package.json 检测 bare → 给 fix 命令 | Plugin 模块扩展 | ~80 行净增 | 已落地 **v5.7.4**（2026-04-26 同日，calendar 外第 4 次 hot-fix）|
+| ✅ | **skill-recommender 按需求自动挑 skill** | 用户提"看看 Claude 是怎么做的"——反编译发现 Claude Desktop 就是 name+description 注入 system prompt 让 LLM 挑；enhance 改成按需工具：扫多路径（含 WeCom workspace-*）+ CJK 双字滑窗 + alias 强 boost + 三段式（已装 / 未装 / 自建规划） | Plugin 模块 + 工具 | ~270 行 | 已落地 **v5.7.5/6**（2026-04-26 同日第 5 次）|
 | 1 | **auto-memory-curator cron 触发** | enhance 已有 skill，缺定时器 | Plugin 模块 | ~40 行 + cron 命令 | 待选 |
 | 2 | **path-rules**（plan/explore 写入静态参数白名单）| Claude Code Settings | Plugin 模块 | ~150 行 | 待选 |
 | 3 | **WeCom push notification 桥接** | Claude Code Notifications | Plugin 模块 + WeCom webhook | ~100 行（需 @huo15/wecom 协作）| 待选 |
@@ -171,7 +172,8 @@ clawhub search huo15-openclaw-<name>
 | 2026-04-26 | v5.7.1 | hot-fix：删 before_compaction 噪音 hook + 加 memory_purge | 用户实测 enhance 库 613 条全为 auto-compact 噪音 | Plugin hot-fix |
 | 2026-04-26 | v5.7.2 | hardening：Map LRU + safety_log TTL + corpus tag 黑名单 + peerDep 4.22 | Explore agent 全代码审计后挑 4 项 ROI 最高的批量修 | Plugin patch |
 | 2026-04-26 | v5.7.3 | config-doctor：启动期诊断 openclaw.json 陷阱（reserveTokensFloor 缺失 / model maxTokens 过大）| 用户实测装 v5.7.2 仍爆 'Context limit exceeded'，根因在 openclaw 配置而非插件 | Plugin 模块 |
-| 2026-04-26 | **v5.7.4** | **config-doctor 扫已装插件 bare pluginApi** | **用户报"插件要求 2026.2.24"实际是其它插件违反 ranged spec 规则** | **Plugin 模块扩展** |
+| 2026-04-26 | v5.7.4 | config-doctor 扫已装插件 bare pluginApi | 用户报"插件要求 2026.2.24"实际是其它插件违反 ranged spec 规则 | Plugin 模块扩展 |
+| 2026-04-26 | **v5.7.5/6** | **skill-recommender：按需求挑已装 skill / 推荐未装 / 给自建规划** | **用户提"看看 Claude 是怎么做的"——反编译 Claude Desktop loadSkills 启发** | **Plugin 模块** |
 
 下一次迭代锚点：**2026-04-28**（每 3 天间隔；如果有新 Claude Code release 或线上 bug 反馈提前触发）。
 
