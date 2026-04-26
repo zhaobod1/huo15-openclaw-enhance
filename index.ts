@@ -36,6 +36,7 @@ import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { registerConfigDoctor } from "./src/modules/config-doctor.js";
 import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
+import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -211,6 +212,14 @@ export default definePluginEntry({
         tier: 2,
         enabled: config.skillRecommender?.enabled !== false,
         load: () => registerSkillRecommender(api, config.skillRecommender),
+      },
+      {
+        // v5.7.7: 接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook
+        // tier=1 minimal 也启用——这是核心生命周期补全，零工具 schema（纯 hook 监听）
+        name: "会话生命周期",
+        tier: 1,
+        enabled: config.sessionLifecycle?.enabled !== false,
+        load: () => registerSessionLifecycle(api, config.sessionLifecycle, notifyQueue),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

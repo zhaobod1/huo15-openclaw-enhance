@@ -2,6 +2,83 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.7 — 2026-04-26（session-lifecycle：接入 openclaw 4.22 五个 hook 闭环 session 生命周期）
+
+**用户反馈**："结合 claude 官网的能力描述和本地 claude code 源码看看我们的 enhance 插件还有哪些可以完善的。但是不能干扰 openclaw 最新版的既有能力和跟 openclaw 最新版冲突。"
+
+跑了完整 SELF_ITERATE.md SOP 第 1+2 步（信息更新 + gap 比对）：
+
+### 调研发现
+
+- **Claude Code 官方 docs**（hooks 页）暴露 27 个 hook event names：SessionStart / UserPromptSubmit / PreToolUse / PermissionRequest / PermissionDenied / PostToolBatch / Stop / SubagentStart / SubagentStop / TaskCreated / TaskCompleted / InstructionsLoaded / ConfigChange / CwdChanged / FileChanged / PreCompact / PostCompact / Elicitation / Notification / WorktreeCreate / WorktreeRemove / SessionEnd 等
+- **openclaw 2026.4.22 SDK** (`hook-types.d.ts: PluginHookName`) 暴露 **29 个 hook**，跟 Claude Code 一一对应（命名风格不同：`before_/after_/_end` 而非 Claude 的 `Pre/Post/Stop`）
+- **enhance 之前只用 4 个 hook**：`before_prompt_build` / `before_tool_call` / `after_tool_call` / `before_agent_reply`
+- **反编译 Claude.app** 看到 29 张 SQLite 表，最有价值的没用过：artifacts 多版本 + frames 树状对话历史 + notes 用户批注
+
+### ROI top 5 候选
+
+| # | 候选 | 工作量 | 价值 |
+|---|---|---|---|
+| **1** | **session-lifecycle**（接 session_start + session_end + before_reset + subagent_*）| ~250 行 | **🔴 立即闭环 session 生命周期** |
+| 2 | tool-result-optimizer（接 tool_result_persist 大结果截断+摘要）| ~100 行 | 🟡 长 session 减负 |
+| 3 | message_received hook 自动 skill 推荐 | ~60 行 | 🟡 跟 v5.7.5 接合 |
+| 4 | artifacts 多版本管理（轻量 SQLite）| ~250 行 | 🔴 但量大留 v5.8 |
+| 5 | frames 父子 session 关系跟踪 | ~150 行 | 🟠 留 v5.8 |
+
+**v5.7.7 落地候选 #1**（最高 ROI）。
+
+### 新增
+
+- **`src/modules/session-lifecycle.ts`**（~250 行）— 接入 5 个 hook：
+  - `session_start` → idle > 30min 时插入"🚀 会话开始 / 续启"章节占位（不强制每个 session 都加章节，避免噪音）
+  - `session_end` → 加"🏁 会话结束"章节 + flush 未完成 in_progress todo 到 project memory（专用 tag `session-flush`, importance=4）
+  - `before_reset` → reset 前最后机会抢救最近 3 章节 + 全部未完成 todo 到 decision memory（专用 tag `reset-rescue`, importance=6）+ 推 notification 提醒
+  - `subagent_spawned` → 派生子 agent 时插入"🤖 派生子 agent: X"章节
+  - `subagent_ended` → 子 agent 结束插入"✅/❌ 子 agent 结束: X"章节
+- **`types.ts: SessionLifecycleConfig`** — 5 个 hook 各自可关，含 `debug` 开关
+- **`openclaw.plugin.json`** configSchema 加 `sessionLifecycle` 段
+- **模块 `tier=1`** minimal 也启用——这是核心生命周期补全，**零工具 schema**（纯 hook 监听，不占 prompt 容量）
+
+### 防 noise factory 三层防御（吸收 v5.7.1 教训）
+
+v5.7.1 删了 `before_compaction` 噪音 hook 后总结了"不要在高频 hook 里无脑写记忆"。新增的 5 个 hook 也是高频（`session_start` 在多 agent 场景每分钟可能多次触发），所以严格控写：
+
+1. **30 秒 dedup**：每个 hook 触发按 `event:agentId:sessionId` 拼 key 进 LRU Map（`MAX_RECENT_ENTRIES=500` + FIFO 淘汰），30 秒内重复触发跳过
+2. **重要性低 + 专用 tag**：`session-flush` importance=4（不是用户主动决策）；`reset-rescue` importance=6（reset 前抢救偏重要）。**故意不进 corpus pruner 黑名单**——这些是用户下次想恢复的实质内容，让 pruner 按相关度自然评分
+3. **try-catch 包裹**：每个 hook handler 全包，错误只 log 不抛——绝不让插件因 hook 异常 crash
+
+### 不破坏
+
+- 完全只读 openclaw 状态，不修改任何龙虾原生表/文件
+- 写入 `chapters` / `memories` 是 enhance 自有表（不污染龙虾原生 memory，v5.5.0 的 corpus supplement 边界保持）
+- 没改 SQLite schema、没引入新 npm 依赖
+- 没新增 enhance_* 工具（纯 hook 监听）
+- 用户可单独关任意 hook（`config.sessionLifecycle.enableSessionStart = false`）
+
+### 设计决策
+
+- **为什么 tier=1**：纯 hook 监听零工具 schema，不占 prompt 容量；session 生命周期是核心补全（minimal 用户也该有）；
+- **为什么 session_start 不是每次都加章节**：避免每分钟一个 session 都新加章节造成 chapter 表膨胀；只在 idle > 30min 时加（用户真正"重启"的场景）
+- **为什么 before_reset 比 session_end 重要性高**：reset 是用户主动清理，比自然结束激进；importance=6 vs 4 让 corpus pruner 优先返回 reset 抢救的内容
+- **为什么不进 corpus pruner 黑名单**：tag=session-flush / reset-rescue 的内容是用户下次想恢复的工作（"上次未完成的 X"），跟 v5.7.1 删的 auto-compact noise（信息量为 0）本质不同
+- **为什么 subagent hook 也加章节而非 memory**：spawn 链路属于"事件流"（用户想看时间线），章节比记忆更适合；下游可以用 chapter timeline 看派生关系
+
+### 跟 openclaw 4.22 不冲突的检查
+
+- ✅ openclaw 自己的 `before_compaction` 等 hook 仍正常工作（enhance 不复制不抢占）
+- ✅ openclaw 原生 memory 系统不受影响（enhance 只写 enhance-memory.sqlite）
+- ✅ openclaw 原生 cron-cli / tools.allow/deny / memory 向量库 enhance 全部不复制
+- ✅ openclaw 4.22 类型定义 `PluginHookName` 包含全部 5 个 hook，无破坏性变更
+
+### 调研依据
+
+- 反编译 `/Applications/Claude.app/Contents/Resources/app.asar`：`loadSkills` / `loadSkillContent` / artifacts 多版本 / frames 树状历史
+- WebFetch `code.claude.com/docs/en/hooks`：27 个 hook event names + 输入字段
+- `/Users/jobzhao/workspace/projects/openclaw/huo15-openclaw-enhance/node_modules/openclaw/dist/plugin-sdk/src/plugins/hook-types.d.ts: PluginHookName`：openclaw 4.22 的 29 个 hook 完整列表
+- 详见 KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v577-session-lifecycle-postmortem.md`
+
+---
+
 ## 5.7.5 — 2026-04-26（skill-recommender：按需求自动挑 skill / 推荐未装 / 给自建规划）
 
 **用户反馈**："新增自动根据用户的需求自动挑选已经安装的技能，如果没有技能就把规划方案给出来。看看 Claude 是如何做的"

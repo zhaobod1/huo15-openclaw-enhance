@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除噪音 hook；v5.7.2 hardening；v5.7.3 诊断 openclaw.json 陷阱；v5.7.4 扫 bare pluginApi；v5.7.5 skill-recommender（按需求挑已装 / 推荐未装 / 给自建规划，算法源自反编译 Claude Desktop loadSkills）",
-  "version": "2.4.6",
+  "description": "非侵入式增强 OpenClaw：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除噪音 hook；v5.7.2 hardening；v5.7.3 诊断 openclaw.json 陷阱；v5.7.4 扫 bare pluginApi；v5.7.5 skill-recommender；v5.7.7 session-lifecycle（接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook 闭环生命周期）",
+  "version": "2.4.7",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -125,6 +125,18 @@
           "enabled": { "type": "boolean", "default": true },
           "installedThreshold": { "type": "number", "default": 0.25, "description": "已装命中相关度阈值，低于则触发未装/自建建议" },
           "cacheTtlSec": { "type": "number", "default": 60, "description": "skill 扫描结果缓存秒数" }
+        }
+      },
+      "sessionLifecycle": {
+        "type": "object",
+        "description": "v5.7.7 接入 openclaw 4.22 的 session_start / session_end / before_reset / subagent_spawned / subagent_ended hook 闭环 session 生命周期。每个 hook 都做 30 秒 dedup 去重 + 仅写入 enhance 自有表，不污染龙虾原生 memory",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "enableSessionStart": { "type": "boolean", "default": true },
+          "enableSessionEnd": { "type": "boolean", "default": true },
+          "enableBeforeReset": { "type": "boolean", "default": true },
+          "enableSubagent": { "type": "boolean", "default": true },
+          "debug": { "type": "boolean", "default": false }
         }
       },
       "dashboard": {

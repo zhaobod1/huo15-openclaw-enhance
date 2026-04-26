@@ -256,6 +256,25 @@ export interface TranscriptSearchConfig {
   enabled?: boolean;
 }
 
+// ── Session Lifecycle (v5.7.7) ──
+/**
+ * 接入 openclaw 4.22 的 session_start / session_end / before_reset /
+ * subagent_spawned / subagent_ended 五个 hook，闭环 session 生命周期。
+ * 写入用专用 tag `lifecycle-flush` 避免被 corpus pruner 当成决策记忆召回（v5.7.2 黑名单逻辑）。
+ */
+export interface SessionLifecycleConfig {
+  enabled?: boolean;
+  /** 接 session_start hook：新会话起点加章节占位（仅 idle > 30min 时） */
+  enableSessionStart?: boolean;
+  /** 接 session_end hook：会话结束自动 mark_chapter + flush in_progress todo 到 project memory */
+  enableSessionEnd?: boolean;
+  /** 接 before_reset hook：reset 前最后机会抢救 in_progress + 最近章节到 decision memory */
+  enableBeforeReset?: boolean;
+  /** 接 subagent_spawned/ended hook：spawn 链路自动落 chapter */
+  enableSubagent?: boolean;
+  debug?: boolean;
+}
+
 // ── Skill Recommender (v5.7.5) ──
 /**
  * 按用户需求挑已装 skill / 推荐未装 huo15-* / 给自建规划。
@@ -328,6 +347,8 @@ export interface EnhancePluginConfig {
   configDoctor?: ConfigDoctorConfig;
   /** v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划 */
   skillRecommender?: SkillRecommenderConfig;
+  /** v5.7.7: 接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook 闭环 session 生命周期 */
+  sessionLifecycle?: SessionLifecycleConfig;
 }
 
 export interface SessionRecapConfigType {

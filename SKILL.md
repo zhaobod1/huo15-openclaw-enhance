@@ -1,18 +1,32 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.5 — skill-recommender：按用户需求自动挑已装 skill（扫 ~/.openclaw/skills + workspace-*/skills 多路径，含 WeCom 多 agent 隔离的子工作区）+ 推荐 ClawHub 上未装的 huo15-* 候选（含安装命令）+ 没有合适 skill 时给自建规划（frontmatter 模板 + 触发词建议 + 内容大纲 + 红线 #3 ClawHub 优先发布提醒）。算法源自反编译 Claude Desktop loadSkills（"Available skills: ${list}." prompt 注入），CJK 双字滑窗 + alias exact 命中强 boost。继承 v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
-version: 5.7.6
+description: "火一五·克劳德·龙虾增强插件 v5.7.7 — session-lifecycle：接入 openclaw 4.22 的 session_start / session_end / before_reset / subagent_spawned / subagent_ended 五个 hook 闭环 session 生命周期。新会话起点 idle > 30min 自动加章节占位；会话结束自动 mark_chapter + flush in_progress todo 到 project memory；reset 前最后机会抢救 in_progress + 最近章节到 decision memory；subagent 派生/结束自动落 chapter。所有 hook 30 秒 dedup 防 noise factory + 仅写入 enhance 自有表（不污染龙虾原生 memory）。继承 v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
+version: 5.7.7
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.5
+# 火一五·克劳德·龙虾增强插件 v5.7.7
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.7 session-lifecycle（2026-04-26 同日，跑完整 gap 调研后落地）
+
+**调研依据**：跑了一次完整 SOP 第 1+2 步（Claude Code 官方 hooks 文档 + 反编译 Claude.app + openclaw 4.22 SDK）。发现 **openclaw 4.22 暴露 29 个 hook，enhance 之前只用 4 个**。落地最高 ROI 的 5 个 hook 闭环 session 生命周期：
+
+| Hook | enhance 行为 | 落地表 |
+|---|---|---|
+| `session_start` | idle > 30min 时插入"🚀 会话开始/续启"章节占位 | `chapters` |
+| `session_end` | 加"🏁 会话结束"章节 + flush in_progress todo 到 project memory（tag=session-flush, importance=4） | `chapters` + `memories` |
+| `before_reset` | reset 前最后机会抢救最近 3 章节 + 全部未完成 todo 到 decision memory（tag=reset-rescue, importance=6）+ 推 notification | `memories` |
+| `subagent_spawned` | 派生子 agent 时加"🤖 派生子 agent: X"章节 | `chapters` |
+| `subagent_ended` | 子 agent 结束加"✅/❌ 子 agent 结束: X"章节 | `chapters` |
+
+**防 noise factory 三层防御**（吸收 v5.7.1 教训）：30 秒 dedup + 低 importance + 专用 tag（不进黑名单，用户下次会想恢复）。
 
 ## v5.7.5 skill-recommender（2026-04-26 同日）
 

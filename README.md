@@ -26,10 +26,23 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.5** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.7** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.7 session-lifecycle：接入 openclaw 4.22 五个 hook 闭环 session 生命周期（2026-04-26 同日）
+
+跑了完整 SOP 第 1+2 步后发现 **openclaw 4.22 暴露 29 个 hook，enhance 只用了 4 个**。落地最高 ROI 的 5 个 hook：
+
+| Hook | 行为 |
+|---|---|
+| `session_start` | idle > 30min 时插入"🚀 会话开始/续启"章节占位 |
+| `session_end` | 加"🏁 会话结束"章节 + flush in_progress todo 到 project memory |
+| `before_reset` | reset 前抢救最近 3 章节 + 全部未完成 todo 到 decision memory + 推 notification |
+| `subagent_spawned` / `subagent_ended` | 派生/结束自动落 chapter（跟 enhance_spawn_task 闭环）|
+
+防 noise factory 三层防御：30 秒 dedup + 低 importance + 专用 tag（吸收 v5.7.1 教训）。
 
 ### v5.7.5 skill-recommender：按需求挑 skill / 推荐未装 / 给自建规划（2026-04-26 同日）
 

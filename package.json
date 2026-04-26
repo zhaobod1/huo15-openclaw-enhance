@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.6",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.5 — skill-recommender：按用户需求挑已装 skill / 推荐未装 huo15-* / 给自建规划。算法源自反编译 Claude Desktop loadSkills（'Available skills: ${list}.' system prompt 注入），enhance 改成按需工具（enhance_skill_recommend）避免每轮 prompt 占 schema；扫 ~/.openclaw/skills + workspace-*/skills（WeCom 多 agent 隔离）+ ~/.claude/skills 等多路径，CJK 双字滑窗 + alias 强 boost。继承 v5.7.4 扫 bare pluginApi + v5.7.3 openclaw.json 陷阱诊断 + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层 + 三层记忆协调。",
+  "version": "5.7.7",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.7 — session-lifecycle：接入 openclaw 4.22 的 session_start / session_end / before_reset / subagent_spawned / subagent_ended 五个 hook 闭环 session 生命周期：起点诊断 + 收尾 mark_chapter + reset 前抢救 in_progress todo / 最近章节进 decision memory + spawn 链路自动落 chapter。30 秒 dedup 去重防 noise factory。继承 v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
