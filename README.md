@@ -26,10 +26,18 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.3** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.4** 是 [OpenClaw 2026.4.22+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.4 config-doctor 扩展：扫已装插件 bare pluginApi（2026-04-26 同日）
+
+用户反馈："提示插件要求 2026.2.24，但是我的 openclaw 已经是 2026.4.22" — 这是**其它插件**的 `compat.pluginApi` 写成 bare 字符串（精确匹配）导致 openclaw 启动失败。enhance 主动扫所有装的 plugin package.json，检测违规并给 fix 命令。
+
+实测命中：
+- `~/.openclaw/extensions/tips/package.json` v1.0.0 → `pluginApi: "2026.4.11"`（bare）
+- `~/.openclaw/node_modules/@huo15/huo15-huihuoyun-odoo/package.json` v1.2.0 → `pluginApi: "2026.2.24"`（bare）
 
 ### v5.7.3 config-doctor（2026-04-26 同日，继 v5.7.2）
 

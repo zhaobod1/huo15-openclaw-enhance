@@ -1,18 +1,34 @@
 ---
 name: huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v5.7.3 — config-doctor：启动期主动诊断 ~/.openclaw/openclaw.json 陷阱配置 → 缺失 agents.defaults.compaction.reserveTokensFloor / model maxTokens 占 contextWindow 一半以上等导致 'Context limit exceeded' 的根因；只读不改配置，给可粘贴 fix 命令；新增 enhance_config_doctor 工具按需重检。继承 v5.7.2 hardening（Map LRU + safety_log TTL + corpus tag 黑名单）+ v5.7.1 移除 before_compaction 噪音 hook + memory_purge + v5.7 transcript-search + v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
-version: 5.7.3
+description: "火一五·克劳德·龙虾增强插件 v5.7.4 — config-doctor 扩展：扫所有已装插件的 bare pluginApi（违反 '>=X.Y.Z' 规则会被 openclaw 拒绝，报错"插件要求 X.Y.Z"）；扫 ~/.openclaw/extensions/ + node_modules/@huo15/* 等路径，给 python3 inline 修复命令。继承 v5.7.3 openclaw.json 陷阱诊断（reserveTokensFloor / model maxTokens）+ v5.7.2 hardening（Map LRU + safety_log TTL + corpus tag 黑名单）+ v5.7.1 移除 before_compaction 噪音 hook + memory_purge + v5.7 transcript-search + v5.6 工具分层；三层记忆协调；session-recap；statusline；spawn_task；ExitPlanMode；捆绑 11 个配套 skill"
+version: 5.7.4
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
 
-# 火一五·克劳德·龙虾增强插件 v5.7.3
+# 火一五·克劳德·龙虾增强插件 v5.7.4
 
 ## 简介
 
 `@huo15/openclaw-enhance` 是 **OpenClaw 2026.4.22+** 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验。
 
 **核心原则**：凡是龙虾原生有的功能一律不复制，重叠处以龙虾为准；只补龙虾没有的 Claude-Code 体验。
+
+## v5.7.4 config-doctor 扩展：扫已装插件 bare pluginApi（2026-04-26 同日）
+
+**用户反馈**："提示插件要求 2026.2.24，但是我的 openclaw 已经是 2026.4.22"
+
+**根因**：openclaw plugin compat 规则要求 `compat.pluginApi` 必须是 ranged spec（`>=X.Y.Z` / `^X.Y.Z` / `~X.Y.Z`）。**bare 字符串（如 `"2026.2.24"` 没前缀）= 精确匹配**，与当前 openclaw 不匹配时启动失败。用户实测：
+
+- `~/.openclaw/extensions/tips/package.json` v1.0.0 → `pluginApi: "2026.4.11"` ❌
+- `~/.openclaw/node_modules/@huo15/huo15-huihuoyun-odoo/package.json` v1.2.0（npm peerDep 残留）→ `pluginApi: "2026.2.24"` ❌
+
+**新增**：`config-doctor` 启动期扫描 `~/.openclaw/extensions/*` + `~/.openclaw/node_modules/@huo15/*` + 无 scope 的 `node_modules/*`，对每个声明 `openclaw.extensions` 的包检查 `compat.pluginApi`。bare 命中 → 推仪表盘 + log warn + 给可粘贴 fix 命令。
+
+```
+⚠️ [plugin-bare-pluginApi] 已装插件 @huo15/wecom-tips 的 openclaw.compat.pluginApi="2026.4.11" 是 bare 版本，会被解读为精确匹配...
+   → 修复: python3 -c "..."（一行 inline）
+```
 
 ## v5.7.3 config-doctor（2026-04-26 同日）
 

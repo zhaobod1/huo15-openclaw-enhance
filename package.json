@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.3",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.3 — config-doctor：启动期诊断 ~/.openclaw/openclaw.json 陷阱配置（缺失 agents.defaults.compaction.reserveTokensFloor / model maxTokens 占 contextWindow 一半以上）解决 'Context limit exceeded' 高频反馈，只读不改配置，给可粘贴 fix 命令 + enhance_config_doctor 工具按需诊断。继承 v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层 + 三层记忆协调。",
+  "version": "5.7.4",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.4 — config-doctor 扩展扫所有已装插件 bare pluginApi（违反 '>=X.Y.Z' 规则会被 openclaw 拒绝，报错 '插件要求 X.Y.Z'）：扫 ~/.openclaw/extensions/ 和 node_modules/@huo15/ 等路径，给 python3 inline 修复命令；继承 v5.7.3 openclaw.json 陷阱诊断（reserveTokensFloor / model maxTokens）+ v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层 + 三层记忆协调。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

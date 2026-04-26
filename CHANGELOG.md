@@ -2,6 +2,59 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.4 — 2026-04-26（config-doctor 扩展：扫已装插件 bare pluginApi）
+
+用户反馈：**"提示插件要求 2026.2.24，但是我的 openclaw 已经是 2026.4.22"**。第一反应是 enhance 自己的问题，但实际是另外两个插件违反了 openclaw plugin compat 规则。
+
+### 根因
+
+按 [`MEMORY/openclaw_plugin_compat_rules.md`](https://...): "compat.pluginApi MUST be ">=X.Y.Z" range, never bare version (bare = exact match, breaks on runtime drift)"。
+
+用户实测两处违规：
+- `~/.openclaw/extensions/tips/package.json` v1.0.0 → `pluginApi: "2026.4.11"`（bare）
+- `~/.openclaw/node_modules/@huo15/huo15-huihuoyun-odoo/package.json` v1.2.0（npm peerDep 残留）→ `pluginApi: "2026.2.24"`（bare）
+
+openclaw 启动扫 node_modules 看到 bare → 解读为精确匹配 2026.2.24 → 跟当前 4.22 不匹配 → 报错"插件要求 2026.2.24"。
+
+### 新增
+
+- **`src/modules/config-doctor.ts: isBarePluginApi(spec)`** — 检测字符串是否是 ranged spec：
+  - 带前缀 `>=` `<=` `>` `<` `^` `~` `*` `=` → 合规
+  - 含空格组合 range（如 `">=1.0 <2.0"`）→ 合规
+  - 数字开头无前缀（如 `"2026.4.11"`）→ **bare 违规**
+- **`src/modules/config-doctor.ts: scanInstalledPluginsForBarePluginApi(openclawDir)`** — 扫描三类路径下的 `package.json`：
+  1. `{openclawDir}/extensions/*/package.json`（openclaw 实际启用的）
+  2. `{openclawDir}/node_modules/@huo15/*/package.json`（@huo15 scope 下的）
+  3. `{openclawDir}/node_modules/*/package.json`（无 scope 的）
+  - 只检查声明了 `openclaw.extensions` 或 `peerDependencies.openclaw` 的包
+  - 命中 bare → 加 `CheckResult` 推到主报告 + 给 python3 inline fix 命令
+- 工具 `enhance_config_doctor` 输出自动多一段"已装插件 pluginApi 健康度"
+
+### 不破坏
+
+- 完全只读用户文件系统，绝不修改任何 package.json
+- 启动检查失败 try-catch 静默
+- 扫描复杂度 O(已装插件数)，单次启动 < 50ms（实测 5 个插件 < 10ms）
+
+### 已立即修用户当前安装
+
+- `~/.openclaw/extensions/tips/package.json`: bare `2026.4.11` → `>=2026.4.11`
+- `~/.openclaw/node_modules/@huo15/huo15-huihuoyun-odoo/package.json`: bare `2026.2.24` → `>=2026.2.24`
+- 备份分别在同目录 `.bak.before-bare-fix` / `.bak`
+
+### 经验沉淀
+
+- **bare pluginApi 是 silent breakage 的常见来源** —— 插件作者写时通常想表达"最低版本"，但忘了加 `>=`，部署时被解读为精确匹配
+- **enhance config-doctor 的诊断范围应该覆盖整个 openclaw 状态目录**，不只 openclaw.json —— 任何会让 openclaw 启动失败的配置陷阱都该报警
+- **写在 SELF_ITERATE.md 第 5 节作为发布前自查项**：发版前 npm pack && grep `pluginApi` 看是不是 ranged
+
+### 调研依据
+
+- 用户反馈："提示插件要求 2026.2.24，但是我的 openclaw 已经是 2026.4.22"
+- KB `~/knowledge/huo15/2026-04-26-openclaw-enhance-v574-plugin-bare-pluginApi-postmortem.md`
+
+---
+
 ## 5.7.3 — 2026-04-26（config-doctor：'Context limit exceeded' 高频反馈兜底）
 
 用户实测：装了 v5.7.2 之后仍然报 `Context limit exceeded. ... agents.defaults.compaction.reserveTokensFloor to 20000 or higher`。**这不是 enhance 插件的问题**，而是 openclaw 自身配置：(1) 缺失 `agents.defaults.compaction.reserveTokensFloor`（4.22 把这个字段从顶层 `compaction.*` 移到 `agents.defaults.compaction.*`，老用户配置文件没自动迁移）；(2) MiniMax-M2.7 maxTokens=131072 / contextWindow=204800，每轮预留输出吃 64% budget，剩 73k 给 input + tools + memory + history，几轮必爆。但用户**装的就是 enhance**，看到爆 context 第一反应是"插件的锅"，所以 enhance 必须主动诊断 + 报警把根因信号给到用户。

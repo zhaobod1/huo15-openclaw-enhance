@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除 before_compaction 噪音 hook；v5.7.2 hardening；v5.7.3 启动期诊断 openclaw.json 配置陷阱（缺失 reserveTokensFloor / model maxTokens 过大）",
-  "version": "2.4.3",
+  "description": "非侵入式增强 OpenClaw：记忆整合（corpus supplement）、工具安全补充、提示词增强、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘。v5.6 工具分层；v5.7 历史会话搜索；v5.7.1 移除噪音 hook；v5.7.2 hardening；v5.7.3 诊断 openclaw.json 陷阱；v5.7.4 扫已装插件 bare pluginApi（违反 '>=X.Y.Z' 会被 openclaw 拒绝）",
+  "version": "2.4.4",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

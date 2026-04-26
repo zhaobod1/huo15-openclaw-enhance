@@ -13,7 +13,7 @@
  * - 不用 child_process（红线 #4）
  * - 修复命令通过 return-cliCmd 模式给出，让用户手工或 cron-cli 执行（红线 #5）
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
@@ -21,6 +21,111 @@ import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import type { ConfigDoctorConfig, NotificationQueue } from "../types.js";
 import { DEFAULT_AGENT_ID } from "../types.js";
+
+/**
+ * v5.7.4: 检测某条 pluginApi / peerDep 范围是否是合规的 ranged spec。
+ * "2026.4.11" → bare（精确匹配，被 openclaw 4.22 拒绝）
+ * ">=2026.4.11" / "^2026.4.11" / "~2026.4.11" / "*" / undefined → OK
+ *
+ * 见 KB `~/.claude/projects/-Users-jobzhao/memory/openclaw_plugin_compat_rules.md`
+ */
+function isBarePluginApi(spec: unknown): spec is string {
+  if (typeof spec !== "string") return false;
+  const s = spec.trim();
+  if (!s) return false;
+  // 任何带前缀的 range 都 OK
+  if (/^(>=|<=|>|<|\^|~|\*|=)/.test(s)) return false;
+  // 含空格说明是组合 range（如 ">=1.0 <2.0"）也 OK
+  if (/\s/.test(s)) return false;
+  // 剩下的就是 bare 字符串（如 "2026.4.11"）
+  return /^\d/.test(s);
+}
+
+/**
+ * v5.7.4: 扫所有已装插件的 package.json 检测 bare pluginApi
+ * 扫描路径：
+ * - {openclawDir}/extensions/<plugin>/package.json
+ * - {openclawDir}/node_modules/@huo15/<plugin>/package.json（旧 npm peerDep 残留）
+ * - {openclawDir}/node_modules/<plugin>/package.json（无 scope 的）
+ */
+function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  const dirsToScan: string[] = [];
+
+  // extensions 目录
+  const extDir = join(openclawDir, "extensions");
+  if (existsSync(extDir)) {
+    try {
+      for (const name of readdirSync(extDir)) {
+        const p = join(extDir, name);
+        if (statSync(p).isDirectory()) dirsToScan.push(p);
+      }
+    } catch {
+      /* 静默 */
+    }
+  }
+
+  // node_modules 下的 @huo15/* 和无 scope 的（不递归子 node_modules）
+  const nmDir = join(openclawDir, "node_modules");
+  if (existsSync(nmDir)) {
+    try {
+      for (const name of readdirSync(nmDir)) {
+        if (name === ".bin" || name === ".package-lock.json") continue;
+        const p = join(nmDir, name);
+        try {
+          if (!statSync(p).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        if (name.startsWith("@")) {
+          // scope: 进入扫子目录
+          try {
+            for (const sub of readdirSync(p)) {
+              const sp = join(p, sub);
+              try {
+                if (statSync(sp).isDirectory()) dirsToScan.push(sp);
+              } catch {
+                /* skip */
+              }
+            }
+          } catch {
+            /* skip */
+          }
+        } else {
+          dirsToScan.push(p);
+        }
+      }
+    } catch {
+      /* 静默 */
+    }
+  }
+
+  for (const dir of dirsToScan) {
+    const pkgPath = join(dir, "package.json");
+    if (!existsSync(pkgPath)) continue;
+    let pkg: any;
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    } catch {
+      continue;
+    }
+    // 只扫声明了 openclaw extensions 的包
+    if (!pkg?.openclaw?.extensions && !pkg?.peerDependencies?.openclaw) continue;
+    const name = pkg?.name ?? dir;
+    const compatApi = pkg?.openclaw?.compat?.pluginApi;
+    if (isBarePluginApi(compatApi)) {
+      const fixed = `>=${compatApi}`;
+      results.push({
+        ok: false,
+        level: "warn",
+        category: "plugin-bare-pluginApi",
+        message: `已装插件 ${name}（${pkgPath}）的 openclaw.compat.pluginApi="${compatApi}" 是 bare 版本，会被解读为精确匹配，与当前 openclaw 不兼容时启动报错"插件要求 ${compatApi}"`,
+        fixCommand: `python3 -c "import json,pathlib;p=pathlib.Path('${pkgPath}');c=json.loads(p.read_text());c.setdefault('openclaw',{}).setdefault('compat',{})['pluginApi']='${fixed}';p.write_text(json.dumps(c,indent=2,ensure_ascii=False));print('OK')"`,
+      });
+    }
+  }
+  return results;
+}
 
 interface CheckResult {
   ok: boolean;
@@ -136,13 +241,17 @@ export function checkOpenClawConfig(
     }
   }
 
+  // v5.7.4: 扫所有已装插件的 bare pluginApi（违反 ">=X.Y.Z" 规则的会被 openclaw 拒绝）
+  const pluginIssues = scanInstalledPluginsForBarePluginApi(openclawDir);
+  results.push(...pluginIssues);
+
   if (results.length === 0) {
     return [
       {
         ok: true,
         level: "info",
         category: "config-ok",
-        message: "openclaw.json 配置健康（reserveTokensFloor 合理 + 所有 model maxTokens 合理）",
+        message: "openclaw 配置 + 已装插件 pluginApi 全部健康（reserveTokensFloor / model maxTokens / plugin compat 均合规）",
       },
     ];
   }
