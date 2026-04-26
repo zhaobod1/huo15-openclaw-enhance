@@ -2,7 +2,7 @@
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
   "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.8 全面适配 openclaw 4.24 SDK：peerDep 4.24 + build/compat 同步 + 14 处 api.on 全 typed 去 as any + 加 enabledByDefault/uiHints/activation 元数据",
-  "version": "2.4.8",
+  "version": "2.4.9",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": { "control": "select", "label": "工具分层" },
