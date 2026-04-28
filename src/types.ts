@@ -349,6 +349,21 @@ export interface EnhancePluginConfig {
   skillRecommender?: SkillRecommenderConfig;
   /** v5.7.7: 接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook 闭环 session 生命周期 */
   sessionLifecycle?: SessionLifecycleConfig;
+  /** v5.7.10: 主动 surface 龙虾原生 .md memory 文件锚点(解决"第二天失忆") */
+  nativeMemorySurfacer?: NativeMemorySurfacerConfigType;
+}
+
+export interface NativeMemorySurfacerConfigType {
+  enabled?: boolean;
+  /** 显式指定 memory 目录;不指定则按 cwd 推断 (~/.claude/projects/-<cwd-key>/memory) */
+  memoryDir?: string;
+  /** 单次注入最多展示的文件数,默认 5 */
+  maxFiles?: number;
+  /** 单文件 description 截断长度,默认 80 */
+  descriptionMaxChars?: number;
+  /** 评分阈值 (0-1),低于此分数的文件不进入 surface,默认 0.15 */
+  threshold?: number;
+  debug?: boolean;
 }
 
 export interface SessionRecapConfigType {

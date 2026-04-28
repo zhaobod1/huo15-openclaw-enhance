@@ -37,6 +37,7 @@ import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { registerConfigDoctor } from "./src/modules/config-doctor.js";
 import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
+import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { getDb } from "./src/utils/sqlite-store.js";
@@ -220,6 +221,14 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.sessionLifecycle?.enabled !== false,
         load: () => registerSessionLifecycle(api, config.sessionLifecycle, notifyQueue),
+      },
+      {
+        // v5.7.10: 主动 surface 龙虾原生 .md memory 文件锚点
+        // tier=1 minimal 也启用——零工具 schema（纯 before_prompt_build hook）+ 解决"第二天失忆"
+        name: "原生记忆 surface",
+        tier: 1,
+        enabled: config.nativeMemorySurfacer?.enabled !== false,
+        load: () => registerNativeMemorySurfacer(api, config.nativeMemorySurfacer),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
