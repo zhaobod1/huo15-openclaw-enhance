@@ -71,9 +71,29 @@ export default definePluginEntry({
     const maxTier: Tier = TIER_MAX[toolTier];
 
     // 初始化共享数据库和通知队列
+    // better-sqlite3 是原生模块，Node.js 版本变更或 npm install 不完整时可能缺失 .node 绑定文件。
+    // 此时降级运行：跳过所有 DB 依赖模块，保留无状态模块（installer / spawn / prompt / kb / config-doctor 等）。
     const openclawHome = resolveOpenClawHome(api);
-    const db = getDb(openclawHome);
-    const notifyQueue = createNotificationQueue(db, config.notifications);
+    let db: ReturnType<typeof getDb> | null = null;
+    let notifyQueue: ReturnType<typeof createNotificationQueue> | null = null;
+    let dbAvailable = false;
+    try {
+      db = getDb(openclawHome);
+      notifyQueue = createNotificationQueue(db, config.notifications);
+      dbAvailable = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const extDir = join(openclawHome, "extensions", "enhance");
+      api.logger.error(
+        `[enhance] better-sqlite3 原生绑定丢失，数据库初始化失败：${msg}`,
+      );
+      api.logger.error(
+        `[enhance] 修复命令：cd ${extDir} && npm rebuild better-sqlite3`,
+      );
+      api.logger.warn(
+        `[enhance] 已降级：跳过所有 DB 依赖模块（结构化记忆、状态栏、追踪、章节、仪表盘、生命周期等），无状态模块正常加载。`,
+      );
+    }
 
     // 模块清单（v5.6 新增 tier 字段）：
     // tier 1 = 常驻层（最高 ROI，任何时候都暴露）
@@ -85,14 +105,14 @@ export default definePluginEntry({
       {
         name: "结构化记忆",
         tier: 1,
-        enabled: config.memory?.enabled !== false,
+        enabled: config.memory?.enabled !== false && dbAvailable,
         load: () => registerStructuredMemory(api, config.memory),
       },
       {
         name: "状态栏",
         tier: 1,
-        enabled: config.statusline?.enabled !== false,
-        load: () => registerStatusline(api, db, notifyQueue),
+        enabled: config.statusline?.enabled !== false && dbAvailable,
+        load: () => registerStatusline(api, db!, notifyQueue!),
       },
       {
         name: "子任务派发",
@@ -103,8 +123,8 @@ export default definePluginEntry({
       {
         name: "模式闸门",
         tier: 1,
-        enabled: config.mode?.enabled === true,
-        load: () => registerModeGate(api, config.mode, notifyQueue),
+        enabled: config.mode?.enabled === true && dbAvailable,
+        load: () => registerModeGate(api, config.mode, notifyQueue!),
       },
       {
         name: "技能安装器",
@@ -115,25 +135,25 @@ export default definePluginEntry({
       {
         name: "记忆整合",
         tier: 1,
-        enabled: config.memory?.enabled !== false,
+        enabled: config.memory?.enabled !== false && dbAvailable,
         load: () => registerMemoryIntegrator(api, config.contextPruner),
       },
       {
         name: "章节标记",
         tier: 2,
-        enabled: config.chapters?.enabled !== false,
+        enabled: config.chapters?.enabled !== false && dbAvailable,
         load: () => registerChapterMarks(api),
       },
       {
         name: "任务追踪",
         tier: 2,
-        enabled: config.todos?.enabled !== false,
-        load: () => registerTodoTracker(api, notifyQueue),
+        enabled: config.todos?.enabled !== false && dbAvailable,
+        load: () => registerTodoTracker(api, notifyQueue!),
       },
       {
         name: "定时任务桥",
         tier: 2,
-        enabled: config.scheduledTasks?.enabled !== false,
+        enabled: config.scheduledTasks?.enabled !== false && dbAvailable,
         load: () => registerScheduledTasksBridge(api),
       },
       {
@@ -151,7 +171,7 @@ export default definePluginEntry({
       {
         name: "工具安全",
         tier: 3,
-        enabled: config.safety?.enabled !== false,
+        enabled: config.safety?.enabled !== false && dbAvailable,
         load: () => registerToolSafety(api, config.safety),
       },
       {
@@ -163,7 +183,7 @@ export default definePluginEntry({
       {
         name: "会话回顾",
         tier: 3,
-        enabled: config.sessionRecap?.enabled !== false,
+        enabled: config.sessionRecap?.enabled !== false && dbAvailable,
         load: () => registerSessionRecap(api, config.sessionRecap),
       },
       {
@@ -183,14 +203,14 @@ export default definePluginEntry({
       {
         name: "输出自检",
         tier: 1,
-        enabled: config.selfCheck?.enabled !== false,
+        enabled: config.selfCheck?.enabled !== false && dbAvailable,
         load: () => registerSelfCheck(api, config.selfCheck),
       },
       {
         name: "仪表盘",
         tier: 1,
-        enabled: config.dashboard?.enabled !== false,
-        load: () => registerDashboard(api, config.dashboard, notifyQueue, db),
+        enabled: config.dashboard?.enabled !== false && dbAvailable,
+        load: () => registerDashboard(api, config.dashboard, notifyQueue!, db!),
       },
       {
         name: "共享知识库语料",
@@ -203,8 +223,8 @@ export default definePluginEntry({
         // tier=1，minimal 也启用——这是关键的 'Context limit exceeded' 兜底诊断
         name: "配置诊断",
         tier: 1,
-        enabled: config.configDoctor?.enabled !== false,
-        load: () => registerConfigDoctor(api, config.configDoctor, notifyQueue),
+        enabled: config.configDoctor?.enabled !== false && dbAvailable,
+        load: () => registerConfigDoctor(api, config.configDoctor, notifyQueue!),
       },
       {
         // v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划
@@ -219,8 +239,8 @@ export default definePluginEntry({
         // tier=1 minimal 也启用——这是核心生命周期补全，零工具 schema（纯 hook 监听）
         name: "会话生命周期",
         tier: 1,
-        enabled: config.sessionLifecycle?.enabled !== false,
-        load: () => registerSessionLifecycle(api, config.sessionLifecycle, notifyQueue),
+        enabled: config.sessionLifecycle?.enabled !== false && dbAvailable,
+        load: () => registerSessionLifecycle(api, config.sessionLifecycle, notifyQueue!),
       },
       {
         // v5.7.10: 主动 surface 龙虾原生 .md memory 文件锚点
@@ -276,6 +296,7 @@ export default definePluginEntry({
       // 静默跳过（非关键路径）
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v5.7.11 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
+    const degradeNote = dbAvailable ? "" : "（DB 降级模式：better-sqlite3 原生绑定丢失）";
+    api.logger.info(`[enhance] 龙虾增强包 v5.7.12 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能）${degradeNote}，启用模块: ${loaded.join("、")}`);
   },
 });
