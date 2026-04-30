@@ -276,6 +276,6 @@ export default definePluginEntry({
       // 静默跳过（非关键路径）
     }
 
-    api.logger.info(`[enhance] 龙虾增强包 v5.6.0 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v5.7.11 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能），启用模块: ${loaded.join("、")}`);
   },
 });
