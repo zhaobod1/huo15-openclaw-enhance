@@ -26,10 +26,22 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.8** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.11** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.11 model-router: 修复 WeCom 图片路由到 MiniMax-VL-01（2026-04-30）
+
+**用户反馈**："图片路由到 M2.7 报 content empty，M2.7 是 text-only 模型不支持图片"
+
+问题根因：`detectPromptInlineMedia` 只检测 `[image]` 和 `[media attached` 标记，但 WeCom 图片到达时 prompt 里只有文件路径（`~/.openclaw/media/inbound/xxx.png`），没有这些标记，导致图片检测失败，一直路由到 text-only 的 M2.7。
+
+修复：在 `detectPromptInlineMedia` 中新增 WeCom 媒体路径格式检测——任何包含 `~/.openclaw/media/inbound/*.png|jpg|jpeg|gif|webp|bmp` 的 prompt 都会被识别为图片，自动路由到 `MiniMax-VL-01`（vision 模型）。
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| WeCom 发图片 | 路由到 M2.7 → API 报 content empty | 路由到 VL-01 → 正常识别 |
 
 ### v5.7.8 全面适配 openclaw 2026.4.24（2026-04-26 同日）
 
