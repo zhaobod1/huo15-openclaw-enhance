@@ -228,7 +228,7 @@ function buildEnhanceCorpus(
   options: MemoryIntegratorOptions,
 ): MemoryCorpusSupplement {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
   const threshold = options.threshold ?? 0.5;
   const defaultMax = options.maxEntries ?? 5;
   const debug = options.debug ?? false;
@@ -362,7 +362,7 @@ export function registerMemoryIntegrator(
     parameters: {},
     async execute(_id: string, _params: Record<string, unknown>): Promise<any> {
       const openclawDir = resolveOpenClawHome(api);
-      const db = getDb(openclawDir);
+      const db = getDb();
       const agentId = ((ctx?.agentId as string | undefined) ?? DEFAULT_AGENT_ID).trim();
 
       const rows = listRecentMemories(db, agentId, 1000);

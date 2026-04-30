@@ -45,7 +45,7 @@ function resolveAgentId(ctx: OpenClawPluginToolContext): string {
 
 export function registerStructuredMemory(api: OpenClawPluginApi, config?: MemoryConfig) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
   const maxCtx = config?.maxContextEntries ?? 5;
 
   // ── Tool Factory: enhance_memory_store ──

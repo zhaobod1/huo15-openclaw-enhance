@@ -467,7 +467,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
       const pathname = url.pathname;
 
       if (pathname === "/plugins/enhance/api/status") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentFilter = url.searchParams.get("agent") || undefined;
 
         const agents = getAllAgentIds(db);
@@ -497,7 +497,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // 宠物 JSON API
       if (pathname === "/plugins/enhance/api/pet") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
         const pet = getOrCreatePet(db, agentId);
         sendJson(res, pet);
@@ -506,7 +506,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // 宠物互动 API
       if (pathname === "/plugins/enhance/api/pet/interact" && req.method === "POST") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         let body = "";
         for await (const chunk of req) body += chunk;
         try {
@@ -550,7 +550,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // 状态栏快照 JSON（供 Control UI / 外部嵌入）
       if (pathname === "/plugins/enhance/api/statusline") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
         const sessionId = url.searchParams.get("session") || "";
         const snap = notifyQueue ? buildSnapshot(db, agentId, sessionId, notifyQueue) : null;
@@ -560,7 +560,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // Todos 列表（最近一个 session）
       if (pathname === "/plugins/enhance/api/todos") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
         const todos = getLatestTodos(db, agentId);
         sendJson(res, { agentId, todos });
@@ -569,7 +569,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // Chapter marks
       if (pathname === "/plugins/enhance/api/chapters") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
         const sessionId = url.searchParams.get("session") || undefined;
         const chapters = listChapters(db, agentId, sessionId, 50);
@@ -579,7 +579,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // 定时工作流桥列表
       if (pathname === "/plugins/enhance/api/loops") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || undefined;
         const loops = listScheduledBindings(db, agentId);
         sendJson(res, { loops });
@@ -588,7 +588,7 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
 
       // 子任务孵化清单（从 memory 里过滤 tag=spawn-task）
       if (pathname === "/plugins/enhance/api/spawn-tasks") {
-        const db = sharedDb ?? getDb(openclawDir);
+        const db = sharedDb ?? getDb();
         const agentId = url.searchParams.get("agent") || DEFAULT_AGENT_ID;
         const entries = searchMemories(db, agentId, { keyword: "spawn-task", limit: 30 });
         sendJson(res, { agentId, entries });

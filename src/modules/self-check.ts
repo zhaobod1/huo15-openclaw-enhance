@@ -51,7 +51,7 @@ function scoreKeywordMatch(text: string, keywords: string[]): number {
 
 export function registerSelfCheck(api: OpenClawPluginApi, config?: SelfCheckConfig) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   const enabled = config?.enabled !== false;
   if (!enabled) return;

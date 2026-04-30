@@ -141,7 +141,7 @@ export function registerSessionRecap(api: OpenClawPluginApi, config?: SessionRec
   if (config?.enabled === false) return;
 
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   const idleMinutes = config?.recapIdleMinutes ?? 75;
   const minIntervalMinutes = config?.recapMinIntervalMinutes ?? 30;

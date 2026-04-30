@@ -152,7 +152,7 @@ function pruneObservations(now: number) {
 // ─────────────────────── 主入口 ───────────────────────
 export function registerToolSafety(api: OpenClawPluginApi, config?: SafetyConfig) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
   const rules: SafetyRule[] = config?.rules ?? [];
   const defaultAction = config?.defaultAction ?? "allow";
   const enableRetry = config?.enableRetry ?? true;

@@ -23,7 +23,7 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
 
 export function registerChapterMarks(api: OpenClawPluginApi) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({

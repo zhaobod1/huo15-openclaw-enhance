@@ -40,7 +40,7 @@ import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
-import { getDb } from "./src/utils/sqlite-store.js";
+import { initDb } from "./src/utils/sqlite-store.js";
 import type { EnhancePluginConfig, ToolTier } from "./src/types.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -65,25 +65,26 @@ export default definePluginEntry({
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
   description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
 
-  register(api) {
+  async register(api) {
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
     const toolTier: ToolTier = config.toolTier ?? "balanced";
     const maxTier: Tier = TIER_MAX[toolTier];
 
     // 初始化共享数据库和通知队列
-    // better-sqlite3 是原生模块，Node.js 版本变更或 npm install 不完整时可能缺失 .node 绑定文件。
-    // 此时降级运行：跳过所有 DB 依赖模块，保留无状态模块（installer / spawn / prompt / kb / config-doctor 等）。
+    // better-sqlite3 是原生模块，Node.js 版本变更时 ABI 不兼容导致加载失败。
+    // 使用动态 import() 代替静态 import，让失败可以被 try/catch 截获并降级运行。
+    // .node-version 指纹文件用于提前检测 Node 升级，在加载前就打 warning。
     const openclawHome = resolveOpenClawHome(api);
-    let db: ReturnType<typeof getDb> | null = null;
+    const extDir = join(openclawHome, "extensions", "enhance");
+    let db: Awaited<ReturnType<typeof initDb>> | null = null;
     let notifyQueue: ReturnType<typeof createNotificationQueue> | null = null;
     let dbAvailable = false;
     try {
-      db = getDb(openclawHome);
+      db = await initDb(openclawHome, extDir, api.logger);
       notifyQueue = createNotificationQueue(db, config.notifications);
       dbAvailable = true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const extDir = join(openclawHome, "extensions", "enhance");
       api.logger.error(
         `[enhance] better-sqlite3 原生绑定丢失，数据库初始化失败：${msg}`,
       );

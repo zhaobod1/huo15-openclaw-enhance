@@ -39,7 +39,7 @@ function buildCliCmd(agentId: string, prompt: string, thinking: "off" | "low" | 
 
 export function registerSpawnTask(api: OpenClawPluginApi) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({

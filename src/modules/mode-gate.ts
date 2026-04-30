@@ -206,7 +206,7 @@ export function registerModeGate(
 
   // ── enhance_exit_plan_mode: Claude-Code 风格的 Plan 审批闭环 ──
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   api.registerTool(
     ((ctx: OpenClawPluginToolContext) => ({

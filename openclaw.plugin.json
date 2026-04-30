@@ -2,7 +2,7 @@
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
   "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.10 新增 native-memory-surfacer：解决'第二天失忆'——每个 session 开局自动 surface ~/.claude/projects 下相关 .md memory 文件锚点(零侵入只读、零工具 schema、零 child_process)。继承 v5.7.8 全面适配 openclaw 4.24 SDK 等",
-  "version": "2.4.11",
+  "version": "2.4.12",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": { "control": "select", "label": "工具分层" },

@@ -4,9 +4,10 @@
  * 所有表都包含 agent_id 列以支持动态 Agent 隔离。
  * 每个 WeCom 用户/群组对应一个独立的 agentId，数据完全隔离。
  */
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
+import { ensureSqlite } from "./ensure-sqlite.js";
 import type {
   MemoryEntry,
   MemoryCategory,
@@ -188,15 +189,33 @@ function migrateV3ToV4(db: Database.Database): void {
 }
 
 let _db: Database.Database | null = null;
+let _dbInitError: string | null = null;
 
-export function getDb(openclawDir: string): Database.Database {
+export type { Database };
+
+/**
+ * 异步初始化数据库连接（仅在插件启动时由 index.ts 调用一次）。
+ * 使用动态 import() 加载 better-sqlite3，失败可以被 try/catch 截获。
+ */
+export async function initDb(
+  openclawDir: string,
+  extDir?: string,
+  log?: { warn: (msg: string) => void; info?: (msg: string) => void },
+): Promise<Database.Database> {
   if (_db) return _db;
+
+  const resolvedExtDir = extDir ?? join(openclawDir, "extensions", "enhance");
+  const result = await ensureSqlite(openclawDir, resolvedExtDir, log ?? { warn: console.warn });
+  if (!result.ok) {
+    _dbInitError = result.error;
+    throw new Error(`better-sqlite3 原生绑定不可用：${result.error}\n修复命令：${result.repairCmd}`);
+  }
 
   const memoryDir = join(openclawDir, "memory");
   if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
 
   const dbPath = join(memoryDir, "enhance-memory.sqlite");
-  _db = new Database(dbPath);
+  _db = new result.Database(dbPath);
   _db.pragma("journal_mode = WAL");
 
   // 检测是否需要迁移 v1 表
@@ -226,6 +245,19 @@ export function getDb(openclawDir: string): Database.Database {
   }
 
   return _db;
+}
+
+/**
+ * 同步获取已初始化的数据库实例。
+ * 必须在 initDb() 成功后调用；否则抛出明确的错误。
+ * 供各模块在注册期使用（此时 DB 已由 index.ts 初始化完毕）。
+ */
+export function getDb(): Database.Database {
+  if (_db) return _db;
+  if (_dbInitError) {
+    throw new Error(`better-sqlite3 未初始化：${_dbInitError}`);
+  }
+  throw new Error("better-sqlite3 未初始化：initDb() 尚未调用或已失败");
 }
 
 /** v5.7.2: 暴露给运维 / enhance_memory_purge 调用的清理函数 */

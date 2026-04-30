@@ -42,7 +42,7 @@ function quote(s: string): string {
 
 export function registerScheduledTasksBridge(api: OpenClawPluginApi) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   // ── Hook: before_prompt_build ── 识别 loop 前缀并注入对应 binding 的 instructions
   // v5.7.8: typed via openclaw 4.24 SDK

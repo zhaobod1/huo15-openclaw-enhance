@@ -51,7 +51,7 @@ function summarize(rows: TodoEntry[]): string {
 
 export function registerTodoTracker(api: OpenClawPluginApi, notifyQueue: NotificationQueue) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
 
   // enhance_todo_write — 覆盖式写入整组
   api.registerTool(

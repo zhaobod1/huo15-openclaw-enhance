@@ -62,7 +62,7 @@ export function registerSessionLifecycle(
   notifyQueue: NotificationQueue,
 ) {
   const openclawDir = resolveOpenClawHome(api);
-  const db = getDb(openclawDir);
+  const db = getDb();
   const enableSessionStart = config?.enableSessionStart !== false;
   const enableSessionEnd = config?.enableSessionEnd !== false;
   const enableBeforeReset = config?.enableBeforeReset !== false;
