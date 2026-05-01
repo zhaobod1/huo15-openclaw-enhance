@@ -66,22 +66,24 @@ export default definePluginEntry({
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
   description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
 
-  async register(api) {
+  register(api) {
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
     const toolTier: ToolTier = config.toolTier ?? "balanced";
     const maxTier: Tier = TIER_MAX[toolTier];
 
     // 初始化共享数据库和通知队列
     // better-sqlite3 是原生模块，Node.js 版本变更时 ABI 不兼容导致加载失败。
-    // 使用动态 import() 代替静态 import，让失败可以被 try/catch 截获并降级运行。
+    // v5.7.17: 走 createRequire(import.meta.url) 同步加载（loader 拒绝
+    // async register —— 见 ~/.claude/projects/-Users-jobzhao/memory/feedback_*
+    // 关于 openclaw plugin SDK sync 约束的记录），try/catch 仍可截获 ABI 错误。
     // .node-version 指纹文件用于提前检测 Node 升级，在加载前就打 warning。
     const openclawHome = resolveOpenClawHome(api);
     const extDir = join(openclawHome, "extensions", "enhance");
-    let db: Awaited<ReturnType<typeof initDb>> | null = null;
+    let db: ReturnType<typeof initDb> | null = null;
     let notifyQueue: ReturnType<typeof createNotificationQueue> | null = null;
     let dbAvailable = false;
     try {
-      db = await initDb(openclawHome, extDir, api.logger);
+      db = initDb(openclawHome, extDir, api.logger);
       notifyQueue = createNotificationQueue(db, config.notifications);
       dbAvailable = true;
     } catch (err) {

@@ -1,16 +1,24 @@
 /**
  * Lazy, resilient better-sqlite3 loader with Node.js ABI fingerprinting.
  *
- * Static imports fail at module-evaluation time before any try/catch can
- * intercept them.  Dynamic import() makes the failure catchable so the
- * plugin can degrade gracefully and surface a one-command repair.
+ * Static `import` fails at module-evaluation time before any try/catch can
+ * intercept it. v5.7.17: switched from dynamic `import()` (async) to
+ * `createRequire(import.meta.url)` so the loader is sync and try/catch can
+ * still trap ABI mismatches — required because openclaw's loader rejects
+ * async plugin `register()` (loader-CLyHx60E.js: "plugin register must be
+ * synchronous"). Container of damage when register returned a Promise:
+ * loader called `guarded.close()` immediately and every subsequent
+ * `api.registerTool` / `api.on` was a silent no-op.
  *
  * A `.node-version` fingerprint in the OpenClaw memory directory lets us
- * detect Node.js upgrades before import() fails, so we can warn early.
+ * detect Node.js upgrades before require() fails, so we can warn early.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
+
+const nodeRequire = createRequire(import.meta.url);
 
 let _Database: typeof Database | null = null;
 let _resolved = false;
@@ -57,17 +65,19 @@ export interface SqliteEnsureError {
 }
 
 /**
- * Dynamically import better-sqlite3, catching ABI mismatches so the
- * plugin can fall back gracefully instead of crashing at import time.
+ * Synchronously load better-sqlite3 via createRequire, catching ABI
+ * mismatches so the plugin can fall back gracefully instead of crashing
+ * at module evaluation. Sync because openclaw's plugin loader requires
+ * register() to return synchronously.
  *
  * On Node.js version change it prints an early-warning log through the
  * supplied logger and refreshes the fingerprint on success.
  */
-export async function ensureSqlite(
+export function ensureSqlite(
   openclawDir: string,
   extDir: string,
   log: { warn: (msg: string) => void; info?: (msg: string) => void },
-): Promise<SqliteEnsureResult | SqliteEnsureError> {
+): SqliteEnsureResult | SqliteEnsureError {
   // Short-circuit if already resolved this session.
   if (_Database) return { Database: _Database, ok: true };
 
@@ -81,15 +91,15 @@ export async function ensureSqlite(
   }
 
   try {
-    const mod = await import("better-sqlite3");
-    _Database = mod.default as typeof Database;
+    const mod = nodeRequire("better-sqlite3");
+    _Database = (mod?.default ?? mod) as typeof Database;
     _resolved = true;
     writeNodeVersion(openclawDir, currentVersion);
     return { Database: _Database, ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const repairCmd = `cd ${extDir} && npm rebuild better-sqlite3`;
-    log.warn(`[enhance] better-sqlite3 动态加载失败: ${msg}`);
+    log.warn(`[enhance] better-sqlite3 加载失败: ${msg}`);
     log.warn(`[enhance] 修复命令：${repairCmd}`);
     return {
       ok: false,

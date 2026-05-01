@@ -194,18 +194,19 @@ let _dbInitError: string | null = null;
 export type { Database };
 
 /**
- * 异步初始化数据库连接（仅在插件启动时由 index.ts 调用一次）。
- * 使用动态 import() 加载 better-sqlite3，失败可以被 try/catch 截获。
+ * 同步初始化数据库连接（仅在插件启动时由 index.ts 调用一次）。
+ * v5.7.17: sync 化以适配 openclaw plugin loader 对 register() 同步返回的硬约束。
+ * 用 createRequire 加载 better-sqlite3，失败可以被 try/catch 截获。
  */
-export async function initDb(
+export function initDb(
   openclawDir: string,
   extDir?: string,
   log?: { warn: (msg: string) => void; info?: (msg: string) => void },
-): Promise<Database.Database> {
+): Database.Database {
   if (_db) return _db;
 
   const resolvedExtDir = extDir ?? join(openclawDir, "extensions", "enhance");
-  const result = await ensureSqlite(openclawDir, resolvedExtDir, log ?? { warn: console.warn });
+  const result = ensureSqlite(openclawDir, resolvedExtDir, log ?? { warn: console.warn });
   if (!result.ok) {
     _dbInitError = result.error;
     throw new Error(`better-sqlite3 原生绑定不可用：${result.error}\n修复命令：${result.repairCmd}`);
