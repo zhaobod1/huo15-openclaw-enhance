@@ -190,11 +190,13 @@ function formatResults(results: CheckResult[]): string {
 export function registerSessionDoctor(
   api: OpenClawPluginApi,
   config: SessionDoctorConfig | undefined,
-  notifyQueue: NotificationQueue,
+  notifyQueue: NotificationQueue | null,
 ) {
   const openclawDir = resolveOpenClawHome(api);
 
   // 启动期检查（fire-and-forget，绝不阻塞插件加载）
+  // 本模块不读 db，notifyQueue 缺失时降级到 logger only（符合 enhance "无状态模块
+  // 在 DB 降级模式仍正常加载" 原则）。
   try {
     const results = checkTrajectories(openclawDir, config);
     const issues = results.filter((r) => !r.ok);
@@ -206,13 +208,15 @@ export function registerSessionDoctor(
         api.logger.warn(`  • [${r.level}] ${r.category}: ${r.message}`);
         if (r.fixCommand) api.logger.warn(`    → ${r.fixCommand}`);
       }
-      notifyQueue.emit(
-        DEFAULT_AGENT_ID,
-        "warn",
-        "session-doctor",
-        `enhance: trajectory.jsonl 体量异常（${issues.length} 项），可能引起 gateway sessions.list 卡顿`,
-        formatResults(issues) + "\n\n（运行 enhance_session_doctor 工具看完整诊断）",
-      );
+      if (notifyQueue) {
+        notifyQueue.emit(
+          DEFAULT_AGENT_ID,
+          "warn",
+          "session-doctor",
+          `enhance: trajectory.jsonl 体量异常（${issues.length} 项），可能引起 gateway sessions.list 卡顿`,
+          formatResults(issues) + "\n\n（运行 enhance_session_doctor 工具看完整诊断）",
+        );
+      }
     } else {
       api.logger.info("[enhance-session-doctor] trajectory 体量健康");
     }

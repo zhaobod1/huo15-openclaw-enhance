@@ -233,10 +233,11 @@ export default definePluginEntry({
       {
         // v5.7.16: 启动期诊断 trajectory.jsonl 体量
         // tier=1，minimal 也启用——超大 trajectory 会让 gateway sessions.list 卡 13s+ event-loop / 99% CPU
+        // v5.7.18: 解除 dbAvailable 依赖——本模块不读 db，notifyQueue 缺失时也能跑（logger only）
         name: "trajectory 体量诊断",
         tier: 1,
-        enabled: config.sessionDoctor?.enabled !== false && dbAvailable,
-        load: () => registerSessionDoctor(api, config.sessionDoctor, notifyQueue!),
+        enabled: config.sessionDoctor?.enabled !== false,
+        load: () => registerSessionDoctor(api, config.sessionDoctor, notifyQueue),
       },
       {
         // v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划
