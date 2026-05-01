@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.22 新增 bot-share-link：企微/钉钉无法直传大文件时的兜底——把本地文件投递到 ~/.openclaw/share/files/，返回 BOT_BASE_URL 下的临时下载 URL，配 FRP+Nginx 内网穿透即可下发给用户（默认 24h 过期 lazy 清理）。继承 v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 4.24 SDK 等",
-  "version": "2.4.13",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.23 bot-share-link 升级 zero-config：复用 dashboard 的 /plugins/enhance prefix route，通过 http-route-bridge 子分发到 /plugins/enhance/share/<token>-<filename>；用户访问过一次仪表盘后 baseUrl 自动从 host header 检测，不再需要配 BOT_BASE_URL env / nginx alias。继承 v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
+  "version": "2.4.14",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {
@@ -334,7 +334,7 @@
       },
       "botShare": {
         "type": "object",
-        "description": "v5.7.22 BOT 文件分享桥：企微/钉钉无法直传大文件（>20-50MB）时，把本地文件投递到 <shareRoot>/files/ 并生成 <baseUrl><urlPrefix>/<token>-<basename> 临时下载 URL（默认 24h 过期，下次工具调用时 lazy 清理）。baseUrl 优先级：env BOT_BASE_URL > 此配置 > http://localhost:18789。Web server 需把 <urlPrefix>/* 反代到 <shareRoot>/files/（FRP+Nginx 内网穿透）。",
+        "description": "v5.7.23 BOT 文件分享桥（zero-config）：企微/钉钉无法直传大文件（>20-50MB）时，把本地文件投递到 <shareRoot>/files/ 并生成 <baseUrl><urlPrefix>/<token>-<basename> 临时下载 URL（默认 24h 过期 lazy 清理）。HTTP 流量复用 dashboard 已有的 /plugins/enhance prefix route，由 http-route-bridge 子分发——无需 nginx alias、无需新端口。baseUrl 优先级：env BOT_BASE_URL > 此配置 > 自动从 dashboard 请求 host 抽 > http://localhost:18789（fallback）。",
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -342,16 +342,16 @@
           },
           "baseUrl": {
             "type": "string",
-            "description": "公网 base URL（不含尾部 /）。env BOT_BASE_URL 优先级更高"
+            "description": "公网 base URL（不含尾部 /）。一般留空——用户访问过一次 /plugins/enhance/* 后会自动检测；env BOT_BASE_URL 优先级更高"
           },
           "shareRoot": {
             "type": "string",
-            "description": "落盘根目录，默认 ~/.openclaw/share；web server alias 应指向 <shareRoot>/files"
+            "description": "落盘根目录，默认 ~/.openclaw/share"
           },
           "urlPrefix": {
             "type": "string",
-            "default": "/share",
-            "description": "URL 路径前缀，对应 nginx alias 挂载位置"
+            "default": "/plugins/enhance/share",
+            "description": "URL 路径前缀。默认走 dashboard prefix route 的子路径，避免 SDK overlap-denial"
           },
           "expireHours": {
             "type": "number",

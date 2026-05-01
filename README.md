@@ -26,36 +26,38 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.22** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.23** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v5.7.23 BOT 文件分享桥升级 zero-config（2026-05-01）
+
+复用 dashboard 已经在跑的 `/plugins/enhance` prefix route，通过新增的 [http-route-bridge](src/utils/http-route-bridge.ts) 子分发到 `/plugins/enhance/share/<token>-<filename>`；dashboard handler 顶部自动从 `x-forwarded-host` / `host` 抽出公网 baseUrl 缓存。
+
+**用户体验**（vs v5.7.22）：
+
+| 维度 | v5.7.22 | v5.7.23 |
+|---|---|---|
+| nginx 配置 | 需要加 `/share/` alias | 不需要——已有的 `/plugins/enhance/*` 反代直接复用 |
+| `BOT_BASE_URL` env | 需要 `export` | 不需要——访问一次 dashboard 自动检测；仍可手动覆盖 |
+| 部署步骤 | 2 步 | 0 步（升级 + 重启即用） |
+
+URL 从 `https://keepermac.huo15.com/share/<token>-...` 变成 `https://keepermac.huo15.com/plugins/enhance/share/<token>-...`。文件流式响应（createReadStream + pipe），Content-Disposition 用 RFC 5987 双声明，UTF-8 文件名兼容老浏览器。
 
 ### v5.7.22 BOT 文件分享桥：企微/钉钉大文件兜底（2026-05-01）
 
 **用户痛点**：播客生成 90MB mp3，企微插件直接传不了；钉钉同样卡死大文件。需要把本地文件投到一个目录、返回临时下载 URL 给用户自取。
 
-**新增三个工具**（tier=1，全分层都暴露）：
+**三个工具**（tier=1，全分层都暴露）：
 
 | 工具 | 作用 |
 |---|---|
-| `enhance_share_file(filePath, label?, expireHours?, copyMode?)` | 把本地文件投递到 `<shareRoot>/files/<token>-<basename>`，返回 `<BOT_BASE_URL><urlPrefix>/<token>-<basename>` 临时 URL（默认 24h 过期） |
+| `enhance_share_file(filePath, label?, expireHours?, copyMode?)` | 把本地文件投递到 `<shareRoot>/files/<token>-<basename>`，返回临时 URL（默认 24h 过期） |
 | `enhance_share_list()` | 列当前活跃分享 + 顺手清过期 |
 | `enhance_share_revoke(token \| filename)` | 立刻撤销（删本地文件 + manifest 条目） |
 
-**典型部署**（用户场景：`Keepermac.huo15.com` 内网穿透）：
-
-```bash
-# 1. FRP 把内网静态 server 端口反代到公网
-#    localhost:18789 → Keepermac.huo15.com
-# 2. Nginx 把 /share/* alias 到 ~/.openclaw/share/files/
-# 3. 给 enhance 喂 BOT_BASE_URL（env 优先级最高）
-export BOT_BASE_URL=https://Keepermac.huo15.com
-# 4. 重启 openclaw，工具返回的 URL 直接是公网可访问的
-#    https://Keepermac.huo15.com/share/<token>-<filename>
-```
-
-**安全闸门**：路径黑名单（`/.ssh/ /.aws/ /.gnupg/ /etc/` 等不让分享）、绝对路径校验、`..` 防 traversal、500MB 大小上限、12 hex token 不可枚举遍历。**零 child_process**（fs.copyFileSync），lazy cleanup（不在 register 期跑后台任务）。
+**安全闸门**：路径黑名单（`/.ssh/ /.aws/ /.gnupg/ /etc/` 等不让分享）、绝对路径校验、`..` 防 traversal、500MB 大小上限、12 hex token 不可枚举遍历、HTTP handler 内 filename 防越界（不能含 `/ \\ ..`）。**零 child_process**（fs.copyFileSync），lazy cleanup（不在 register 期跑后台任务）。
 
 ### v5.7.12 model-router: 速度+精度+覆盖率三重增强（2026-05-01）
 

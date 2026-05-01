@@ -2,28 +2,35 @@
  * 模块: BOT 文件分享桥（enhance_share_file / list / revoke）
  *
  * 解决场景：企微/钉钉等 IM 渠道无法直传大文件（>20MB / >50MB），需要给用户一个
- * "内网穿透下的临时下载链接"。比如本地播客生成 90MB mp3 → 企微发不出去 → 拿这个
- * 工具生成 https://Keepermac.huo15.com/share/<token>-podcast.mp3 发给用户下载。
+ * 临时下载链接。比如本地播客生成 90MB mp3 → 企微发不出去 → 拿这个工具生成一个
+ * `https://<dashboard 域名>/plugins/enhance/share/<token>-podcast.mp3` 发给用户即可。
  *
- * 工作机制：
- *   - 用户通过 FRP/Nginx 把内网 OpenClaw 静态文件目录反代到公网域名（如
- *     `Keepermac.huo15.com → localhost:18789`），并把 `/share/*` alias 到本插件
- *     的 `<shareRoot>/files/` 目录。
- *   - 本模块把 LLM 指定的本地文件 copy/link 到 `<shareRoot>/files/<token>-<basename>`，
- *     生成 `<BOT_BASE_URL><urlPrefix>/<token>-<basename>` URL 返给 LLM 直接发用户。
- *   - 元数据落 `<shareRoot>/manifest.json`，每次调用工具时 lazy 清理过期文件。
+ * 工作机制（v5.7.23 起 zero-config）：
+ *   - 复用 dashboard 已经在运行的 `/plugins/enhance` HTTP route（SDK 不允许两条
+ *     prefix route 互为子前缀，所以走 bridge dispatch）。
+ *   - dashboard handler 顶部 detectBaseUrlFromRequest(req)：用户访问任何
+ *     `/plugins/enhance/*` 一次，bridge 就从 `x-forwarded-host` / `host` 抽出
+ *     公网 baseUrl 缓存住——不用配 env，不用 nginx alias。
+ *   - LLM 调 enhance_share_file(filePath) 时，把文件 copy/link 到
+ *     `<shareRoot>/files/<token>-<basename>`，URL 拼为
+ *     `${detectedBaseUrl}/plugins/enhance/share/<token>-<basename>`。
+ *   - 公网请求打到 dashboard 的 prefix route，dashboard 顶部调用
+ *     tryHandleSubRoute() 让 bot-share 自己的 handler 流式吐文件。
  *
- * 配置优先级（baseUrl）：env BOT_BASE_URL > pluginConfig.botShare.baseUrl > http://localhost:18789
+ * 配置优先级（baseUrl）：env BOT_BASE_URL > pluginConfig.botShare.baseUrl
+ *   > 自动检测到的公网 host > http://localhost:18789（fallback）
  *
  * 红线一致：
- *   - 零 child_process（用 fs.copyFileSync / linkSync）
+ *   - 零 child_process（fs.copyFileSync / linkSync / createReadStream）
  *   - 不擅自改用户配置（写的是插件自己的 share 目录）
  *   - LLM 输入过 sanitizer：绝对路径校验 + path traversal + 敏感目录黑名单
+ *   - HTTP handler 防越界（filename 不能含 / 和 ..，必须 manifest 命中）
  *   - 单文件大小上限（默认 500MB）防止误传系统盘
  */
 import { Type } from "@sinclair/typebox";
 import {
   copyFileSync,
+  createReadStream,
   existsSync,
   linkSync,
   mkdirSync,
@@ -34,13 +41,18 @@ import {
 } from "node:fs";
 import { basename, isAbsolute, join, normalize, resolve as pathResolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
+import {
+  registerSubRouteHandler,
+  resolveBaseUrl as resolveBaseUrlFromBridge,
+} from "../utils/http-route-bridge.js";
 import type { BotShareConfig } from "../types.js";
 
-const DEFAULT_BASE_URL = "http://localhost:18789";
-const DEFAULT_URL_PREFIX = "/share";
+const DEFAULT_BASE_URL_FALLBACK = "http://localhost:18789";
+const DEFAULT_URL_PREFIX = "/plugins/enhance/share";
 const DEFAULT_EXPIRE_HOURS = 24;
 const DEFAULT_MAX_FILE_MB = 500;
 
@@ -71,18 +83,6 @@ interface Manifest {
   entries: ShareEntry[];
 }
 
-function getEnv(name: string): string | undefined {
-  return (globalThis as any).process?.env?.[name];
-}
-
-function resolveBaseUrl(config: BotShareConfig | undefined): string {
-  const raw =
-    getEnv("BOT_BASE_URL")?.trim() ||
-    config?.baseUrl?.trim() ||
-    DEFAULT_BASE_URL;
-  return raw.replace(/\/+$/, "");
-}
-
 function resolveShareRoot(api: OpenClawPluginApi, config: BotShareConfig | undefined): string {
   if (config?.shareRoot && config.shareRoot.trim()) return config.shareRoot.trim();
   return join(resolveOpenClawHome(api), "share");
@@ -90,7 +90,7 @@ function resolveShareRoot(api: OpenClawPluginApi, config: BotShareConfig | undef
 
 function resolveUrlPrefix(config: BotShareConfig | undefined): string {
   const raw = (config?.urlPrefix ?? DEFAULT_URL_PREFIX).trim();
-  if (!raw) return "";
+  if (!raw) return DEFAULT_URL_PREFIX;
   return "/" + raw.replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
@@ -164,6 +164,27 @@ function errorResponse(msg: string) {
   return { content: [{ type: "text" as const, text: `✗ ${msg}` }] };
 }
 
+function resolveBaseUrl(config: BotShareConfig | undefined): string {
+  return resolveBaseUrlFromBridge({
+    configBaseUrl: config?.baseUrl,
+    fallback: DEFAULT_BASE_URL_FALLBACK,
+  });
+}
+
+function buildShareUrl(
+  baseUrl: string,
+  urlPrefix: string,
+  filename: string,
+): string {
+  return `${baseUrl}${urlPrefix}/${encodeURIComponent(filename)}`;
+}
+
+/** 把原始文件名（去掉 token 前缀）抽出来，用于 Content-Disposition。 */
+function deriveFriendlyName(finalName: string): string {
+  const dash = finalName.indexOf("-");
+  return dash > 0 ? finalName.slice(dash + 1) : finalName;
+}
+
 export function registerBotShareLink(
   api: OpenClawPluginApi,
   config: BotShareConfig | undefined,
@@ -183,17 +204,131 @@ export function registerBotShareLink(
     );
   }
 
+  // ── 注册 HTTP sub-route handler 到 bridge（dashboard handler 顶部会 dispatch） ──
+  registerSubRouteHandler(async (req: IncomingMessage, res: ServerResponse) => {
+    const rawUrl = req.url ?? "/";
+    let pathname: string;
+    try {
+      pathname = new URL(rawUrl, `http://${req.headers.host || "localhost"}`).pathname;
+    } catch {
+      return false;
+    }
+    if (pathname !== urlPrefix && !pathname.startsWith(urlPrefix + "/")) return false;
+
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { Allow: "GET, HEAD" });
+      res.end("Method Not Allowed");
+      return true;
+    }
+
+    // 提取 filename（必须在 prefix 之后，且不能含 / 和 ..）
+    if (pathname === urlPrefix || pathname === urlPrefix + "/") {
+      res.writeHead(404);
+      res.end("Not Found");
+      return true;
+    }
+    let filename: string;
+    try {
+      filename = decodeURIComponent(pathname.slice(urlPrefix.length + 1));
+    } catch {
+      res.writeHead(400);
+      res.end("Bad Request");
+      return true;
+    }
+    if (!filename || filename.includes("/") || filename.includes("..") || filename.includes("\\")) {
+      res.writeHead(400);
+      res.end("Bad Request");
+      return true;
+    }
+
+    const manifest = safeReadManifest(manifestPath);
+    const entry = manifest.entries.find((e) => e.filename === filename);
+    if (!entry) {
+      res.writeHead(404);
+      res.end("Not Found");
+      return true;
+    }
+    if (new Date(entry.expireAt).getTime() <= Date.now()) {
+      res.writeHead(410);
+      res.end("Gone (link expired)");
+      return true;
+    }
+
+    const localPath = pathResolve(join(filesDir, filename));
+    if (!localPath.startsWith(pathResolve(filesDir) + "/") || !existsSync(localPath)) {
+      res.writeHead(404);
+      res.end("Not Found (file missing)");
+      return true;
+    }
+    let st: ReturnType<typeof statSync>;
+    try {
+      st = statSync(localPath);
+    } catch {
+      res.writeHead(404);
+      res.end("Not Found");
+      return true;
+    }
+
+    const friendlyName = deriveFriendlyName(filename);
+    // RFC 5987 双声明，兼容老浏览器 + UTF-8 文件名
+    const safeAscii = friendlyName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "_");
+    const contentDisposition =
+      `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(friendlyName)}`;
+
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": st.size,
+      "Content-Disposition": contentDisposition,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
+    });
+    if (req.method === "HEAD") {
+      res.end();
+      return true;
+    }
+
+    await new Promise<void>((done) => {
+      const stream = createReadStream(localPath);
+      let finished = false;
+      const finish = () => {
+        if (!finished) {
+          finished = true;
+          done();
+        }
+      };
+      stream.on("error", (err) => {
+        api.logger.warn(
+          `[enhance-bot-share] stream error on ${localPath}: ${(err as Error).message}`,
+        );
+        try {
+          if (!res.headersSent) res.writeHead(500);
+          res.end();
+        } catch {
+          // ignore
+        }
+        finish();
+      });
+      stream.on("end", finish);
+      res.on("close", () => {
+        stream.destroy();
+        finish();
+      });
+      stream.pipe(res);
+    });
+    return true;
+  });
+
   api.logger.info(
-    `[enhance] BOT 文件分享模块已加载（root=${shareRoot}，url=${resolveBaseUrl(config)}${urlPrefix}，默认 ${expireHours}h 过期，上限 ${maxFileMB}MB）`,
+    `[enhance] BOT 文件分享模块已加载（root=${shareRoot}，prefix=${urlPrefix}，默认 ${expireHours}h 过期，上限 ${maxFileMB}MB；URL 通过 dashboard route + bridge 自动路由，无需 nginx alias / env）`,
   );
 
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_share_file",
       description:
-        "把本地大文件投递到 OpenClaw share 目录，返回 BOT_BASE_URL 下的临时下载链接。" +
-        "用于企微/钉钉等无法直传大文件（>20-50MB）的渠道：把文件路径丢给我，返回 https://<内网穿透域名><urlPrefix>/<token>-<filename>，发给用户即可下载。" +
-        "BOT_BASE_URL 来自环境变量或 pluginConfig.botShare.baseUrl（默认 http://localhost:18789）。文件 24h 后下次工具调用时自动清理。",
+        "把本地大文件投递到 OpenClaw share 目录，返回对外的临时下载链接。" +
+        "用于企微/钉钉等无法直传大文件（>20-50MB）的场景：传一个绝对路径，返回 https://<dashboard 公网域名>/plugins/enhance/share/<token>-<filename> 给用户下载。" +
+        "v5.7.23 起 zero-config：用户访问过一次 dashboard 后，公网 baseUrl 自动从 host header 检测，不需要配 env 或 nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。",
       parameters: Type.Object({
         filePath: Type.String({
           description:
@@ -304,7 +439,8 @@ export function registerBotShareLink(
         }
 
         const baseUrl = resolveBaseUrl(config);
-        const url = `${baseUrl}${urlPrefix}/${encodeURIComponent(finalName)}`;
+        const url = buildShareUrl(baseUrl, urlPrefix, finalName);
+        const detected = baseUrl !== DEFAULT_BASE_URL_FALLBACK;
         const lines = [
           `✓ 已生成临时下载链接（${formatSize(st.size)}，${ttlH}h 后过期）：`,
           ``,
@@ -316,7 +452,9 @@ export function registerBotShareLink(
           `过期：${expireAt.toISOString()}`,
           pruned > 0 ? `（顺手清理了 ${pruned} 个过期文件）` : "",
           ``,
-          `提示：BOT_BASE_URL=${baseUrl} 来自 env > config > 默认。Web server 需把 ${urlPrefix}/* 映射到 ${filesDir}/`,
+          detected
+            ? `baseUrl=${baseUrl}（来自 env/config/dashboard 自动检测）`
+            : `⚠ baseUrl 仍是默认 ${baseUrl}——请先在浏览器访问一次你的 dashboard 公网地址（任何 /plugins/enhance/* 都行），让 enhance 自动捕获 host；或显式 export BOT_BASE_URL / 在 botShare.baseUrl 配置`,
         ]
           .filter(Boolean)
           .join("\n");
@@ -333,6 +471,7 @@ export function registerBotShareLink(
             label,
             expireAt: expireAt.toISOString(),
             baseUrl,
+            baseUrlDetected: detected,
             urlPrefix,
             shareRoot,
             prunedExpired: pruned,
@@ -387,7 +526,7 @@ export function registerBotShareLink(
           ``,
         ];
         for (const e of sorted) {
-          const url = `${baseUrl}${urlPrefix}/${encodeURIComponent(e.filename)}`;
+          const url = buildShareUrl(baseUrl, urlPrefix, e.filename);
           const remainH = (
             (new Date(e.expireAt).getTime() - now.getTime()) /
             3600 /
@@ -407,7 +546,7 @@ export function registerBotShareLink(
           structuredContent: {
             entries: sorted.map((e) => ({
               ...e,
-              url: `${baseUrl}${urlPrefix}/${encodeURIComponent(e.filename)}`,
+              url: buildShareUrl(baseUrl, urlPrefix, e.filename),
             })),
             pruned,
             pendingMissing,

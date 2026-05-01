@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.22",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.22 — 新增 bot-share-link：企微/钉钉等 IM 渠道无法直传大文件（>20-50MB）时的兜底——把本地文件投递到 <shareRoot>/files/，返回 <BOT_BASE_URL><urlPrefix>/<token>-<basename> 临时下载链接（默认 24h 过期 lazy 清理）。配 FRP+Nginx 内网穿透即可：localhost:18789 → Keepermac.huo15.com/share/。零 child_process（fs.copyFileSync），路径黑名单 sanitizer 防 LLM path traversal。继承 v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 2026.4.24 + v5.7.7 session-lifecycle + v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.6 工具分层。",
+  "version": "5.7.23",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.23 — bot-share-link 升级 zero-config：复用 dashboard 已有的 /plugins/enhance prefix route，通过 http-route-bridge 子分发到 /plugins/enhance/share/<token>-<filename>；用户访问过一次仪表盘后 baseUrl 自动从 host header 检测，不需要再配 BOT_BASE_URL env、也不用 nginx alias。继承 v5.7.22 三件套（enhance_share_file/list/revoke）+ v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 2026.4.24 + v5.6 工具分层。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

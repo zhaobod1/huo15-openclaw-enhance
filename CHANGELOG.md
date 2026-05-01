@@ -2,6 +2,61 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.23 — 2026-05-01（bot-share zero-config：复用 dashboard route + 自动检测 baseUrl）
+
+**用户反馈**：「上次实现增强包面板就没配那么多东西。第一步 nginx 加 alias 和第二步 export BOT_BASE_URL 能不能不做？参考 https://keepermac.huo15.com/plugins/enhance」
+
+—— 用户已经把 dashboard 的 `/plugins/enhance` prefix route 反代到公网，没必要为大文件分享再加一条 nginx alias 或一个 env 变量。
+
+### 设计调整
+
+**问题**：SDK 的 `registerHttpRoute` 不允许两条 prefix route 互为子前缀（[node_modules/openclaw/dist/http-route-overlap-*.js](http-route-overlap-C2701fGQ.js) 的 `doPluginHttpRoutesOverlap` 会拒）。dashboard 已经占了 `/plugins/enhance`，bot-share 想注册 `/plugins/enhance/share` 会被 overlap-denied。
+
+**解决**：新增 [http-route-bridge.ts](src/utils/http-route-bridge.ts)，做两件事：
+
+1. **子路由 dispatch**：bot-share register 时把自己的 handler 挂到 bridge；dashboard handler 顶部 `await tryHandleSubRoute(req, res)`，命中即返。一条 SDK route，多个模块共用。
+2. **baseUrl 自动检测**：dashboard handler 顶部 `detectBaseUrlFromRequest(req)`——从 `x-forwarded-host` / `host` + `x-forwarded-proto` 抽出公网 baseUrl 缓存。区分 external（含 `.` 且非纯 IP / localhost）和 internal，external 优先。
+
+**用户体验变化**：
+
+| 维度 | v5.7.22 | v5.7.23 |
+|---|---|---|
+| nginx 配置 | 需要加 `/share` alias 反代 `~/.openclaw/share/files/` | 不需要——直接复用 dashboard 已经反代过的 `/plugins/enhance/*` |
+| BOT_BASE_URL env | 需要 `export` | 不需要——访问一次 dashboard 就自动检测；仍可手动 export 覆盖 |
+| 默认 urlPrefix | `/share` | `/plugins/enhance/share` |
+| 部署步骤 | 2 步 | 0 步（升级即用，重启 openclaw 后访问一次仪表盘即可） |
+
+### URL 形态
+
+```
+旧：https://keepermac.huo15.com/share/<token>-podcast.mp3
+新：https://keepermac.huo15.com/plugins/enhance/share/<token>-podcast.mp3
+```
+
+文件流式响应（`createReadStream(...).pipe(res)`），HTTP 头：`Content-Type: application/octet-stream` + `Content-Disposition: attachment; filename*=UTF-8''<encoded>` + `X-Content-Type-Options: nosniff`。
+
+### baseUrl resolve 优先级（最终版）
+
+1. `process.env.BOT_BASE_URL`（运行时动态）
+2. `pluginConfig.botShare.baseUrl`（启动时静态）
+3. **bridge 检测到的 external host**（含 `.` 且非纯 IP / localhost）
+4. bridge 检测到的 internal host（localhost）
+5. `http://localhost:18789` fallback（仅当上述都没命中，工具响应里会提示用户去访问一次 dashboard）
+
+### 文件影响
+
+- 新增 [src/utils/http-route-bridge.ts](src/utils/http-route-bridge.ts)（76 行）
+- [src/modules/bot-share-link.ts](src/modules/bot-share-link.ts) 重写：新增 SDK HTTP handler（流式 GET + HEAD + 405/404/410/400 响应）；删本地 resolveBaseUrl 改用 bridge；urlPrefix 默认 `/plugins/enhance/share`
+- [src/modules/dashboard.ts](src/modules/dashboard.ts) handler 顶部加 `detectBaseUrlFromRequest` + `tryHandleSubRoute` 两行
+- npm `5.7.22 → 5.7.23`，plugin `2.4.13 → 2.4.14`
+
+### 红线一致
+
+- 零 child_process（continue 用 fs.copyFileSync / linkSync / createReadStream）
+- 不修改 openclaw 配置（写自己的 `~/.openclaw/share/`）
+- HTTP handler 防越界：filename 不能含 `/ \\ ..`，必须 manifest 命中（防文件系统枚举）
+- pluginApi 仍是 `>=2026.4.24`
+
 ## 5.7.22 — 2026-05-01（BOT 文件分享桥：企微/钉钉大文件兜底）
 
 **用户反馈**：「最近播客生成 90MB mp3，企微插件直接传不了。每次遇到大文件都卡死。我跑了 FRP 把内网 18789 反代到 Keepermac.huo15.com，希望 enhance 提供一个工具，把本地文件投到一个目录、返回临时 URL 给用户下载。」
