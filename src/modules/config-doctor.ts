@@ -219,6 +219,68 @@ function scanInstalledPluginsForAsyncRegister(openclawDir: string): CheckResult[
 }
 
 /**
+ * v5.7.25: 扫所有已装 channel-plugin 的 manifest 顶层是否缺 `channelConfigs.<channelId>`。
+ * Why: openclaw runtime setup 流程要在 plugin 实际加载之前用 `channelConfigs.<id>`
+ * 渲染 channel 的 label / description / schema。manifest 只声明 `configSchema.properties.
+ * channels.<id>.*` 不够 —— runtime 启动会报：
+ *   "channel plugin manifest declares <id> without channelConfigs metadata;
+ *    add openclaw.plugin.json#channelConfigs so config schema and setup
+ *    surfaces work before runtime loads"
+ * 这是 @huo15/wechat-service v0.1-2.2.0 踩过的坑（修于 2.2.1）。
+ *
+ * 触发条件：manifest 顶层 `channels` 数组非空，且 `channelConfigs` 字段缺失或没覆盖到所有声明的 channelId。
+ * 修复命令：参考 wechat-service@2.2.1 的 manifest 结构（channelConfigs.<id> 含 label/description/schema 三段）。
+ */
+function scanInstalledPluginsForMissingChannelConfigs(openclawDir: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  for (const dir of collectInstalledPluginDirs(openclawDir)) {
+    const manifestPath = join(dir, "openclaw.plugin.json");
+    if (!existsSync(manifestPath)) continue;
+    let manifest: any;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    } catch {
+      continue;
+    }
+    const declaredChannels: string[] = Array.isArray(manifest?.channels) ? manifest.channels.filter((x: any) => typeof x === "string") : [];
+    if (declaredChannels.length === 0) continue;
+    const channelConfigs = manifest?.channelConfigs;
+    const missing: string[] = [];
+    if (!channelConfigs || typeof channelConfigs !== "object") {
+      missing.push(...declaredChannels);
+    } else {
+      for (const cid of declaredChannels) {
+        const cfg = channelConfigs[cid];
+        if (!cfg || typeof cfg !== "object") missing.push(cid);
+      }
+    }
+    if (missing.length === 0) continue;
+    const meta = readPluginPackageJson(dir);
+    const name = meta?.pkg?.name ?? dir;
+    results.push({
+      ok: false,
+      level: "warn",
+      category: "plugin-missing-channelConfigs",
+      message:
+        `已装 channel 插件 ${name}（${manifestPath}）声明 channels=[${declaredChannels.join(", ")}] ` +
+        `但 manifest 顶层 channelConfigs 缺 [${missing.join(", ")}]。openclaw runtime setup 流程需要 ` +
+        `channelConfigs.<id>.{label,description,schema} 在 runtime 加载前可用，否则启动报警告且 setup 向导无法渲染该 channel`,
+      fixCommand:
+        `# 在 ${manifestPath} 顶层加 channelConfigs 字段（与 configSchema 同级）。范例（参考 @huo15/wechat-service@2.2.1）：\n` +
+        `# {\n` +
+        `#   "id": "<plugin-id>",\n` +
+        `#   "channels": [${declaredChannels.map((c) => `"${c}"`).join(", ")}],\n` +
+        `#   "channelConfigs": {\n` +
+        missing.map((cid) => `#     "${cid}": { "label": "...", "description": "...", "schema": { "type": "object", "properties": { /* 把 configSchema.properties.channels.${cid} 下的 schema 平移过来 */ } } }`).join(",\n") + "\n" +
+        `#   },\n` +
+        `#   "configSchema": { ... 保留旧路径作为兼容 ... }\n` +
+        `# }`,
+    });
+  }
+  return results;
+}
+
+/**
  * v5.7.21: 扫所有已装插件的入口文件检测旧版 tool 字段（schema/handler）。
  * Why: openclaw plugin SDK 现校验 { parameters, execute }（tools-CCfW25J2.js
  * describeMalformedPluginTool: typeof tool.execute !== "function" 直接判 missing），
@@ -407,6 +469,8 @@ export function checkOpenClawConfig(
   results.push(...scanInstalledPluginsForAsyncRegister(openclawDir));
   // v5.7.21: 扫已装插件的旧版 tool 字段 schema/handler（被 loader 判 malformed 跳过）
   results.push(...scanInstalledPluginsForLegacyToolFields(openclawDir));
+  // v5.7.25: 扫已装 channel-plugin 的 manifest 是否缺顶层 channelConfigs.<channelId>（runtime setup 报警）
+  results.push(...scanInstalledPluginsForMissingChannelConfigs(openclawDir));
 
   if (results.length === 0) {
     return [

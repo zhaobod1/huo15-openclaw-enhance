@@ -2,6 +2,46 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.25 — 2026-05-01（config-doctor 加扫 channel-plugin 缺顶层 channelConfigs）
+
+**触发**：今天为 `@huo15/wechat-service` 修「runtime 启动报 *channel plugin manifest declares wechat-service without channelConfigs metadata*」时，发现 enhance 的 config-doctor 已经扫了 bare pluginApi / async register / 旧版 tool 字段三类反模式，但**没扫这条**。channel 类插件如果 manifest 顶层只声明 `configSchema.properties.channels.<id>` 而没有顶层 `channelConfigs.<id>`，runtime setup 流程在加载前就拿不到 label / description / schema，就会报这个警告。
+
+### 改动
+
+- `src/modules/config-doctor.ts` 新增 `scanInstalledPluginsForMissingChannelConfigs(openclawDir)`：
+  - 遍历 `~/.openclaw/extensions/*` 与 `~/.openclaw/node_modules/{,@scope/}*` 下的 `openclaw.plugin.json`
+  - 取顶层 `channels`（数组）+ `channelConfigs`（对象），找出 `channels` 声明了但 `channelConfigs` 没覆盖到的 channelId
+  - 给出可粘贴的 manifest 补丁示例（参考 `@huo15/wechat-service@2.2.1` 的结构 `channelConfigs.<id>.{label,description,schema}`）
+- `checkOpenClawConfig()` 末尾追加调用此扫描，与现有三类扫描并列
+
+### 触发场景
+
+```bash
+# 启动期会在 stderr 看到：
+[enhance-config-doctor] 检测到 N 项 openclaw.json 配置问题:
+  • [warn] plugin-missing-channelConfigs: 已装 channel 插件 @huo15/foo（.../openclaw.plugin.json）
+    声明 channels=[foo] 但 manifest 顶层 channelConfigs 缺 [foo]。openclaw runtime setup
+    流程需要 channelConfigs.<id>.{label,description,schema} 在 runtime 加载前可用，
+    否则启动报警告且 setup 向导无法渲染该 channel
+    → 修复: # 在 .../openclaw.plugin.json 顶层加 channelConfigs 字段...
+
+# 或 agent 主动跑：
+enhance_config_doctor()
+```
+
+### 红线自查
+
+- ✅ 完全只读扫描，不修改任何 manifest（红线 #1）
+- ✅ 无 `child_process`（红线 #4）
+- ✅ 修复给的是 manifest 补丁示例文本，不自动 patch（红线 #1 + #5）
+- ✅ 不复制龙虾原生告警内容，只**主动提供修复命令**（与 bare pluginApi / async register / legacy tool 字段三类扫描同模式）
+
+### KB 关联
+
+- 起因 post-mortem：`~/knowledge/huo15/2026-05-01-wechat-service-v221-channelconfigs-and-stuck-v220-rescue.md`
+
+---
+
 ## 5.7.24 — 2026-05-01（bot-share URL 独立兄弟 prefix /plugins/enhance-share）
 
 **用户反馈**：「你应该模仿 https://keepermac.huo15.com/plugins/enhance，把所有的临时下载链接做成这样 `https://keepermac.huo15.com/plugins/enhancexx/{download-url}`，类似把。你自己规划」
