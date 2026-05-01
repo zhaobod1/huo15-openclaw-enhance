@@ -2,6 +2,64 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.24 — 2026-05-01（bot-share URL 独立兄弟 prefix /plugins/enhance-share）
+
+**用户反馈**：「你应该模仿 https://keepermac.huo15.com/plugins/enhance，把所有的临时下载链接做成这样 `https://keepermac.huo15.com/plugins/enhancexx/{download-url}`，类似把。你自己规划」
+
+—— v5.7.23 把 share 挂在 dashboard 子路径 `/plugins/enhance/share/...` 下，路径耦合 dashboard。用户希望 share 跟 dashboard 平级、各管各的。
+
+### 关键发现：兄弟前缀不算 overlap
+
+重读 SDK 的 [http-route-overlap.js](node_modules/openclaw/dist/http-route-overlap-*.js)：
+
+```js
+function prefixMatchPath(pathname, prefix) {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`) || pathname.startsWith(`${prefix}%`);
+}
+```
+
+`startsWith(\`${prefix}/\`)` 要求**斜杠分隔**——所以：
+
+| a.path | b.path | overlap? |
+|---|---|---|
+| `/plugins/enhance` | `/plugins/enhance/share` | ✅ overlap（子前缀） |
+| `/plugins/enhance` | `/plugins/enhance-share` | ❌ 不 overlap（兄弟前缀，分隔字符是 `-` 不是 `/`） |
+
+→ bot-share 可以**直接注册**自己的兄弟 prefix `/plugins/enhance-share`，不再需要 bridge dispatch。
+
+### 设计调整
+
+- **URL 形态**：`https://keepermac.huo15.com/plugins/enhance/share/<token>-<basename>` → `https://keepermac.huo15.com/plugins/enhance-share/<token>-<basename>`
+- **HTTP 路由**：bot-share 自己 `api.registerHttpRoute({ path: "/plugins/enhance-share", match: "prefix", auth: "plugin" })`，不再借道 dashboard handler
+- **dashboard.ts**：回退到 v5.7.22 状态，只保留 `detectBaseUrlFromRequest(req)` 一行（baseUrl 自动检测仍要走 dashboard 入口才能命中）
+- **http-route-bridge.ts**：简化为只导出 `detectBaseUrlFromRequest` / `resolveBaseUrl`，去掉 `registerSubRouteHandler` / `tryHandleSubRoute`
+- **share handler**：自己也调一下 `detectBaseUrlFromRequest(req)`——用户即使没访问过 dashboard，第一次点过的下载链接也能让 bridge 缓存 baseUrl
+
+### nginx 兼容性
+
+只要 nginx 反代是 `location /plugins/` proxy_pass（一般都是），新 URL 直接可达。如果用户只反代了 `/plugins/enhance/`（只代理 enhance 一个 plugin），需要补一条：
+
+```nginx
+location /plugins/enhance-share/ {
+    proxy_pass http://localhost:18789;
+    # （跟 /plugins/enhance/ 同样的 proxy headers）
+}
+```
+
+### 文件影响
+
+- [src/utils/http-route-bridge.ts](src/utils/http-route-bridge.ts)：从 102 行简化到 76 行（去掉 SubRoute 相关导出）
+- [src/modules/bot-share-link.ts](src/modules/bot-share-link.ts)：`registerSubRouteHandler` → `api.registerHttpRoute`，urlPrefix 默认 `/plugins/enhance-share`
+- [src/modules/dashboard.ts](src/modules/dashboard.ts)：去掉 `tryHandleSubRoute` import 和调用
+- npm `5.7.23 → 5.7.24`，plugin `2.4.14 → 2.4.15`
+
+### 红线一致
+
+- 零 child_process（仍用 fs.copyFileSync / linkSync / createReadStream）
+- 不修改 openclaw 配置
+- HTTP handler 防越界：filename 不能含 `/ \\ ..`，必须 manifest 命中防文件系统枚举
+- pluginApi 仍是 `>=2026.4.24`
+
 ## 5.7.23 — 2026-05-01（bot-share zero-config：复用 dashboard route + 自动检测 baseUrl）
 
 **用户反馈**：「上次实现增强包面板就没配那么多东西。第一步 nginx 加 alias 和第二步 export BOT_BASE_URL 能不能不做？参考 https://keepermac.huo15.com/plugins/enhance」

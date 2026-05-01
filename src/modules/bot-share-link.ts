@@ -3,19 +3,18 @@
  *
  * 解决场景：企微/钉钉等 IM 渠道无法直传大文件（>20MB / >50MB），需要给用户一个
  * 临时下载链接。比如本地播客生成 90MB mp3 → 企微发不出去 → 拿这个工具生成一个
- * `https://<dashboard 域名>/plugins/enhance/share/<token>-podcast.mp3` 发给用户即可。
+ * `https://<域名>/plugins/enhance-share/<token>-podcast.mp3` 发给用户即可。
  *
- * 工作机制（v5.7.23 起 zero-config）：
- *   - 复用 dashboard 已经在运行的 `/plugins/enhance` HTTP route（SDK 不允许两条
- *     prefix route 互为子前缀，所以走 bridge dispatch）。
- *   - dashboard handler 顶部 detectBaseUrlFromRequest(req)：用户访问任何
- *     `/plugins/enhance/*` 一次，bridge 就从 `x-forwarded-host` / `host` 抽出
- *     公网 baseUrl 缓存住——不用配 env，不用 nginx alias。
+ * 工作机制（v5.7.24 起独立兄弟 prefix）：
+ *   - SDK overlap 规则：`prefixMatchPath` 检查 `${prefix}/`，所以兄弟前缀
+ *     `/plugins/enhance-share` 跟 dashboard 的 `/plugins/enhance` **不算 overlap**，
+ *     bot-share 直接 api.registerHttpRoute 自己的 prefix route，不再依赖 bridge dispatch。
+ *   - 任何 `/plugins/enhance*` / `/plugins/enhance-share/*` 请求都喂给
+ *     detectBaseUrlFromRequest(req)，bridge 缓存公网 host——访问过一次 dashboard
+ *     或下载过一次 share 链接，工具就能拼出正确公网 URL，不用配 env / nginx alias。
  *   - LLM 调 enhance_share_file(filePath) 时，把文件 copy/link 到
  *     `<shareRoot>/files/<token>-<basename>`，URL 拼为
- *     `${detectedBaseUrl}/plugins/enhance/share/<token>-<basename>`。
- *   - 公网请求打到 dashboard 的 prefix route，dashboard 顶部调用
- *     tryHandleSubRoute() 让 bot-share 自己的 handler 流式吐文件。
+ *     `${detectedBaseUrl}/plugins/enhance-share/<token>-<basename>`。
  *
  * 配置优先级（baseUrl）：env BOT_BASE_URL > pluginConfig.botShare.baseUrl
  *   > 自动检测到的公网 host > http://localhost:18789（fallback）
@@ -46,13 +45,13 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
 import {
-  registerSubRouteHandler,
+  detectBaseUrlFromRequest,
   resolveBaseUrl as resolveBaseUrlFromBridge,
 } from "../utils/http-route-bridge.js";
 import type { BotShareConfig } from "../types.js";
 
 const DEFAULT_BASE_URL_FALLBACK = "http://localhost:18789";
-const DEFAULT_URL_PREFIX = "/plugins/enhance/share";
+const DEFAULT_URL_PREFIX = "/plugins/enhance-share";
 const DEFAULT_EXPIRE_HOURS = 24;
 const DEFAULT_MAX_FILE_MB = 500;
 
@@ -204,122 +203,132 @@ export function registerBotShareLink(
     );
   }
 
-  // ── 注册 HTTP sub-route handler 到 bridge（dashboard handler 顶部会 dispatch） ──
-  registerSubRouteHandler(async (req: IncomingMessage, res: ServerResponse) => {
-    const rawUrl = req.url ?? "/";
-    let pathname: string;
-    try {
-      pathname = new URL(rawUrl, `http://${req.headers.host || "localhost"}`).pathname;
-    } catch {
-      return false;
-    }
-    if (pathname !== urlPrefix && !pathname.startsWith(urlPrefix + "/")) return false;
+  // ── 注册独立 SDK prefix route（兄弟前缀，不跟 dashboard /plugins/enhance overlap） ──
+  api.registerHttpRoute({
+    path: urlPrefix,
+    match: "prefix",
+    auth: "plugin",
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      // 顺手喂给 bridge 缓存公网 baseUrl —— 用户即使没访问过 dashboard，
+      // 第一次点过的下载链接也能让工具知道公网 URL 是什么。
+      detectBaseUrlFromRequest(req);
 
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      res.writeHead(405, { Allow: "GET, HEAD" });
-      res.end("Method Not Allowed");
-      return true;
-    }
+      const rawUrl = req.url ?? "/";
+      let pathname: string;
+      try {
+        pathname = new URL(rawUrl, `http://${req.headers.host || "localhost"}`).pathname;
+      } catch {
+        res.writeHead(400);
+        res.end("Bad Request");
+        return true;
+      }
 
-    // 提取 filename（必须在 prefix 之后，且不能含 / 和 ..）
-    if (pathname === urlPrefix || pathname === urlPrefix + "/") {
-      res.writeHead(404);
-      res.end("Not Found");
-      return true;
-    }
-    let filename: string;
-    try {
-      filename = decodeURIComponent(pathname.slice(urlPrefix.length + 1));
-    } catch {
-      res.writeHead(400);
-      res.end("Bad Request");
-      return true;
-    }
-    if (!filename || filename.includes("/") || filename.includes("..") || filename.includes("\\")) {
-      res.writeHead(400);
-      res.end("Bad Request");
-      return true;
-    }
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        res.writeHead(405, { Allow: "GET, HEAD" });
+        res.end("Method Not Allowed");
+        return true;
+      }
 
-    const manifest = safeReadManifest(manifestPath);
-    const entry = manifest.entries.find((e) => e.filename === filename);
-    if (!entry) {
-      res.writeHead(404);
-      res.end("Not Found");
-      return true;
-    }
-    if (new Date(entry.expireAt).getTime() <= Date.now()) {
-      res.writeHead(410);
-      res.end("Gone (link expired)");
-      return true;
-    }
+      // prefix 根路径或者带 / 但没文件名 → 404（不暴露目录列表）
+      if (pathname === urlPrefix || pathname === urlPrefix + "/") {
+        res.writeHead(404);
+        res.end("Not Found");
+        return true;
+      }
+      let filename: string;
+      try {
+        filename = decodeURIComponent(pathname.slice(urlPrefix.length + 1));
+      } catch {
+        res.writeHead(400);
+        res.end("Bad Request");
+        return true;
+      }
+      if (!filename || filename.includes("/") || filename.includes("..") || filename.includes("\\")) {
+        res.writeHead(400);
+        res.end("Bad Request");
+        return true;
+      }
 
-    const localPath = pathResolve(join(filesDir, filename));
-    if (!localPath.startsWith(pathResolve(filesDir) + "/") || !existsSync(localPath)) {
-      res.writeHead(404);
-      res.end("Not Found (file missing)");
-      return true;
-    }
-    let st: ReturnType<typeof statSync>;
-    try {
-      st = statSync(localPath);
-    } catch {
-      res.writeHead(404);
-      res.end("Not Found");
-      return true;
-    }
+      const manifest = safeReadManifest(manifestPath);
+      const entry = manifest.entries.find((e) => e.filename === filename);
+      if (!entry) {
+        res.writeHead(404);
+        res.end("Not Found");
+        return true;
+      }
+      if (new Date(entry.expireAt).getTime() <= Date.now()) {
+        res.writeHead(410);
+        res.end("Gone (link expired)");
+        return true;
+      }
 
-    const friendlyName = deriveFriendlyName(filename);
-    // RFC 5987 双声明，兼容老浏览器 + UTF-8 文件名
-    const safeAscii = friendlyName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "_");
-    const contentDisposition =
-      `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(friendlyName)}`;
+      const localPath = pathResolve(join(filesDir, filename));
+      if (!localPath.startsWith(pathResolve(filesDir) + "/") || !existsSync(localPath)) {
+        res.writeHead(404);
+        res.end("Not Found (file missing)");
+        return true;
+      }
+      let st: ReturnType<typeof statSync>;
+      try {
+        st = statSync(localPath);
+      } catch {
+        res.writeHead(404);
+        res.end("Not Found");
+        return true;
+      }
 
-    res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": st.size,
-      "Content-Disposition": contentDisposition,
-      "Cache-Control": "private, max-age=0, must-revalidate",
-      "X-Content-Type-Options": "nosniff",
-    });
-    if (req.method === "HEAD") {
-      res.end();
-      return true;
-    }
+      const friendlyName = deriveFriendlyName(filename);
+      // RFC 5987 双声明，兼容老浏览器 + UTF-8 文件名
+      const safeAscii = friendlyName.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "_");
+      const contentDisposition =
+        `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(friendlyName)}`;
 
-    await new Promise<void>((done) => {
-      const stream = createReadStream(localPath);
-      let finished = false;
-      const finish = () => {
-        if (!finished) {
-          finished = true;
-          done();
-        }
-      };
-      stream.on("error", (err) => {
-        api.logger.warn(
-          `[enhance-bot-share] stream error on ${localPath}: ${(err as Error).message}`,
-        );
-        try {
-          if (!res.headersSent) res.writeHead(500);
-          res.end();
-        } catch {
-          // ignore
-        }
-        finish();
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": st.size,
+        "Content-Disposition": contentDisposition,
+        "Cache-Control": "private, max-age=0, must-revalidate",
+        "X-Content-Type-Options": "nosniff",
       });
-      stream.on("end", finish);
-      res.on("close", () => {
-        stream.destroy();
-        finish();
+      if (req.method === "HEAD") {
+        res.end();
+        return true;
+      }
+
+      await new Promise<void>((done) => {
+        const stream = createReadStream(localPath);
+        let finished = false;
+        const finish = () => {
+          if (!finished) {
+            finished = true;
+            done();
+          }
+        };
+        stream.on("error", (err) => {
+          api.logger.warn(
+            `[enhance-bot-share] stream error on ${localPath}: ${(err as Error).message}`,
+          );
+          try {
+            if (!res.headersSent) res.writeHead(500);
+            res.end();
+          } catch {
+            // ignore
+          }
+          finish();
+        });
+        stream.on("end", finish);
+        res.on("close", () => {
+          stream.destroy();
+          finish();
+        });
+        stream.pipe(res);
       });
-      stream.pipe(res);
-    });
-    return true;
+      return true;
+    },
   });
 
   api.logger.info(
-    `[enhance] BOT 文件分享模块已加载（root=${shareRoot}，prefix=${urlPrefix}，默认 ${expireHours}h 过期，上限 ${maxFileMB}MB；URL 通过 dashboard route + bridge 自动路由，无需 nginx alias / env）`,
+    `[enhance] BOT 文件分享模块已加载（root=${shareRoot}，prefix=${urlPrefix}，默认 ${expireHours}h 过期，上限 ${maxFileMB}MB；独立 SDK prefix route，不依赖 dashboard，nginx 反代 /plugins/* 即可）`,
   );
 
   api.registerTool(
@@ -327,8 +336,8 @@ export function registerBotShareLink(
       name: "enhance_share_file",
       description:
         "把本地大文件投递到 OpenClaw share 目录，返回对外的临时下载链接。" +
-        "用于企微/钉钉等无法直传大文件（>20-50MB）的场景：传一个绝对路径，返回 https://<dashboard 公网域名>/plugins/enhance/share/<token>-<filename> 给用户下载。" +
-        "v5.7.23 起 zero-config：用户访问过一次 dashboard 后，公网 baseUrl 自动从 host header 检测，不需要配 env 或 nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。",
+        "用于企微/钉钉等无法直传大文件（>20-50MB）的场景：传一个绝对路径，返回 https://<公网域名>/plugins/enhance-share/<token>-<filename> 给用户下载。" +
+        "zero-config：用户访问过 dashboard 或点过任何 share 链接后，公网 baseUrl 自动从 host header 检测，不需要配 env / nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。",
       parameters: Type.Object({
         filePath: Type.String({
           description:

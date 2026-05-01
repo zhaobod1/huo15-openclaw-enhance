@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.23",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.23 — bot-share-link 升级 zero-config：复用 dashboard 已有的 /plugins/enhance prefix route，通过 http-route-bridge 子分发到 /plugins/enhance/share/<token>-<filename>；用户访问过一次仪表盘后 baseUrl 自动从 host header 检测，不需要再配 BOT_BASE_URL env、也不用 nginx alias。继承 v5.7.22 三件套（enhance_share_file/list/revoke）+ v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 2026.4.24 + v5.6 工具分层。",
+  "version": "5.7.24",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.24 — bot-share-link URL 改成独立兄弟 prefix /plugins/enhance-share/<token>-<filename>（v5.7.23 之前是 dashboard /plugins/enhance 子路径走 bridge dispatch，现在直接 api.registerHttpRoute 自己一条 prefix route）。SDK overlap 规则下兄弟前缀不冲突，结构更干净，bridge 简化为只做 baseUrl 检测。继承 v5.7.22 三件套（enhance_share_file/list/revoke）+ zero-config baseUrl 自动检测 + v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 2026.4.24。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

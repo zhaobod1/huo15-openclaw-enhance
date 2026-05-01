@@ -26,24 +26,29 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.23** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v5.7.24** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
 
+### v5.7.24 BOT 文件分享 URL 改成独立兄弟 prefix（2026-05-01）
+
+URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bridge dispatch）改成 v5.7.24 的 `/plugins/enhance-share/...`（独立 SDK prefix route，不依赖 dashboard）。
+
+| 维度 | v5.7.23 | v5.7.24 |
+|---|---|---|
+| URL | `https://<域>/plugins/enhance/share/<token>-...` | `https://<域>/plugins/enhance-share/<token>-...` |
+| 路由实现 | dashboard handler 顶部 `tryHandleSubRoute` 转给 bridge 注册的 share handler | bot-share-link 自己 `api.registerHttpRoute({ path: "/plugins/enhance-share", ... })` |
+| dashboard.ts 改动 | +3 行（dispatch + detect） | 1 行（detect only），跟 v5.7.22 同 |
+| bridge 复杂度 | 102 行 | 76 行（去掉 dispatch 相关） |
+
+**SDK overlap 规则**：`prefixMatchPath` 用的是 `startsWith(\`${prefix}/\`)`，分隔必须是 `/`。所以 `/plugins/enhance-share` ≠ `/plugins/enhance` 的子前缀（中间是 `-`），SDK 不会拒绝。
+
+**baseUrl 自动检测仍 zero-config**：dashboard handler + share handler 都调 `detectBaseUrlFromRequest(req)` 抓 host，访问过任一即缓存。
+
 ### v5.7.23 BOT 文件分享桥升级 zero-config（2026-05-01）
 
-复用 dashboard 已经在跑的 `/plugins/enhance` prefix route，通过新增的 [http-route-bridge](src/utils/http-route-bridge.ts) 子分发到 `/plugins/enhance/share/<token>-<filename>`；dashboard handler 顶部自动从 `x-forwarded-host` / `host` 抽出公网 baseUrl 缓存。
-
-**用户体验**（vs v5.7.22）：
-
-| 维度 | v5.7.22 | v5.7.23 |
-|---|---|---|
-| nginx 配置 | 需要加 `/share/` alias | 不需要——已有的 `/plugins/enhance/*` 反代直接复用 |
-| `BOT_BASE_URL` env | 需要 `export` | 不需要——访问一次 dashboard 自动检测；仍可手动覆盖 |
-| 部署步骤 | 2 步 | 0 步（升级 + 重启即用） |
-
-URL 从 `https://keepermac.huo15.com/share/<token>-...` 变成 `https://keepermac.huo15.com/plugins/enhance/share/<token>-...`。文件流式响应（createReadStream + pipe），Content-Disposition 用 RFC 5987 双声明，UTF-8 文件名兼容老浏览器。
+复用 dashboard 已经在跑的 `/plugins/enhance` prefix route，通过新增的 [http-route-bridge](src/utils/http-route-bridge.ts) 子分发到 `/plugins/enhance/share/<token>-<filename>`。**v5.7.24 已替换为独立兄弟 prefix 方案，不再 dispatch。**
 
 ### v5.7.22 BOT 文件分享桥：企微/钉钉大文件兜底（2026-05-01）
 

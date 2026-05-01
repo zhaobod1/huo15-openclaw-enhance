@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.23 bot-share-link 升级 zero-config：复用 dashboard 的 /plugins/enhance prefix route，通过 http-route-bridge 子分发到 /plugins/enhance/share/<token>-<filename>；用户访问过一次仪表盘后 baseUrl 自动从 host header 检测，不再需要配 BOT_BASE_URL env / nginx alias。继承 v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
-  "version": "2.4.14",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.24 bot-share-link URL 改成独立兄弟 prefix /plugins/enhance-share/<token>-<filename>（不再做 bridge dispatch，bot-share 自己注册 SDK route），跟 dashboard /plugins/enhance 完全独立，结构更清晰。baseUrl 仍走自动检测 zero-config。继承 v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
+  "version": "2.4.15",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {
@@ -334,7 +334,7 @@
       },
       "botShare": {
         "type": "object",
-        "description": "v5.7.23 BOT 文件分享桥（zero-config）：企微/钉钉无法直传大文件（>20-50MB）时，把本地文件投递到 <shareRoot>/files/ 并生成 <baseUrl><urlPrefix>/<token>-<basename> 临时下载 URL（默认 24h 过期 lazy 清理）。HTTP 流量复用 dashboard 已有的 /plugins/enhance prefix route，由 http-route-bridge 子分发——无需 nginx alias、无需新端口。baseUrl 优先级：env BOT_BASE_URL > 此配置 > 自动从 dashboard 请求 host 抽 > http://localhost:18789（fallback）。",
+        "description": "v5.7.24 BOT 文件分享桥（独立 prefix route + zero-config）：企微/钉钉无法直传大文件（>20-50MB）时，把本地文件投递到 <shareRoot>/files/ 并生成 <baseUrl><urlPrefix>/<token>-<basename> 临时下载 URL（默认 24h 过期 lazy 清理）。urlPrefix 默认 /plugins/enhance-share，这是 dashboard /plugins/enhance 的兄弟前缀，SDK overlap 规则下不冲突，由本模块独立 api.registerHttpRoute 注册。baseUrl 优先级：env BOT_BASE_URL > 此配置 > 自动从请求 host 抽 > http://localhost:18789（fallback）。",
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -342,7 +342,7 @@
           },
           "baseUrl": {
             "type": "string",
-            "description": "公网 base URL（不含尾部 /）。一般留空——用户访问过一次 /plugins/enhance/* 后会自动检测；env BOT_BASE_URL 优先级更高"
+            "description": "公网 base URL（不含尾部 /）。一般留空——用户访问过一次 /plugins/enhance/* 或 share 链接后会自动检测；env BOT_BASE_URL 优先级更高"
           },
           "shareRoot": {
             "type": "string",
@@ -350,8 +350,8 @@
           },
           "urlPrefix": {
             "type": "string",
-            "default": "/plugins/enhance/share",
-            "description": "URL 路径前缀。默认走 dashboard prefix route 的子路径，避免 SDK overlap-denial"
+            "default": "/plugins/enhance-share",
+            "description": "URL 路径前缀。默认 /plugins/enhance-share（独立兄弟 prefix，SDK 不会跟 dashboard /plugins/enhance overlap）"
           },
           "expireHours": {
             "type": "number",

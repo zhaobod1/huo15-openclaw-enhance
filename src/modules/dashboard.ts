@@ -28,10 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow, type NotificationQueue } from "../types.js";
 import { buildSnapshot } from "./statusline.js";
-import {
-  detectBaseUrlFromRequest,
-  tryHandleSubRoute,
-} from "../utils/http-route-bridge.js";
+import { detectBaseUrlFromRequest } from "../utils/http-route-bridge.js";
 
 function loadAllWorkflows(openclawDir: string): Workflow[] {
   const path = join(openclawDir, "memory", "enhance-workflows.json");
@@ -467,14 +464,9 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
     match: "prefix",
     auth: "plugin",
     handler: async (req: IncomingMessage, res: ServerResponse) => {
-      // v5.7.23: 任何 /plugins/enhance/* 请求都让 bridge 抽公网 baseUrl 缓存住
+      // v5.7.23+: 任何 /plugins/enhance/* 请求都让 bridge 抽公网 baseUrl 缓存住
       // —— bot-share-link 等子模块的工具调用就能拼出公网 URL，零配置。
       detectBaseUrlFromRequest(req);
-
-      // v5.7.23: SDK 不允许两条 prefix route 互为子前缀，所以这里先 dispatch
-      // 给已注册的子 handler（如 bot-share-link 的 /plugins/enhance/share/*）；
-      // 任一子 handler 返回 true 即视为已处理，dashboard 不再走兜底 HTML。
-      if (await tryHandleSubRoute(req, res)) return true;
 
       const url = parseUrl(req);
       const pathname = url.pathname;
