@@ -42,30 +42,34 @@ function isBarePluginApi(spec: unknown): spec is string {
 }
 
 /**
- * v5.7.4: 扫所有已装插件的 package.json 检测 bare pluginApi
+ * v5.7.4 / v5.7.21: 收集所有已装 openclaw 插件的根目录
  * 扫描路径：
- * - {openclawDir}/extensions/<plugin>/package.json
- * - {openclawDir}/node_modules/@huo15/<plugin>/package.json（旧 npm peerDep 残留）
- * - {openclawDir}/node_modules/<plugin>/package.json（无 scope 的）
+ * - {openclawDir}/extensions/<plugin>/
+ * - {openclawDir}/node_modules/@scope/<plugin>/
+ * - {openclawDir}/node_modules/<plugin>/（无 scope）
+ *
+ * 复用方：scanInstalledPluginsForBarePluginApi / scanInstalledPluginsForAsyncRegister /
+ *         scanInstalledPluginsForLegacyToolFields
  */
-function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[] {
-  const results: CheckResult[] = [];
-  const dirsToScan: string[] = [];
+function collectInstalledPluginDirs(openclawDir: string): string[] {
+  const dirs: string[] = [];
 
-  // extensions 目录
   const extDir = join(openclawDir, "extensions");
   if (existsSync(extDir)) {
     try {
       for (const name of readdirSync(extDir)) {
         const p = join(extDir, name);
-        if (statSync(p).isDirectory()) dirsToScan.push(p);
+        try {
+          if (statSync(p).isDirectory()) dirs.push(p);
+        } catch {
+          /* skip */
+        }
       }
     } catch {
       /* 静默 */
     }
   }
 
-  // node_modules 下的 @huo15/* 和无 scope 的（不递归子 node_modules）
   const nmDir = join(openclawDir, "node_modules");
   if (existsSync(nmDir)) {
     try {
@@ -78,12 +82,11 @@ function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[
           continue;
         }
         if (name.startsWith("@")) {
-          // scope: 进入扫子目录
           try {
             for (const sub of readdirSync(p)) {
               const sp = join(p, sub);
               try {
-                if (statSync(sp).isDirectory()) dirsToScan.push(sp);
+                if (statSync(sp).isDirectory()) dirs.push(sp);
               } catch {
                 /* skip */
               }
@@ -92,37 +95,194 @@ function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[
             /* skip */
           }
         } else {
-          dirsToScan.push(p);
+          dirs.push(p);
         }
       }
     } catch {
       /* 静默 */
     }
   }
+  return dirs;
+}
 
-  for (const dir of dirsToScan) {
-    const pkgPath = join(dir, "package.json");
-    if (!existsSync(pkgPath)) continue;
-    let pkg: any;
-    try {
-      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    } catch {
-      continue;
+/**
+ * 读 plugin package.json，返回 { pkg, isOpenClawPlugin }；非 openclaw 插件返回 null。
+ */
+function readPluginPackageJson(dir: string): { pkg: any; pkgPath: string } | null {
+  const pkgPath = join(dir, "package.json");
+  if (!existsSync(pkgPath)) return null;
+  let pkg: any;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  } catch {
+    return null;
+  }
+  if (!pkg?.openclaw?.extensions && !pkg?.peerDependencies?.openclaw) return null;
+  return { pkg, pkgPath };
+}
+
+/**
+ * 解析 plugin 入口源文件路径（pkg.openclaw.extensions[0] / pkg.main / index.ts 兜底）。
+ */
+function resolvePluginEntryFile(dir: string, pkg: any): string | null {
+  const candidates = [
+    pkg?.openclaw?.extensions?.[0],
+    pkg?.main,
+    "index.ts",
+    "index.js",
+  ].filter((c): c is string => typeof c === "string" && c.length > 0);
+  for (const c of candidates) {
+    const p = join(dir, c);
+    if (existsSync(p)) {
+      try {
+        if (statSync(p).isFile()) return p;
+      } catch {
+        /* skip */
+      }
     }
-    // 只扫声明了 openclaw extensions 的包
-    if (!pkg?.openclaw?.extensions && !pkg?.peerDependencies?.openclaw) continue;
-    const name = pkg?.name ?? dir;
-    const compatApi = pkg?.openclaw?.compat?.pluginApi;
+  }
+  return null;
+}
+
+/**
+ * v5.7.4: 扫所有已装插件的 package.json 检测 bare pluginApi
+ */
+function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  for (const dir of collectInstalledPluginDirs(openclawDir)) {
+    const meta = readPluginPackageJson(dir);
+    if (!meta) continue;
+    const name = meta.pkg?.name ?? dir;
+    const compatApi = meta.pkg?.openclaw?.compat?.pluginApi;
     if (isBarePluginApi(compatApi)) {
       const fixed = `>=${compatApi}`;
       results.push({
         ok: false,
         level: "warn",
         category: "plugin-bare-pluginApi",
-        message: `已装插件 ${name}（${pkgPath}）的 openclaw.compat.pluginApi="${compatApi}" 是 bare 版本，会被解读为精确匹配，与当前 openclaw 不兼容时启动报错"插件要求 ${compatApi}"`,
-        fixCommand: `python3 -c "import json,pathlib;p=pathlib.Path('${pkgPath}');c=json.loads(p.read_text());c.setdefault('openclaw',{}).setdefault('compat',{})['pluginApi']='${fixed}';p.write_text(json.dumps(c,indent=2,ensure_ascii=False));print('OK')"`,
+        message: `已装插件 ${name}（${meta.pkgPath}）的 openclaw.compat.pluginApi="${compatApi}" 是 bare 版本，会被解读为精确匹配，与当前 openclaw 不兼容时启动报错"插件要求 ${compatApi}"`,
+        fixCommand: `python3 -c "import json,pathlib;p=pathlib.Path('${meta.pkgPath}');c=json.loads(p.read_text());c.setdefault('openclaw',{}).setdefault('compat',{})['pluginApi']='${fixed}';p.write_text(json.dumps(c,indent=2,ensure_ascii=False));print('OK')"`,
       });
     }
+  }
+  return results;
+}
+
+/**
+ * v5.7.21: 扫所有已装插件的入口文件检测 `async register(` 反模式。
+ * Why: openclaw plugin loader 强制 sync 返回（loader-CLyHx60E.js: "plugin register
+ * must be synchronous"），async register 返回 Promise → loader 立刻 guarded.close()
+ * → 后续所有 api.registerTool 进 silent no-op，整个插件等于没装。
+ * 这是 enhance 自己 5.7.13-5.7.16 踩过的坑（修于 5.7.17）。
+ */
+function scanInstalledPluginsForAsyncRegister(openclawDir: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  const ASYNC_REGISTER_RE = /\basync\s+register\s*\(/;
+  for (const dir of collectInstalledPluginDirs(openclawDir)) {
+    const meta = readPluginPackageJson(dir);
+    if (!meta) continue;
+    const entry = resolvePluginEntryFile(dir, meta.pkg);
+    if (!entry) continue;
+    let stat;
+    try {
+      stat = statSync(entry);
+    } catch {
+      continue;
+    }
+    // 防御：> 1MB 跳过（避免扫到 webpack bundle 等）
+    if (!stat.isFile() || stat.size > 1024 * 1024) continue;
+    let src: string;
+    try {
+      src = readFileSync(entry, "utf-8");
+    } catch {
+      continue;
+    }
+    if (!ASYNC_REGISTER_RE.test(src)) continue;
+    const name = meta.pkg?.name ?? dir;
+    results.push({
+      ok: false,
+      level: "error",
+      category: "plugin-async-register",
+      message:
+        `已装插件 ${name}（${entry}）入口里有 \`async register(\`。openclaw loader 强制 sync 返回 ` +
+        `（loader-CLyHx60E.js: "plugin register must be synchronous"），async 让 loader ` +
+        `立刻 guarded.close()，所有 api.registerTool 进 silent no-op，整个插件等于没装`,
+      fixCommand:
+        `# 1) 把 async register(api) 改回 register(api)\n` +
+        `sed -i.bak 's/async register(/register(/' '${entry}'\n` +
+        `# 2) 处理函数体里的 await：把 \`await import("xxx")\` 换成\n` +
+        `#    \`createRequire(import.meta.url)("xxx")\`（同步，仍可 try/catch ABI 错误）\n` +
+        `# 参考 huo15-openclaw-enhance@5.7.17 commit "fix(register): sync register"`,
+    });
+  }
+  return results;
+}
+
+/**
+ * v5.7.21: 扫所有已装插件的入口文件检测旧版 tool 字段（schema/handler）。
+ * Why: openclaw plugin SDK 现校验 { parameters, execute }（tools-CCfW25J2.js
+ * describeMalformedPluginTool: typeof tool.execute !== "function" 直接判 missing），
+ * 旧字段 schema/handler 全被 loader 跳过。
+ * 这是 huo15-huihuoyun-odoo 1.20.0/1.20.1 踩过的坑（修于 1.20.2）。
+ */
+function scanInstalledPluginsForLegacyToolFields(openclawDir: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  const SCHEMA_FIELD_RE = /^\s+schema:\s*\{/m;
+  const HANDLER_FIELD_RE = /^\s+(?:async\s+)?handler\s*\(/m;
+  // 已用 helper 集中转换字段名的（如 huo15-huihuoyun-odoo@1.20.2 的 toSdkTool）
+  // 不算 broken —— 跳过，避免对正确实现误报
+  const HELPER_PATTERNS = [
+    /\btoSdkTool\b/,
+    /\bparameters\s*:\s*schema\b/,
+    /\bexecute\s*:\s*handler\b/,
+  ];
+  for (const dir of collectInstalledPluginDirs(openclawDir)) {
+    const meta = readPluginPackageJson(dir);
+    if (!meta) continue;
+    const entry = resolvePluginEntryFile(dir, meta.pkg);
+    if (!entry) continue;
+    let stat;
+    try {
+      stat = statSync(entry);
+    } catch {
+      continue;
+    }
+    // 工具大入口允许到 5MB（odoo 是 ~320KB；防御 webpack bundle 才设上限）
+    if (!stat.isFile() || stat.size > 5 * 1024 * 1024) continue;
+    let src: string;
+    try {
+      src = readFileSync(entry, "utf-8");
+    } catch {
+      continue;
+    }
+    // 必须同时命中 schema: 和 handler( —— 单独的 schema 可能是 Type.Object 之类，handler 也可能是别的事件回调
+    if (!SCHEMA_FIELD_RE.test(src) || !HANDLER_FIELD_RE.test(src)) continue;
+    // carve-out：已经在 helper 里做了字段转换的（例如 toSdkTool）跳过
+    if (HELPER_PATTERNS.some((re) => re.test(src))) continue;
+    const schemaCount = (src.match(/^\s+schema:\s*\{/gm) ?? []).length;
+    const handlerCount = (src.match(/^\s+(?:async\s+)?handler\s*\(/gm) ?? []).length;
+    const name = meta.pkg?.name ?? dir;
+    results.push({
+      ok: false,
+      level: "warn",
+      category: "plugin-legacy-tool-fields",
+      message:
+        `已装插件 ${name}（${entry}）疑似用旧版 tool 字段：schema:{ 出现 ${schemaCount} 处、` +
+        `handler( 出现 ${handlerCount} 处。openclaw plugin SDK 现在校验 { parameters, execute }，` +
+        `旧字段 schema/handler 被 loader 直接判 malformed 跳过（plugin tool is malformed: missing parameters object / missing execute function）`,
+      fixCommand:
+        `# 在 register helper 里加字段映射（不必逐个 tool 改）：\n` +
+        `# const toSdkTool = (opts: any) => {\n` +
+        `#   const { schema, handler, ...rest } = opts;\n` +
+        `#   return {\n` +
+        `#     ...rest,\n` +
+        `#     ...(schema  !== undefined && { parameters: schema  }),\n` +
+        `#     ...(handler !== undefined && { execute: handler }),\n` +
+        `#   };\n` +
+        `# };\n` +
+        `# 然后 api.registerTool(toSdkTool(opts))。\n` +
+        `# 参考 huo15-huihuoyun-odoo@1.20.2 commit "fix: 修 50+ tool malformed"`,
+    });
   }
   return results;
 }
@@ -242,8 +402,11 @@ export function checkOpenClawConfig(
   }
 
   // v5.7.4: 扫所有已装插件的 bare pluginApi（违反 ">=X.Y.Z" 规则的会被 openclaw 拒绝）
-  const pluginIssues = scanInstalledPluginsForBarePluginApi(openclawDir);
-  results.push(...pluginIssues);
+  results.push(...scanInstalledPluginsForBarePluginApi(openclawDir));
+  // v5.7.21: 扫已装插件的 async register（loader 拒收，整个插件 silent no-op）
+  results.push(...scanInstalledPluginsForAsyncRegister(openclawDir));
+  // v5.7.21: 扫已装插件的旧版 tool 字段 schema/handler（被 loader 判 malformed 跳过）
+  results.push(...scanInstalledPluginsForLegacyToolFields(openclawDir));
 
   if (results.length === 0) {
     return [
