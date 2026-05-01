@@ -136,7 +136,7 @@ export interface TipsConfig {
 
 // ── 通知中心 ──
 export type NotificationLevel = "info" | "warn" | "success";
-export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow" | "config-doctor";
+export type NotificationSource = "safety" | "memory" | "pet" | "tips" | "workflow" | "config-doctor" | "session-doctor";
 
 export interface Notification {
   id: number;
@@ -308,6 +308,25 @@ export interface ConfigDoctorConfig {
   maxModelMaxTokens?: number;
 }
 
+/**
+ * v5.7.16 trajectory 体量诊断
+ * 扫描 ~/.openclaw/agents/*\/sessions/*.trajectory.jsonl，超大时给归档 cliCmd。
+ * 触发场景：openclaw-control-ui webchat 反复 sessions.list 时，gateway 主线程
+ * 在 V8 JsonParser 上被超大 trajectory 钉死（symptom: 99% CPU + sessions.list 12s+）。
+ * 只读，不删不改不归档。
+ */
+export interface SessionDoctorConfig {
+  enabled?: boolean;
+  /** 单文件 ≥ 多少 MB 触发 warn，默认 20 */
+  warnSingleFileMB?: number;
+  /** 累计 ≥ 多少 MB 触发 warn，默认 200 */
+  warnTotalMB?: number;
+  /** 批量归档命令里 mtime 阈值（多少天前才允许归档），默认 7 */
+  archiveAgeDays?: number;
+  /** 输出 top N 大文件路径，默认 5 */
+  topN?: number;
+}
+
 // ── 工具分层（v5.6 新增） ──
 /**
  * 工具分层：
@@ -345,6 +364,8 @@ export interface EnhancePluginConfig {
   transcriptSearch?: TranscriptSearchConfig;
   /** v5.7.3: 启动期诊断 openclaw.json 陷阱配置 */
   configDoctor?: ConfigDoctorConfig;
+  /** v5.7.16: 启动期诊断 trajectory.jsonl 体量(防 gateway sessions.list 卡 CPU) */
+  sessionDoctor?: SessionDoctorConfig;
   /** v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划 */
   skillRecommender?: SkillRecommenderConfig;
   /** v5.7.7: 接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook 闭环 session 生命周期 */

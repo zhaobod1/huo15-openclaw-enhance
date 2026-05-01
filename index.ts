@@ -35,6 +35,7 @@ import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { registerConfigDoctor } from "./src/modules/config-doctor.js";
+import { registerSessionDoctor } from "./src/modules/session-doctor.js";
 import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
@@ -226,6 +227,14 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.configDoctor?.enabled !== false && dbAvailable,
         load: () => registerConfigDoctor(api, config.configDoctor, notifyQueue!),
+      },
+      {
+        // v5.7.16: 启动期诊断 trajectory.jsonl 体量
+        // tier=1，minimal 也启用——超大 trajectory 会让 gateway sessions.list 卡 13s+ event-loop / 99% CPU
+        name: "trajectory 体量诊断",
+        tier: 1,
+        enabled: config.sessionDoctor?.enabled !== false && dbAvailable,
+        load: () => registerSessionDoctor(api, config.sessionDoctor, notifyQueue!),
       },
       {
         // v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划
