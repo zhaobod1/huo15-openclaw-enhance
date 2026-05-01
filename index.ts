@@ -14,6 +14,8 @@
  * - 每个企微用户/群组的数据完全隔离
  */
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { createRequire } from "node:module";
+const pkg = createRequire(import.meta.url)("./package.json") as { version: string };
 import { registerStructuredMemory } from "./src/modules/structured-memory.js";
 import { registerTaskPlanner } from "./src/modules/task-planner.js";
 import { registerToolSafety } from "./src/modules/tool-safety.js";
@@ -310,6 +312,6 @@ export default definePluginEntry({
     }
 
     const degradeNote = dbAvailable ? "" : "（DB 降级模式：better-sqlite3 原生绑定丢失）";
-    api.logger.info(`[enhance] 龙虾增强包 v5.7.12 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能）${degradeNote}，启用模块: ${loaded.join("、")}`);
+    api.logger.info(`[enhance] 龙虾增强包 v${pkg.version} 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能）${degradeNote}，启用模块: ${loaded.join("、")}`);
   },
 });
