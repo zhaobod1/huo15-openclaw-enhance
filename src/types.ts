@@ -327,6 +327,23 @@ export interface SessionDoctorConfig {
   topN?: number;
 }
 
+/**
+ * v5.7.20 trajectory 自动归档（macOS LaunchAgent）
+ * 给出"一次性部署 + 每日 03:00 自动归档"的命令，由 launchd 调度跑 find -mtime -size -mv。
+ * plugin 自己不执行 mv（红线 #5 诊断不修复 + 红线 #4 不 child_process）。
+ */
+export interface TrajectoryArchiverConfig {
+  enabled?: boolean;
+  /** LaunchAgent label，默认 ai.huo15.openclaw.trajectory-archiver */
+  label?: string;
+  /** mtime 阈值（天）；早于此天数才归档；默认 1 */
+  archiveAgeDays?: number;
+  /** size 阈值（MB），≥ 才归档；默认 5 */
+  archiveMinSizeMB?: number;
+  /** 触发时刻 hour（0-23）；默认 3 */
+  scheduleHour?: number;
+}
+
 // ── 工具分层（v5.6 新增） ──
 /**
  * 工具分层：
@@ -366,6 +383,8 @@ export interface EnhancePluginConfig {
   configDoctor?: ConfigDoctorConfig;
   /** v5.7.16: 启动期诊断 trajectory.jsonl 体量(防 gateway sessions.list 卡 CPU) */
   sessionDoctor?: SessionDoctorConfig;
+  /** v5.7.20: trajectory 自动归档（输出 macOS LaunchAgent 部署 cliCmd） */
+  trajectoryArchiver?: TrajectoryArchiverConfig;
   /** v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划 */
   skillRecommender?: SkillRecommenderConfig;
   /** v5.7.7: 接入 openclaw 4.22 的 session_start/end/before_reset/subagent_* hook 闭环 session 生命周期 */

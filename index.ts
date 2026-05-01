@@ -38,6 +38,7 @@ import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
 import { registerConfigDoctor } from "./src/modules/config-doctor.js";
 import { registerSessionDoctor } from "./src/modules/session-doctor.js";
+import { registerTrajectoryArchiver } from "./src/modules/trajectory-archiver.js";
 import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
@@ -240,6 +241,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.sessionDoctor?.enabled !== false,
         load: () => registerSessionDoctor(api, config.sessionDoctor, notifyQueue),
+      },
+      {
+        // v5.7.20: trajectory 自动归档（输出 LaunchAgent 部署 cliCmd）
+        // tier=1，minimal 也启用——零 db 依赖，纯 cliCmd 输出
+        // 配合 session-doctor：诊断告警 + 一次性部署 launchd 自动归档 = 治本预防机制
+        name: "trajectory 自动归档",
+        tier: 1,
+        enabled: config.trajectoryArchiver?.enabled !== false,
+        load: () => registerTrajectoryArchiver(api, config.trajectoryArchiver),
       },
       {
         // v5.7.5: 按用户需求挑已装 skill / 推荐未装 / 给自建规划
