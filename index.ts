@@ -42,6 +42,7 @@ import { registerTrajectoryArchiver } from "./src/modules/trajectory-archiver.js
 import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
+import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
@@ -274,6 +275,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.nativeMemorySurfacer?.enabled !== false,
         load: () => registerNativeMemorySurfacer(api, config.nativeMemorySurfacer),
+      },
+      {
+        // v5.7.22: BOT 文件分享桥（企微/钉钉无法直传大文件时的兜底）
+        // tier=1 minimal 也启用——这是渠道兜底能力，没了它播客/大附件就发不出去
+        // 默认 enabled=true，零 child_process（fs.copyFileSync），路径黑名单 sanitizer 防 LLM path traversal
+        name: "BOT 文件分享",
+        tier: 1,
+        enabled: config.botShare?.enabled !== false,
+        load: () => registerBotShareLink(api, config.botShare),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

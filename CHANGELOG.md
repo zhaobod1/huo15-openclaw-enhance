@@ -2,6 +2,63 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.22 — 2026-05-01（BOT 文件分享桥：企微/钉钉大文件兜底）
+
+**用户反馈**：「最近播客生成 90MB mp3，企微插件直接传不了。每次遇到大文件都卡死。我跑了 FRP 把内网 18789 反代到 Keepermac.huo15.com，希望 enhance 提供一个工具，把本地文件投到一个目录、返回临时 URL 给用户下载。」
+
+### 新增模块：`bot-share-link`
+
+**三个工具**：
+
+| 工具 | 作用 |
+|---|---|
+| `enhance_share_file(filePath, label?, expireHours?, copyMode?)` | 把本地文件投递到 `<shareRoot>/files/<token>-<basename>`，返回 `<BOT_BASE_URL><urlPrefix>/<token>-<basename>` 临时 URL |
+| `enhance_share_list()` | 列当前活跃分享 + 顺手清过期 |
+| `enhance_share_revoke(token \| filename)` | 立刻撤销（删本地文件 + manifest 条目） |
+
+**配置（`enhance.botShare`）**：
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `enabled` | `true` | tier=1（minimal/balanced/full 都启用） |
+| `baseUrl` | env `BOT_BASE_URL` 优先 → 配置 → `http://localhost:18789` | 公网 URL（不含尾部 /） |
+| `shareRoot` | `~/.openclaw/share` | 落盘根目录；web server alias 应指向 `<shareRoot>/files` |
+| `urlPrefix` | `/share` | URL 路径前缀 |
+| `expireHours` | `24` | 默认有效期 |
+| `maxFileSizeMB` | `500` | 单文件上限 |
+
+**典型部署**（用户场景）：
+
+```bash
+# FRP 把 localhost:18789 反代到 Keepermac.huo15.com
+# Nginx 把 /share/* alias 到 ~/.openclaw/share/files/
+
+export BOT_BASE_URL=https://Keepermac.huo15.com
+# 然后重启 openclaw，工具返回的 URL 就是 https://Keepermac.huo15.com/share/<token>-<filename>
+```
+
+**安全闸门**（防 LLM 输入污染）：
+
+1. `filePath` 必须是绝对路径，不能含 `..` 段
+2. 敏感目录黑名单：`/.ssh/ /.gnupg/ /.aws/ /.config/ /.docker/ /.kube/ /.npmrc /.netrc /etc/`
+3. 大小上限 `maxFileSizeMB`（默认 500MB），防误传系统盘大文件
+4. dest 路径校验：必须 `startsWith` filesDir，防 token 越界
+5. `crypto.randomBytes(6)` → 12 hex token，URL 不可枚举遍历
+
+**红线一致**：
+
+- 零 `child_process`：用 `fs.copyFileSync` / `linkSync`
+- 不修改用户 openclaw 配置（写的是插件自己的 `~/.openclaw/share/`）
+- lazy cleanup：每次 share/list 调用时顺手清过期；不在 register 期跑后台任务
+- pluginApi 仍是 `>=2026.4.24`（无新 SDK 依赖）
+
+### 影响面
+
+- `index.ts` 新增 `registerBotShareLink` 注册块（tier=1）
+- `src/types.ts` 新增 `BotShareConfig` + `EnhancePluginConfig.botShare`
+- `openclaw.plugin.json` 新增 `botShare` configSchema + `botShare.enabled` uiHint，plugin version `2.4.12 → 2.4.13`
+- 工具数 `+3`（minimal/balanced/full 都含）
+
 ## 5.7.12 — 2026-05-01（模型路由器增强：速度+精度+覆盖率）
 
 ### model-router 三方面增强

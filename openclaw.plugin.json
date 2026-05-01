@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.10 新增 native-memory-surfacer：解决'第二天失忆'——每个 session 开局自动 surface ~/.claude/projects 下相关 .md memory 文件锚点(零侵入只读、零工具 schema、零 child_process)。继承 v5.7.8 全面适配 openclaw 4.24 SDK 等",
-  "version": "2.4.12",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.22 新增 bot-share-link：企微/钉钉无法直传大文件时的兜底——把本地文件投递到 ~/.openclaw/share/files/，返回 BOT_BASE_URL 下的临时下载 URL，配 FRP+Nginx 内网穿透即可下发给用户（默认 24h 过期 lazy 清理）。继承 v5.7.10 native-memory-surfacer + v5.7.8 全面适配 openclaw 4.24 SDK 等",
+  "version": "2.4.13",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {
@@ -24,6 +24,10 @@
     "nativeMemorySurfacer.enabled": {
       "control": "switch",
       "label": "原生记忆 surface"
+    },
+    "botShare.enabled": {
+      "control": "switch",
+      "label": "BOT 文件分享"
     },
     "transcriptSearch.enabled": {
       "control": "switch",
@@ -325,6 +329,39 @@
           "debug": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "botShare": {
+        "type": "object",
+        "description": "v5.7.22 BOT 文件分享桥：企微/钉钉无法直传大文件（>20-50MB）时，把本地文件投递到 <shareRoot>/files/ 并生成 <baseUrl><urlPrefix>/<token>-<basename> 临时下载 URL（默认 24h 过期，下次工具调用时 lazy 清理）。baseUrl 优先级：env BOT_BASE_URL > 此配置 > http://localhost:18789。Web server 需把 <urlPrefix>/* 反代到 <shareRoot>/files/（FRP+Nginx 内网穿透）。",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "公网 base URL（不含尾部 /）。env BOT_BASE_URL 优先级更高"
+          },
+          "shareRoot": {
+            "type": "string",
+            "description": "落盘根目录，默认 ~/.openclaw/share；web server alias 应指向 <shareRoot>/files"
+          },
+          "urlPrefix": {
+            "type": "string",
+            "default": "/share",
+            "description": "URL 路径前缀，对应 nginx alias 挂载位置"
+          },
+          "expireHours": {
+            "type": "number",
+            "default": 24,
+            "description": "链接默认有效小时数"
+          },
+          "maxFileSizeMB": {
+            "type": "number",
+            "default": 500,
+            "description": "单文件大小上限"
           }
         }
       },

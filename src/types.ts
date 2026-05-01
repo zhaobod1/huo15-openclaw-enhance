@@ -391,6 +391,33 @@ export interface EnhancePluginConfig {
   sessionLifecycle?: SessionLifecycleConfig;
   /** v5.7.10: 主动 surface 龙虾原生 .md memory 文件锚点(解决"第二天失忆") */
   nativeMemorySurfacer?: NativeMemorySurfacerConfigType;
+  /** v5.7.22: BOT 文件分享桥（企微/钉钉无法直传大文件时的兜底，内网穿透 + 临时 URL） */
+  botShare?: BotShareConfig;
+}
+
+/**
+ * v5.7.22 BOT 文件分享桥（enhance_share_file / list / revoke）
+ *
+ * 解决企微/钉钉等渠道无法直传大文件（>20-50MB），需要给用户一个内网穿透下的临时下载链接。
+ * 用户用 FRP/Nginx 把内网静态目录反代到公网（如 Keepermac.huo15.com → localhost:18789），
+ * 本插件把 LLM 指定的本地文件投递到 <shareRoot>/files/<token>-<basename>，返回
+ *   <baseUrl><urlPrefix>/<token>-<basename>
+ * URL 给 LLM 直接发用户。
+ *
+ * baseUrl 优先级：env BOT_BASE_URL > pluginConfig.botShare.baseUrl > http://localhost:18789。
+ */
+export interface BotShareConfig {
+  enabled?: boolean;
+  /** 公网 base URL（不含尾部 /）。优先级：env BOT_BASE_URL > 此配置 > http://localhost:18789 */
+  baseUrl?: string;
+  /** 落盘根目录（web server 应该 alias 到 <shareRoot>/files），默认 ~/.openclaw/share */
+  shareRoot?: string;
+  /** URL 路径前缀（对应 nginx alias 挂载位置），默认 /share */
+  urlPrefix?: string;
+  /** 链接默认过期小时数，默认 24 */
+  expireHours?: number;
+  /** 单文件最大 MB，默认 500 */
+  maxFileSizeMB?: number;
 }
 
 export interface NativeMemorySurfacerConfigType {
