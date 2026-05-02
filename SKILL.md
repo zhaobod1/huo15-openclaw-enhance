@@ -1,7 +1,7 @@
 ---
 name: huo15-openclaw-enhance
 description: "火一五·克劳德·龙虾增强插件 v5.7.8 — 全面适配 openclaw 2026.4.24：peerDep ^4.24 + build/compat 同步到 4.24 + 14 处 api.on 全部去掉 as any 改成 typed hook（hookName 联合类型 + handler 自动推断 PluginHookHandlerMap[K]） + manifest 加 enabledByDefault/uiHints/activation 元数据 + 修 self-check 之前被 as any 屏蔽的 PluginHookBeforeAgentReplyResult 类型不匹配 bug。继承 v5.7.7 session-lifecycle + v5.7.5 skill-recommender + v5.7.4 扫 bare pluginApi + v5.7.3 config-doctor + v5.7.2 hardening + v5.7.1 hot-fix + v5.7 transcript-search + v5.6 工具分层；捆绑 11 个配套 skill"
-version: 5.8.1
+version: 5.8.2
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

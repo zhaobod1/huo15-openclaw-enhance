@@ -2,6 +2,36 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.8.2 — 2026-05-02（chore-only：刷 ClawHub plugin tag + release.sh 修复）
+
+**触发**：用户跑 `openclaw plugins update` 报错：
+
+```
+Resolving clawhub:@huo15/openclaw-enhance
+Plugin "@huo15/openclaw-enhance" requires plugin API 2026.2.24, but this OpenClaw runtime exposes 2026.4.29.
+```
+
+但 npm 上 5.7.9 / 5.7.27 / 5.8.1 三个历史版本的 `package.json.openclaw.compat.pluginApi` 全都是 `>=2026.4.24`（ranged ✓）—— bare `2026.2.24` 跟 npm 实际包内容**完全脱节**。
+
+### 根因
+
+`clawhub inspect huo15-openclaw-enhance` 显示：
+
+```
+Latest: 5.8.1
+Tags: latest=5.8.1, plugin=5.7.9
+```
+
+ClawHub `plugin` tag（被 `clawhub:@huo15/openclaw-enhance` 协议解析时使用）还卡在 5.7.9——那个 5.7.9 是 ClawHub 端**第一次以 plugin entry 注册**时的 manifest 快照，里面的 `pluginApi: "2026.2.24"` 是 **ClawHub 端缓存的元数据**，跟后续 npm publish 完全脱节。
+
+`scripts/release.sh` 调用 `clawhub publish "$(pwd)" --version $VERSION` —— **没传 `--tags`**，CLI 默认只刷 `latest`，所以从 5.7.9 之后每次发版 ClawHub `plugin` tag 都没动。10 多个版本下来用户才碰到。
+
+### 改动
+
+- `scripts/release.sh`: clawhub publish 加 `--tags latest,plugin`，让 plugin tag 跟 latest 一起刷。dry-run 输出和 fallback 提示同步更新。
+- 三处版本 bump 5.8.1 → 5.8.2 触发 chore-only re-publish 把 ClawHub plugin tag 从 5.7.9 一次拉齐到 5.8.2。
+- 零代码逻辑改动（src/ 不动）。
+
 ## 5.8.1 — 2026-05-02（postinstall hint：装完直接引导配 BOT_BASE_URL）
 
 **触发**：v5.7.27 加了运行时 `logger.warn` 在 enhance 启动时如果 baseUrl 是 fallback/LAN 就警告——但用户得翻 `~/.openclaw/logs/gateway.err.log` 才能看到，新机器装完根本没意识到要配。zhaobo 实测 5/2 在企微聊天里看到 LLM 自己拼了 `192.168.1.177:18789` 链接发给群成员就是这个问题——LLM 都没机会引导用户去设。

@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.8.1",
-  "description": "火一五·克劳德·龙虾增强插件 v5.8.1 — 新增 npm postinstall 钩子，装完直接在终端引导用户配置 BOT_BASE_URL（避免大文件下载链接落 LAN IP，群成员点不开）。智能跳过：env 已设 / openclaw.json 已配 / ~/.openclaw/share/config.json 已存 / CI 环境 一律静默。继承 v5.8.0 hook-profiler + v5.7.27 bot-share 持久化 + v5.7.26 session-bridge + v5.7.22 bot-share-link 全套。零 child_process / 零外部依赖，纯 stderr 文本。",
+  "version": "5.8.2",
+  "description": "火一五·克劳德·龙虾增强插件 v5.8.2 — chore-only release：刷 ClawHub plugin tag（release.sh 之前默认只 --tags latest 没刷 plugin tag → plugin tag 卡在 5.7.9 那个 bare pluginApi=2026.2.24 老版本 → `openclaw plugins update` 报 'requires plugin API 2026.2.24, but runtime exposes 2026.4.29'）；同步修 release.sh 让以后默认 --tags latest,plugin。零代码逻辑改动。继承 v5.8.1 postinstall hint + v5.8.0 hook-profiler + v5.7.27 bot-share 持久化 + v5.7.26 session-bridge。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
