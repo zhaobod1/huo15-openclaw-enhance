@@ -2,6 +2,56 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.0.0 — 2026-05-02（**重大改名：npm 包名变更 + ClawHub 重新注册**）
+
+> **BREAKING（npm 包名）**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`
+
+### 触发
+
+老 npm 包 `@huo15/openclaw-enhance` 在 ClawHub 上的 plugin entry 被一段历史 ghost manifest 钉死：
+
+| enhance 历史版本 | pluginApi |
+|---|---|
+| 1.3.0 - 5.1.0（27 个版本） | **`2026.2.24` (bare!)** ← ClawHub 端 plugin entry record 极可能在此期间首次注册时缓存了这个值 |
+| 5.1.3+ | 已全部改 ranged `>=2026.4.x` |
+
+`clawhub publish --tags latest,plugin` 只刷 tag 指针不刷 plugin entry record 字段，OpenClaw 走 `clawhub:` 协议解析时仍报 `requires plugin API 2026.2.24`。
+
+实测对照：`@huo15/wecom@2.8.18` / `@huo15/wechat-service@2.2.2` 两个**新注册**的 plugin entry slug 完全干净（OpenClaw 协议装包成功），证实坑只是 enhance 老 slug 的历史死结，不是 ClawHub 普遍 bug。
+
+### 改动
+
+- **`package.json.name`**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`（与 `huo15-huihuoyun-odoo` 等其他 huo15-* 包命名规范对齐）
+- **`SKILL.md` frontmatter `name`**：`huo15-openclaw-enhance` → `huo15-huo15-openclaw-enhance`（ClawHub slug 同步）
+- **版本号**：5.8.7 → **6.0.0**（major bump 标识 npm 包名 breaking）
+- **`scripts/release.sh`**：重新启用 `clawhub publish --tags latest,plugin`（新 slug 是干净起点，不会再撞 ghost manifest）
+- **`README.md`**：安装命令更新到新名 + 老用户迁移指引
+- **OpenClaw plugin id 保持 `enhance` 不变**：升级时新包替换旧 plugin record；用户 `~/.openclaw/openclaw.json` 里 `plugins.entries.enhance.config.botShare.baseUrl` 等配置无需迁移
+
+### 用户迁移路径
+
+```bash
+# 1. 卸载老包（OpenClaw 内部 plugin id 保持 enhance，新装会被替换；保险起见先 uninstall）
+openclaw plugins uninstall enhance
+
+# 2. 装新包
+openclaw plugins install @huo15/huo15-openclaw-enhance --force
+
+# 3. 重启
+openclaw restart
+```
+
+老 npm 包 `@huo15/openclaw-enhance` 已 deprecate，老 ClawHub slug `huo15-openclaw-enhance` 已 hide（已装用户仍可 update 兜底，新搜索看不到）。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心（红线 #1）
+- ✅ 不复制龙虾原生（红线 #2）
+- ✅ 无 `child_process`（红线 #4）
+- ✅ pluginApi `>=2026.4.24` 仍 ranged（红线 #6.1）
+- ✅ 仓库 git remote 不变（cnb.cool 主 + GitHub 镜像）
+- ✅ OpenClaw plugin id 不变（用户配置兼容）
+
 ## 5.8.2 — 2026-05-02（chore-only：刷 ClawHub plugin tag + release.sh 修复）
 
 **触发**：用户跑 `openclaw plugins update` 报错：

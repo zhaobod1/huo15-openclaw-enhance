@@ -214,29 +214,31 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 ## 一键安装
 
-> ⚠️ **enhance 历史在 5.7.9 那次 publish 时声明了 bare `pluginApi: 2026.2.24`**（早于本仓 §6.1 红线"compat.pluginApi 必须 ranged"修复）。这条老 manifest 在 ClawHub 端被某种缓存固化，即便后续版本（5.7.10+）已全部改成 `>=2026.4.24` ranged，`clawhub:@huo15/openclaw-enhance` 协议解析仍可能拿到老 manifest 报 `requires plugin API 2026.2.24`。已实测同款配置下 `@huo15/wecom` / `@huo15/wechat-service` 第一次刷 plugin tag 干净——是 enhance 历史死结特例。
->
-> 等 ClawHub 维护者刷新此 ghost manifest 后会恢复 `openclaw plugins install @huo15/openclaw-enhance` 直装。短期请走 npm 路径：
+> ⚠️ **v6.0.0 起 npm 包改名**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`（与 `huo15-huihuoyun-odoo` 等其他 huo15-* 包命名规范对齐 + 让 ClawHub 重新创建干净的 plugin entry，绕开老 slug 1.3.0-5.1.0 期间 27 个 bare pluginApi 留下的 ghost manifest 死结）。OpenClaw plugin id 仍是 `enhance`，老用户配置 `~/.openclaw/openclaw.json` 里 `plugins.entries.enhance.*` 不需要迁移。
 
 ```bash
-# 推荐：openclaw 直接传 npm spec（带版本号 → 路由到 npm，不走 marketplace）
-openclaw plugins install @huo15/openclaw-enhance@5.8.2 --force
-
-# 或：先 npm pack 拉 tarball 再装（想看包内容时）
-cd /tmp && npm pack @huo15/openclaw-enhance@5.8.2
-openclaw plugins install /tmp/huo15-openclaw-enhance-5.8.2.tgz --force
-
-# 或：本地源码 link（开发模式）
-openclaw plugins install --link --force /path/to/huo15-openclaw-enhance
-```
-
-> 升级到新版本：把 `@5.8.2` 换成最新版本号即可。最新版本看 [npm](https://www.npmjs.com/package/@huo15/openclaw-enhance) 或 cnb tag 列表。
-
-重启 OpenClaw 生效：
-
-```bash
+openclaw plugins install @huo15/huo15-openclaw-enhance --force
 openclaw restart
 ```
+
+### 老版本用户迁移（v5.x → v6.0.0）
+
+如果你之前装了 `@huo15/openclaw-enhance`：
+
+```bash
+# 1. 卸载老 plugin（OpenClaw 内部 plugin id 是 enhance）
+openclaw plugins uninstall enhance
+
+# 2. 装新包（npm 包名变了，但 OpenClaw plugin id 还是 enhance）
+openclaw plugins install @huo15/huo15-openclaw-enhance --force
+
+# 3. 重启
+openclaw restart
+```
+
+**配置兼容**：用户机器上 `~/.openclaw/openclaw.json` 里 `plugins.entries.enhance.config.*`（如 `botShare.baseUrl`）的 key 不需要改，因为 plugin id 还是 `enhance`。
+
+老 npm 包 `@huo15/openclaw-enhance` 已 deprecate；老 ClawHub slug `huo15-openclaw-enhance` 已 hide（已装用户仍可 update 兜底，但搜索看不到）。详见 [CHANGELOG.md](./CHANGELOG.md) v6.0.0 段。
 
 安装完成后访问仪表盘：`http://localhost:18789/plugins/enhance/`
 
