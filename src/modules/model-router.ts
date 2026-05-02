@@ -45,6 +45,11 @@ import {
   type ModelRouteConfig,
   type RouteMode,
 } from "../utils/model-route-config.js";
+import {
+  recordSample,
+  schedulePersist,
+  snapshotStats,
+} from "../utils/latency-tracker.js";
 
 // ── 类型定义 ───────────────────────────────────────────────
 
@@ -596,6 +601,29 @@ export function registerModelRouter(api: OpenClawPluginApi) {
     return { modelOverride: decision.model };
   });
 
+  // ── v5.8.5 latency tracker：监听 model_call_ended 收集 P50/P95/errRate ──
+  // openclaw 2026.4.29 dist 确认 emit 这个 hook（hook-types.d.ts 含 PluginHookModelCallEndedEvent
+  // 与 durationMs / outcome / timeToFirstByteMs 字段），但 enhance 项目锁定的 plugin-sdk
+  // 类型 union 还没及时更新含 "model_call_ended"——用 (api.on as any) cast 绕过类型不齐。
+  // runtime 行为完全依赖 dist 实现，cast 不影响功能。
+  (api.on as any)("model_call_ended", (event: any, _ctx: any) => {
+    try {
+      const provider = event?.provider;
+      const model = event?.model;
+      if (!provider || !model) return;
+      const providerId = `${provider}/${model}`;
+      // 优先 TTFB（更接近"用户体感速度"），缺失 fallback 到 totalDurationMs
+      const ttfb = event?.timeToFirstByteMs;
+      const dur = event?.durationMs;
+      const latencyMs = typeof ttfb === "number" ? ttfb : (typeof dur === "number" ? dur : 0);
+      const errored = event?.outcome === "error";
+      recordSample(providerId, latencyMs, errored);
+      schedulePersist(runtimeConfig);
+    } catch {
+      // hook 内永不抛 —— 防止把 openclaw 主流程拖坏
+    }
+  });
+
   // ── v5.8.4 工具：4 个对话式配置入口 ─────────────────────
 
   api.registerTool(
@@ -618,18 +646,24 @@ export function registerModelRouter(api: OpenClawPluginApi) {
         lines.push(``);
         lines.push(`**配置文件**: \`${getModelRouteConfigPath()}\``);
         lines.push(``);
+        const memSnap = snapshotStats();
         for (const [tier, t] of Object.entries(cfg.models)) {
           lines.push(`## tier = \`${tier}\``);
           lines.push(``);
-          lines.push(`| provider | priority | weight | enabled | p50ms | errRate |`);
-          lines.push(`|---|---|---|---|---|---|`);
+          lines.push(`| provider | priority | weight | enabled | p50ms | p95ms | errRate | samples | pending |`);
+          lines.push(`|---|---|---|---|---|---|---|---|---|`);
           for (const p of t.providers) {
             const speed = cfg.speedTracking?.[p.id];
+            const mem = memSnap[p.id];
             lines.push(
-              `| \`${p.id}\` | ${p.priority} | ${p.weight} | ${p.enabled ? "✓" : "✗"} | ${speed?.p50Ms ?? "-"} | ${speed?.errRate?.toFixed(2) ?? "-"} |`,
+              `| \`${p.id}\` | ${p.priority} | ${p.weight} | ${p.enabled ? "✓" : "✗"} | ${speed?.p50Ms ?? "-"} | ${speed?.p95Ms ?? "-"} | ${speed?.errRate?.toFixed(2) ?? "-"} | ${speed?.samples ?? mem?.samples ?? 0} | ${mem?.pending ?? 0} |`,
             );
           }
           lines.push(``);
+        }
+        if (Object.keys(memSnap).length > 0) {
+          lines.push(`> v5.8.5 latency tracker 在线：每次 model_call_ended 收集 P50/P95/errRate，1h 滑动窗口，节流 60s 落盘。`);
+          lines.push(`> "pending" 列 = 上次落盘后新增样本数，攒够 10 或满 60s 自动 persist 到 ${getModelRouteConfigPath()}。`);
         }
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       },
@@ -777,6 +811,6 @@ export function registerModelRouter(api: OpenClawPluginApi) {
   void reloadConfig;
 
   api.logger.info(
-    `[enhance] 模型路由器 v5.8.4 已加载（before_model_resolve hook + 4 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | 缓存TTL=${CACHE_TTL_MS}ms`,
+    `[enhance] 模型路由器 v5.8.5 已加载（before_model_resolve + model_call_ended hooks + 4 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | latency tracker 在线（P50/P95/errRate 1h 滑窗）`,
   );
 }
