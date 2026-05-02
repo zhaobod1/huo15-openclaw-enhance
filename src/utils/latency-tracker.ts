@@ -12,6 +12,7 @@
  */
 import type { ModelRouteConfig, SpeedSample } from "./model-route-config.js";
 import { saveModelRouteConfig } from "./model-route-config.js";
+import { appendSnapshot } from "./route-history.js";
 
 interface Sample {
   /** epoch ms */
@@ -117,6 +118,15 @@ export function flushTracking(config: ModelRouteConfig): void {
       saveModelRouteConfig(config);
     } catch {
       // 写盘失败不阻塞——下次 flush 重试
+    }
+    // v5.8.6: 同步 append 一份快照到 history.jsonl，给 enhance_model_route_history 工具用
+    try {
+      appendSnapshot({
+        ts: new Date(now).toISOString(),
+        providers: { ...config.speedTracking },
+      });
+    } catch {
+      // history 写失败也不阻塞主流程
     }
   }
 }

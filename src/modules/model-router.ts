@@ -50,6 +50,11 @@ import {
   schedulePersist,
   snapshotStats,
 } from "../utils/latency-tracker.js";
+import {
+  readHistory,
+  sparkLine,
+  getHistoryPath,
+} from "../utils/route-history.js";
 
 // ── 类型定义 ───────────────────────────────────────────────
 
@@ -759,6 +764,69 @@ export function registerModelRouter(api: OpenClawPluginApi) {
 
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_history",
+      description:
+        "查模型路由的历史延迟趋势（v5.8.6）。每次 latency tracker flush 同步 append 一条快照，" +
+        "可看 P50/errRate 随时间变化（用 ASCII spark line 展示，便于判断 sidus 是否在恢复 / deepseek 高峰是否变慢）。",
+      parameters: Type.Object({
+        windowHours: Type.Optional(Type.Number({ description: "查最近多少小时（默认 24）" })),
+        providerFilter: Type.Optional(Type.String({ description: "provider 子串过滤（如 'sidus' / 'deepseek'）" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const windowHours = typeof params.windowHours === "number" ? params.windowHours : 24;
+        const filter = typeof params.providerFilter === "string" ? params.providerFilter : "";
+        const snaps = readHistory({ windowHours, providerFilter: filter });
+        if (snaps.length === 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text:
+                `📭 history 暂无数据。\n` +
+                `条件: 最近 ${windowHours}h${filter ? `, providerFilter='${filter}'` : ""}\n` +
+                `文件: ${getHistoryPath()}\n` +
+                `提示: latency tracker 至少要 5 样本/provider + 触发 flush 后才会写入 history。等几次 LLM 调用后再查。`,
+            }],
+          };
+        }
+
+        // 按 providerId 聚合时间序列
+        const byProvider = new Map<string, Array<{ ts: string; p50: number; errRate: number; samples: number }>>();
+        for (const snap of snaps) {
+          for (const [pid, s] of Object.entries(snap.providers || {})) {
+            if (filter && !pid.includes(filter)) continue;
+            if (!byProvider.has(pid)) byProvider.set(pid, []);
+            byProvider.get(pid)!.push({ ts: snap.ts, p50: s.p50Ms, errRate: s.errRate, samples: s.samples });
+          }
+        }
+
+        const lines: string[] = [];
+        lines.push(`# 模型路由历史 — 最近 ${windowHours}h${filter ? `（filter: \`${filter}\`）` : ""}`);
+        lines.push(``);
+        lines.push(`快照数: **${snaps.length}**　file: \`${getHistoryPath()}\``);
+        lines.push(``);
+        for (const [pid, series] of byProvider) {
+          const p50s = series.map((s) => s.p50);
+          const errs = series.map((s) => s.errRate);
+          const latest = series[series.length - 1];
+          const oldest = series[0];
+          const p50Min = Math.min(...p50s);
+          const p50Max = Math.max(...p50s);
+          const avgErr = errs.reduce((a, b) => a + b, 0) / errs.length;
+          lines.push(`## \`${pid}\``);
+          lines.push(``);
+          lines.push(`- **P50** spark: \`${sparkLine(p50s)}\`  范围 ${p50Min}-${p50Max}ms  最新 ${latest.p50}ms`);
+          lines.push(`- **errRate** spark: \`${sparkLine(errs)}\`  平均 ${avgErr.toFixed(2)}  最新 ${latest.errRate.toFixed(2)}`);
+          lines.push(`- 时间窗: ${oldest.ts} ~ ${latest.ts} (${series.length} 个采样点)`);
+          lines.push(``);
+        }
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      },
+    })) as any,
+    { name: "enhance_model_route_history" },
+  );
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_model_route_disable",
       description:
         "批量禁用某个 provider（在所有 tier 中），或恢复某个 provider。" +
@@ -811,6 +879,6 @@ export function registerModelRouter(api: OpenClawPluginApi) {
   void reloadConfig;
 
   api.logger.info(
-    `[enhance] 模型路由器 v5.8.5 已加载（before_model_resolve + model_call_ended hooks + 4 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | latency tracker 在线（P50/P95/errRate 1h 滑窗）`,
+    `[enhance] 模型路由器 v5.8.6 已加载（before_model_resolve + model_call_ended hooks + 5 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | latency tracker 在线（P50/P95/errRate 1h 滑窗）+ history 自动归档`,
   );
 }
