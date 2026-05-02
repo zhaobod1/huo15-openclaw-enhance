@@ -214,7 +214,9 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 ## 一键安装
 
-> ⚠️ **从 v5.8.2 起本插件不再走 ClawHub plugin entry**：ClawHub 端 plugin entry manifest 跟 publish 内容是两份独立元数据（`clawhub publish` 不刷 entry 字段），不带版本号的 `clawhub:` 协议解析会拿到老 bare pluginApi 报错。请用 npm 路径安装。
+> ⚠️ **enhance 历史在 5.7.9 那次 publish 时声明了 bare `pluginApi: 2026.2.24`**（早于本仓 §6.1 红线"compat.pluginApi 必须 ranged"修复）。这条老 manifest 在 ClawHub 端被某种缓存固化，即便后续版本（5.7.10+）已全部改成 `>=2026.4.24` ranged，`clawhub:@huo15/openclaw-enhance` 协议解析仍可能拿到老 manifest 报 `requires plugin API 2026.2.24`。已实测同款配置下 `@huo15/wecom` / `@huo15/wechat-service` 第一次刷 plugin tag 干净——是 enhance 历史死结特例。
+>
+> 等 ClawHub 维护者刷新此 ghost manifest 后会恢复 `openclaw plugins install @huo15/openclaw-enhance` 直装。短期请走 npm 路径：
 
 ```bash
 # 推荐：openclaw 直接传 npm spec（带版本号 → 路由到 npm，不走 marketplace）
