@@ -43,6 +43,7 @@ import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
+import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
@@ -284,6 +285,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.botShare?.enabled !== false,
         load: () => registerBotShareLink(api, config.botShare),
+      },
+      {
+        // v5.7.26: 跨 reset 自动桥接上次会话末尾对话（修复 5/2 zhaobo 失忆事故）
+        // tier=1 minimal 也启用——纯 before_prompt_build hook 零工具 schema，只读 sessions/，
+        // 是 session-recap（结构化元数据）+ session-lifecycle（reset 时抢救）的补盲
+        name: "会话桥接",
+        tier: 1,
+        enabled: config.sessionBridge?.enabled !== false,
+        load: () => registerSessionBridge(api, config.sessionBridge),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

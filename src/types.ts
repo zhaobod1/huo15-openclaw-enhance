@@ -393,6 +393,25 @@ export interface EnhancePluginConfig {
   nativeMemorySurfacer?: NativeMemorySurfacerConfigType;
   /** v5.7.22: BOT 文件分享桥（企微/钉钉无法直传大文件时的兜底，内网穿透 + 临时 URL） */
   botShare?: BotShareConfig;
+  /** v5.7.26: 跨 reset 把上次会话末尾对话拉回当前 prependContext */
+  sessionBridge?: SessionBridgeConfigType;
+}
+
+// ── Session Bridge (v5.7.26) ──
+/**
+ * 跨 reset/compact 自动桥接上次会话末尾对话。
+ * 触发：当前 session 文件刚起（< freshSessionMaxBytes）+ 同 chat_id 的 .jsonl.reset.* 在 priorMaxAgeHours 内
+ *      + idle ≥ bridgeIdleMinutes → 拉末 N 条 message 注入 prependContext。
+ * 解决场景：openclaw runtime 把活跃 session 硬 reset 时不发 before_reset，lifecycle 抢救漏的盲区。
+ */
+export interface SessionBridgeConfigType {
+  enabled?: boolean;
+  bridgeIdleMinutes?: number;
+  priorMaxAgeHours?: number;
+  tailMessages?: number;
+  maxChars?: number;
+  freshSessionMaxBytes?: number;
+  debug?: boolean;
 }
 
 /**

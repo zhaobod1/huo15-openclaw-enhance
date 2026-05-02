@@ -2,6 +2,57 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.26 — 2026-05-02（session-bridge：跨 reset 自动桥接上次会话尾段）
+
+**触发**：今天用户在 `wecom:direct:zhaobo` DM 里反映"openclaw 忘了昨天上下午聊的内容"。复盘发现：
+
+- 5/1 23:13:26 openclaw runtime 把活跃 session 硬 reset（`*.jsonl` → `*.jsonl.reset.<ts>`），新 session 立刻在 23:13:38 起点 — 全空白上下文。
+- enhance 已有的 `before_reset` hook 当时**未触发**（动作不是事件级 reset 而是文件级硬 wipe），lifecycle 抢救 = 0；同期 memories 表里也没 `[lifecycle:reset] ... 2026-05-01` 条目佐证。
+- enhance 既有的 `session-recap` 只用结构化元数据（chapters / todos / decisions）填回顾，对"昨天具体聊了啥"完全无能为力。
+- `transcript-search` 是手动工具，不会自动注入。
+
+→ 结论是出现了"reset 不发 hook 时的盲区"。
+
+### 改动
+
+新增 `src/modules/session-bridge.ts`（tier=1，minimal 也启用）：
+
+- 挂 `before_prompt_build` hook，**每个 fresh session（jsonl < 200KB）启动时主动扫一次**
+- 扫 `~/.openclaw/agents/<agentId>/sessions/*.jsonl.reset.<ts>` 文件，限 48h 内
+- 用 `chat_id` (case-insensitive) 而非 sessionKey 匹配 — 比 sessionKey 大小写归一更鲁棒
+- 命中 + idle ≥ 75min（防活跃流自污染）→ 拉末 8 条 `type=message` 的原始 user/assistant 对话
+- 拼成 `prependContext` 注入；同 (agentId,sessionId) 6h dedup 防重复污染
+- 字符上限 4000（含模板），单条 message 上限 ≈ `maxChars / tailMessages`
+
+### 红线自查
+
+- ✅ 完全只读 sessions/ 目录（红线 #1，#2 不修改龙虾任何状态）
+- ✅ 无 `child_process` / `execSync`（红线 #4）
+- ✅ 不复制龙虾原生记忆系统 — 只在原生 hook 之上补盲（红线 #2）
+- ✅ `prependContext` 只追加，不覆盖原 system prompt
+- ✅ 进程内 6h dedup + LRU cap 防内存泄漏
+
+### 配置
+
+```json
+"sessionBridge": {
+  "enabled": true,
+  "bridgeIdleMinutes": 75,
+  "priorMaxAgeHours": 48,
+  "tailMessages": 8,
+  "maxChars": 4000,
+  "freshSessionMaxBytes": 204800,
+  "debug": false
+}
+```
+
+### 关联模块
+
+- `session-recap`（v5.7.x）：结构化元数据回顾，依赖 chapters/todos/decisions 已填好 → 仍然有用，但需要"提前埋点"
+- `session-lifecycle`（v5.7.7）：`before_reset` 时抢救 → reset 没发事件就盲区
+- `transcript-search`（v5.7.x）：手动工具
+- **session-bridge** = 上面三者全部失灵时的最后一道兜底
+
 ## 5.7.25 — 2026-05-01（config-doctor 加扫 channel-plugin 缺顶层 channelConfigs）
 
 **触发**：今天为 `@huo15/wechat-service` 修「runtime 启动报 *channel plugin manifest declares wechat-service without channelConfigs metadata*」时，发现 enhance 的 config-doctor 已经扫了 bare pluginApi / async register / 旧版 tool 字段三类反模式，但**没扫这条**。channel 类插件如果 manifest 顶层只声明 `configSchema.properties.channels.<id>` 而没有顶层 `channelConfigs.<id>`，runtime setup 流程在加载前就拿不到 label / description / schema，就会报这个警告。
