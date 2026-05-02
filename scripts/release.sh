@@ -112,7 +112,9 @@ fi
 log_ok "工作树干净，在 main"
 
 log_step "[2/11] 远端同步（git fetch + ahead/behind 检查）"
-git fetch origin main --tags 2>&1 | sed 's/^/  /'
+# 不带 --tags：避免本地老 tag 跟远端不同 SHA 时报 "would clobber existing tag"
+# 阻塞 fetch；脚本后续只校验本地 tag 状态，不依赖远端 tag 同步
+git fetch origin main 2>&1 | sed 's/^/  /'
 AHEAD="$(git log --oneline origin/main..HEAD | wc -l | tr -d ' ')"
 BEHIND="$(git log --oneline HEAD..origin/main | wc -l | tr -d ' ')"
 if [[ "$BEHIND" -gt 0 ]]; then
