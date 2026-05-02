@@ -33,6 +33,18 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
+import { Type } from "@sinclair/typebox";
+import {
+  loadModelRouteConfig,
+  saveModelRouteConfig,
+  selectProvider,
+  patchProvider,
+  listAllProviders,
+  getModelRouteConfigPath,
+  type ModelRouteConfig,
+  type RouteMode,
+} from "../utils/model-route-config.js";
 
 // ── 类型定义 ───────────────────────────────────────────────
 
@@ -506,6 +518,46 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
   };
 }
 
+// ── v5.8.4 配置驱动路由 ──────────────────────────────────
+
+/**
+ * 启动期 load 一次到内存；工具修改后 in-place 更新这个 ref。
+ * 单进程读写，无并发风险。
+ */
+let runtimeConfig: ModelRouteConfig = loadModelRouteConfig();
+
+function reloadConfig(): void {
+  runtimeConfig = loadModelRouteConfig();
+  bestModelCache.clear();
+  routeCache.clear();
+}
+
+function persistConfig(): void {
+  saveModelRouteConfig(runtimeConfig);
+  bestModelCache.clear();
+  routeCache.clear();
+}
+
+/**
+ * 主路由：先用 routeTask 选 tier（auto-task 模式的 task-aware 部分），
+ * 再用 selectProvider 按 mode 选 provider。
+ */
+function pickModel(prompt: string, mediaTypes: Set<string>): RouteDecision | null {
+  const taskDecision = routeTask(prompt, mediaTypes);
+  const tier = taskDecision.taskTier;
+  const picked = selectProvider(runtimeConfig, tier);
+  if (!picked) {
+    // 走兜底：原 getBestModel（hardcode 顺序）
+    return taskDecision;
+  }
+  return {
+    provider: picked.id.split("/")[0] ?? "?",
+    model: picked.id,
+    taskTier: tier,
+    reason: `${runtimeConfig.mode} | ${taskDecision.reason} | ${picked.reason}`,
+  };
+}
+
 // ── Hook 注册 ─────────────────────────────────────────────
 
 export function registerModelRouter(api: OpenClawPluginApi) {
@@ -518,17 +570,24 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       mediaTypes = detectPromptInlineMedia(event?.prompt);
     }
 
-    // 缓存查找
-    const ck = cacheKey(event?.prompt || "", mediaTypes);
-    const cached = cacheGet(ck);
-    if (cached) {
-      api.logger.info(`[model-router] CACHE HIT: ${cached.reason} | → ${cached.model}`);
-      return { modelOverride: cached.model };
+    // 缓存查找（mode=weighted/speed 时跳缓存——每次都要重新抽样/调权）
+    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task") {
+      const ck = cacheKey(event?.prompt || "", mediaTypes);
+      const cached = cacheGet(ck);
+      if (cached) {
+        api.logger.info(`[model-router] CACHE HIT: ${cached.reason} | → ${cached.model}`);
+        return { modelOverride: cached.model };
+      }
     }
 
     // 执行路由决策
-    const decision = routeTask(event?.prompt || "", mediaTypes);
-    cacheSet(ck, decision);
+    const decision = pickModel(event?.prompt || "", mediaTypes);
+    if (!decision) return undefined;
+
+    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task") {
+      const ck = cacheKey(event?.prompt || "", mediaTypes);
+      cacheSet(ck, decision);
+    }
 
     api.logger.info(
       `[model-router] ${decision.reason} | tier=${decision.taskTier} | → ${decision.model}`
@@ -537,7 +596,187 @@ export function registerModelRouter(api: OpenClawPluginApi) {
     return { modelOverride: decision.model };
   });
 
+  // ── v5.8.4 工具：4 个对话式配置入口 ─────────────────────
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_status",
+      description:
+        "查看当前模型路由配置：mode + 各 tier × provider 的 priority / weight / enabled / 最近延迟。" +
+        "对话式配置入口（v5.8.4）。",
+      parameters: Type.Object({}),
+      async execute() {
+        const cfg = runtimeConfig;
+        const lines: string[] = [];
+        lines.push(`# 模型路由当前状态`);
+        lines.push(``);
+        lines.push(`**模式**: \`${cfg.mode}\``);
+        lines.push(`  - priority: 严格按 priority 排序`);
+        lines.push(`  - weighted: 按 weight 加权随机`);
+        lines.push(`  - speed: 按最近 P50 + errRate 自动调权（v5.8.5+ 才有数据）`);
+        lines.push(`  - auto-task: 按任务复杂度选 tier，tier 内按 priority`);
+        lines.push(``);
+        lines.push(`**配置文件**: \`${getModelRouteConfigPath()}\``);
+        lines.push(``);
+        for (const [tier, t] of Object.entries(cfg.models)) {
+          lines.push(`## tier = \`${tier}\``);
+          lines.push(``);
+          lines.push(`| provider | priority | weight | enabled | p50ms | errRate |`);
+          lines.push(`|---|---|---|---|---|---|`);
+          for (const p of t.providers) {
+            const speed = cfg.speedTracking?.[p.id];
+            lines.push(
+              `| \`${p.id}\` | ${p.priority} | ${p.weight} | ${p.enabled ? "✓" : "✗"} | ${speed?.p50Ms ?? "-"} | ${speed?.errRate?.toFixed(2) ?? "-"} |`,
+            );
+          }
+          lines.push(``);
+        }
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      },
+    })) as any,
+    { name: "enhance_model_route_status" },
+  );
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_set",
+      description:
+        "改某个 tier 下某个 provider 的 priority / weight / enabled 字段。" +
+        "示例：tier='flash', providerId='custom-sidus-ai/deepseek-v4-flash', priority=10 把 sidus 降权到几乎不选。" +
+        "weight 0-100，priority 越小越优先；任一字段可省略不改。",
+      parameters: Type.Object({
+        tier: Type.String({ description: "task tier 名（flash / pro / reasoner / fast / vl / hailuo）" }),
+        providerId: Type.String({ description: "完整 provider/model id，如 deepseek/deepseek-v4-flash" }),
+        priority: Type.Optional(Type.Number({ description: "新优先级（数值越小越优先）" })),
+        weight: Type.Optional(Type.Number({ description: "新权重 0-100" })),
+        enabled: Type.Optional(Type.Boolean({ description: "是否启用" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const tier = String(params.tier ?? "").trim();
+        const providerId = String(params.providerId ?? "").trim();
+        if (!tier || !providerId) {
+          return { content: [{ type: "text" as const, text: "tier / providerId 必填。" }] };
+        }
+        const patch: Record<string, unknown> = {};
+        if (typeof params.priority === "number") patch.priority = params.priority;
+        if (typeof params.weight === "number") patch.weight = Math.max(0, Math.min(100, params.weight));
+        if (typeof params.enabled === "boolean") patch.enabled = params.enabled;
+        if (Object.keys(patch).length === 0) {
+          return { content: [{ type: "text" as const, text: "需要至少一个字段（priority / weight / enabled）" }] };
+        }
+        const ok = patchProvider(runtimeConfig, tier, providerId, patch as any);
+        if (!ok) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `未找到 tier='${tier}' / providerId='${providerId}'。运行 enhance_model_route_status 查现有列表。`,
+            }],
+          };
+        }
+        persistConfig();
+        return {
+          content: [{
+            type: "text" as const,
+            text: `✅ 已更新 ${tier} → ${providerId}：${JSON.stringify(patch)}\n配置文件：${getModelRouteConfigPath()}`,
+          }],
+        };
+      },
+    })) as any,
+    { name: "enhance_model_route_set" },
+  );
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_mode",
+      description:
+        "切换路由模式。priority=严格按优先级 / weighted=按权重抽样 / speed=按最近延迟自动调权（v5.8.5+） / auto-task=按任务自动选 tier 内首选（默认）。",
+      parameters: Type.Object({
+        mode: Type.Union(
+          [
+            Type.Literal("priority"),
+            Type.Literal("weighted"),
+            Type.Literal("speed"),
+            Type.Literal("auto-task"),
+          ],
+          { description: "新模式" },
+        ),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const mode = String(params.mode ?? "").trim() as RouteMode;
+        if (!["priority", "weighted", "speed", "auto-task"].includes(mode)) {
+          return { content: [{ type: "text" as const, text: `mode 必须是 priority / weighted / speed / auto-task` }] };
+        }
+        const old = runtimeConfig.mode;
+        runtimeConfig.mode = mode;
+        persistConfig();
+        const note = mode === "speed"
+          ? "（speed 模式 v5.8.5 才能收集 latency 数据；当前回退到 priority 兜底）"
+          : "";
+        return {
+          content: [{
+            type: "text" as const,
+            text: `✅ 模式切换：\`${old}\` → \`${mode}\`${note}\n下次 LLM 调用立即生效。`,
+          }],
+        };
+      },
+    })) as any,
+    { name: "enhance_model_route_mode" },
+  );
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_disable",
+      description:
+        "批量禁用某个 provider（在所有 tier 中），或恢复某个 provider。" +
+        "示例：providerPrefix='custom-sidus-ai' enabled=false 一刀禁掉所有 sidus。",
+      parameters: Type.Object({
+        providerPrefix: Type.String({ description: "provider 前缀（如 custom-sidus-ai）或完整 id" }),
+        enabled: Type.Boolean({ description: "true=启用 / false=禁用" }),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const prefix = String(params.providerPrefix ?? "").trim();
+        const enabled = params.enabled === true;
+        if (!prefix) {
+          return { content: [{ type: "text" as const, text: "providerPrefix 必填。" }] };
+        }
+        let touched = 0;
+        const matched: string[] = [];
+        for (const [, t] of Object.entries(runtimeConfig.models)) {
+          for (const p of t.providers) {
+            if (p.id === prefix || p.id.startsWith(prefix + "/")) {
+              if (p.enabled !== enabled) {
+                p.enabled = enabled;
+                touched += 1;
+              }
+              matched.push(p.id);
+            }
+          }
+        }
+        if (touched === 0 && matched.length === 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `未匹配到 providerPrefix='${prefix}'。运行 enhance_model_route_status 查现有 provider id。`,
+            }],
+          };
+        }
+        persistConfig();
+        const verb = enabled ? "启用" : "禁用";
+        return {
+          content: [{
+            type: "text" as const,
+            text: `✅ 已${verb} ${touched} 处（共匹配 ${matched.length} 处）\n匹配项: ${matched.join(", ")}`,
+          }],
+        };
+      },
+    })) as any,
+    { name: "enhance_model_route_disable" },
+  );
+
+  // 暴露 reload，方便未来 enhance_loop 触发
+  void reloadConfig;
+
   api.logger.info(
-    `[enhance] 模型路由器 v5.7.12 已加载（before_model_resolve hook）| 供应商: Sidus/DeepSeek/MiniMax/Google | 缓存TTL=${CACHE_TTL_MS}ms | 短路阈值=${SHORT_CIRCUIT_THRESHOLD}字符 | 复杂阈值=${COMPLEX_LENGTH_THRESHOLD}字符`
+    `[enhance] 模型路由器 v5.8.4 已加载（before_model_resolve hook + 4 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | 缓存TTL=${CACHE_TTL_MS}ms`,
   );
 }
