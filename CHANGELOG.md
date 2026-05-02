@@ -2,6 +2,51 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.8.1 — 2026-05-02（postinstall hint：装完直接引导配 BOT_BASE_URL）
+
+**触发**：v5.7.27 加了运行时 `logger.warn` 在 enhance 启动时如果 baseUrl 是 fallback/LAN 就警告——但用户得翻 `~/.openclaw/logs/gateway.err.log` 才能看到，新机器装完根本没意识到要配。zhaobo 实测 5/2 在企微聊天里看到 LLM 自己拼了 `192.168.1.177:18789` 链接发给群成员就是这个问题——LLM 都没机会引导用户去设。
+
+→ 直接在 `npm install` 终端输出里印一段 friendly 提示，最早能介入的时刻。**不是**改用户配置、不是替用户做决定，只是**告知 + 给三种配置路径**。
+
+### 改动
+
+- **`scripts/postinstall.cjs`** 新文件（126 行）：装完后写 stderr 一段中文提示。
+  - **三层智能跳过**：① `~/.openclaw/share/config.json` 已有 baseUrl（升级安装不重复唠叨）；② env `BOT_BASE_URL` 已设；③ `process.env.CI` 或 `npm_config_loglevel=silent`（CI 噪音）
+  - **零依赖**：只 `require('fs') + require('path')`（node 内置，不算 §6.2 禁的 child_process）
+  - **零 fs 写**：纯 `process.stderr.write`，绝不动用户文件
+  - **TTY 自适应**：terminal 着色，pipe / log 文件无色
+  - **`.cjs` 后缀**：因为 `package.json` `type=module`，`.js` 会被当 ESM 解析、`require()` 不存在；`.cjs` 强制 CommonJS
+- **`package.json`**:
+  - `scripts.postinstall = "node scripts/postinstall.cjs"`
+  - `version 5.8.0 → 5.8.1`
+  - description 改成 v5.8.1 摘要
+- 提示文案给三种配置方式（按用户偏好排序）：
+  1. shell rc（`export BOT_BASE_URL=...`）— 最简单
+  2. openclaw.json（`enhance.config.botShare.baseUrl`）— 显式 per-account
+  3. **让 LLM 自动持久化**（说一句话即可，LLM 调 `enhance_share_set_baseurl` 写到 ~/.openclaw/share/config.json）— 最自然
+
+### 为什么不能做"真正的安装时 wizard"
+
+OpenClaw plugin SDK 的 `WizardPrompter` / `setupSurface` 只暴露给 **channel 插件**（discord/feishu/wecom 等），non-channel augmentation 插件（如 enhance）没有交互式 setup hook 入口。npm postinstall 是当前能做到的最早提醒时机。
+
+### 验证
+
+```bash
+# 已配置（你机器实际情况）→ 0 字节 stderr
+node scripts/postinstall.cjs
+
+# 新机器无配置 → 1100+ 字节提示
+HOME=/tmp/fake-home node scripts/postinstall.cjs
+
+# CI 跳过
+CI=1 node scripts/postinstall.cjs
+
+# env 已设跳过
+BOT_BASE_URL=https://x node scripts/postinstall.cjs
+```
+
+四路全对：skip × 3 / print × 1。
+
 ## 5.8.0 — 2026-05-02（hook-profiler：量化 OpenClaw 端到端首字延迟）
 
 **触发**：用户实测 OpenClaw 首字延迟 p50=9.9s / p95=38.8s（取自 `gateway.err.log` 72 个 `[trace:embedded-run] prep stages` 样本），但**不知道慢在哪**。openclaw 自己其实在日志里写得很清楚——每次 turn 的 `core-plugin-tools / system-prompt / bundle-tools / stream-setup` 各阶段耗时都打在 stream-ready 行——只是从来没人聚合 + 趋势 + 排行。同时 `[hooks] X handler from <plugin> failed: timed out` 等异常事件也只是单行 log，没追踪。
