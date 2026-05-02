@@ -26,10 +26,20 @@
 
 ## 简介
 
-**火一五·克劳德·龙虾增强插件 v5.7.24** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
+**火一五·克劳德·龙虾增强插件 v6.0.0** 是 [OpenClaw 2026.4.24+](https://github.com/openclaw/openclaw) 的**非侵入式**增强插件，对标 Claude Code 的 Agent Harness 体验 + 设计能力套件 + 开发辅助套件；**所有能力重叠处都以龙虾为准**，绝不复制或覆盖龙虾原生功能。
 
 完全通过公共 Plugin SDK 实现，**不修改任何核心代码**，一键安装即可使用。
 （非龙虾团队开发）
+
+### v6.0.0 npm 包改名 + ClawHub 重新注册（2026-05-02）
+
+> **BREAKING（npm 包名）**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`
+
+老 npm 包对应的 ClawHub slug `huo15-openclaw-enhance` 上有 ghost manifest 死结——1.3.0-5.1.0 期间 27 个版本 pluginApi=bare `2026.2.24`（早于本仓 §6.1 红线"compat.pluginApi 必须 ranged"修复），ClawHub plugin entry record 在那段历史首次注册时缓存了 bare 值，后续 publish 不刷新 record 字段，OpenClaw 走 `clawhub:` 协议解析时永远拿到老 manifest 报 `requires plugin API 2026.2.24`。
+
+**修复**：换 npm 包名（与 `huo15-huihuoyun-odoo` 等 huo15-* 命名规范对齐）+ 新 ClawHub slug `huo15-huo15-openclaw-enhance`，让 ClawHub 重新创建一个干净的 plugin entry。OpenClaw plugin id 仍是 `enhance`，老用户配置不需迁移。详见 [CHANGELOG.md](./CHANGELOG.md) v6.0.0 段。
+
+老 npm 包已 deprecate；老 ClawHub slug 已 hide。已装老版本用户跑[迁移命令](#老版本用户迁移v5x--v600)即可。
 
 ### v5.7.24 BOT 文件分享 URL 改成独立兄弟 prefix（2026-05-01）
 
