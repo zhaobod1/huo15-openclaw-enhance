@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.27 bot-share 持久化 + 强引导：~/.openclaw/share/config.json 本地保存 baseUrl + enhance_share_set_baseurl 工具 + 启动期 fallback/LAN IP warn + memory prompt supplement 禁止 LLM 手写下载 URL。继承 v5.7.26 session-bridge + v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
-  "version": "2.4.16",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.8.0 新增 hook-profiler：增量解析 gateway.err.log 的 prep-stages + hook timeout/error 落入 enhance-memory.sqlite，新工具 enhance_hook_doctor 输出 P50/P95/timeout 排行；非侵入诊断 OpenClaw 首字延迟（用户实测 p50=9.9s/p95=38.8s）。继承 v5.7.27 bot-share 持久化 + v5.7.26 session-bridge + v5.7.22 三件套",
+  "version": "2.5.0",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {
@@ -32,6 +32,10 @@
     "transcriptSearch.enabled": {
       "control": "switch",
       "label": "历史会话搜索"
+    },
+    "hookProfiler.enabled": {
+      "control": "switch",
+      "label": "首字延迟诊断"
     }
   },
   "activation": {
@@ -227,6 +231,31 @@
           "enabled": {
             "type": "boolean",
             "default": true
+          }
+        }
+      },
+      "hookProfiler": {
+        "type": "object",
+        "description": "v5.8.0 量化 OpenClaw 端到端首字延迟：log-tailer 增量解析 ~/.openclaw/logs/gateway.err.log 的 [trace:embedded-run] prep stages 行 + [hooks] timeout/threw 异常事件，落入 enhance-memory.sqlite 两张新表（prep_stage_metrics / hook_profile）。enhance_hook_doctor 工具输出 P50/P95/timeout 排行 + 行动建议。完全只读 + 不替用户改 openclaw.json",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "retentionDays": {
+            "type": "number",
+            "default": 30,
+            "description": "数据保留天数；启动期清理早于此天数的旧记录"
+          },
+          "tailer": {
+            "type": "object",
+            "description": "gateway.err.log 增量解析子模块。关闭后只能依赖 profileHook 包装的 enhance 内部 hook 数据，不抓其它 plugin 的 timeout/error 事件",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              }
+            }
           }
         }
       },

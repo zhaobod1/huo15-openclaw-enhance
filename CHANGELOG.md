@@ -2,6 +2,48 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.8.0 — 2026-05-02（hook-profiler：量化 OpenClaw 端到端首字延迟）
+
+**触发**：用户实测 OpenClaw 首字延迟 p50=9.9s / p95=38.8s（取自 `gateway.err.log` 72 个 `[trace:embedded-run] prep stages` 样本），但**不知道慢在哪**。openclaw 自己其实在日志里写得很清楚——每次 turn 的 `core-plugin-tools / system-prompt / bundle-tools / stream-setup` 各阶段耗时都打在 stream-ready 行——只是从来没人聚合 + 趋势 + 排行。同时 `[hooks] X handler from <plugin> failed: timed out` 等异常事件也只是单行 log，没追踪。
+
+→ 把它做成 enhance 自家的 APM。**不是**重写 openclaw、不是复制龙虾原生（openclaw 没 hook profiling 能力）、不是替用户改配置——只是**读 + 解析 + 出诊断**。
+
+### 改动
+
+新增 4 个文件 / 改 3 个：
+
+- **`src/utils/hook-profile-db.ts`**（285 行新）— schema migration v5 → v6：建两张表 `prep_stage_metrics`（端到端 stage 耗时）+ `hook_profile`（单 hook 调用记录，source ∈ {`wrap`, `log-timeout`, `log-error`}）。配 `getPrepStageStats / getHookProfileStats / listKnownHookEvents` 查询 helpers + `purgeOldHookProfiles` retention（默认 30 天）。
+- **`src/utils/profile-hook.ts`**（77 行新）— `profileHook(api, event, moduleName, handler, options?)` 包装器。行为零变化（`await` 透传 + 异常 rethrow），副作用只是写一条 `wrap` source 记录。本版**未替换**现有 14 处 `api.on`，留作未来分阶段迁移；先靠 log-tailer 抓数据。
+- **`src/modules/hook-profiler.ts`**（441 行新）— 模块主入口：
+  1. **log-tailer**：fs.watch + readSync 增量读 `~/.openclaw/logs/gateway.err.log`，三条 regex 解析 `[trace:embedded-run] prep stages` / `[hooks] handler from <plugin> failed: timed out after Nms` / `[hooks] handler from <plugin> threw: ...`。启动跳到 EOF 防历史回灌。单次 ≤1MB chunk 防大日志爆 memory。
+  2. **`enhance_hook_doctor` 工具**：输出近 N 天 prep-stages 趋势 P50/P95/max（total / core_plugin / system_prompt / bundle_tools / session_loader / bootstrap_ctx / stream_setup）+ 各 hook event 的 plugin × module 排行（按 P95 降序）+ 行动建议（system_prompt P95>3s 提示看 hook 排行 / core_plugin>4s 提示跑 config_doctor / 其它 plugin timeout 提示反馈维护方）。
+- **`src/utils/sqlite-store.ts`**：+2 行（import + `migrateV5ToV6` 调用，链在 v4→v5 之后）
+- **`src/types.ts`**：+21 行（`HookProfilerConfig` interface + `EnhancePluginConfig.hookProfiler` 字段）
+- **`index.ts`**：+10 行（import + module 注册，tier=1 minimal 也启用，依赖 `dbAvailable`）
+- **`openclaw.plugin.json`**：uiHints 加 `hookProfiler.enabled` 开关 + configSchema 加 `hookProfiler` 段（含 `retentionDays / tailer.enabled`）
+
+### 设计权衡
+
+- **三路数据汇合**：A. log-tailer（间接但抓得到其它 plugin 的 timeout/error）；B. profileHook 包装器（精确但只覆盖 enhance 自家）；C. 未来 openclaw 若暴露其它 plugin 成功 handler 事件可补 D 路。**不抓其它 plugin 成功耗时**因为 openclaw 不暴露这个事件——只能通过 prep-stages 总 system_prompt 耗时反推"集合"贡献。
+- **log-tailer 改成 register 期常驻**（之前 review 时讨论过 SessionStart/End 起停）：fs.watch + persistent:false 不阻塞退出，开销极低（仅日志变更触发回调），按 session 起停徒增 ~30 行没必要。
+- **写表全 try/catch 静默**：profiler 是观察者，不能影响主流程。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心（红线 #1）
+- ✅ 不复制龙虾原生（openclaw 没 hook profiling 能力，红线 #2）
+- ✅ 无 `child_process`（fs.watch + readSync，红线 #4）
+- ✅ 不替用户改 openclaw.json（only return-cliCmd advice，红线 #5 + 6.4 诊断不修复）
+- ✅ `compat.pluginApi >=2026.4.24` 仍 ranged（红线 6.1）
+- ✅ tool 用 `parameters / execute` 新字段
+- ✅ 无新依赖
+
+### 验收（用户安装后跑）
+
+1. `enhance_hook_doctor` 应返回 prep-stages 趋势报表（运行几次 turn 后才有数据）
+2. 对比 `~/.openclaw/logs/gateway.err.log` 里同时段的 `[hooks] ... timed out` 行，`hook_profile` 表里 `source='log-timeout'` 条数应一致
+3. `enhance-memory.sqlite` 两张新表自动建出（migrateV5ToV6 自动跑）
+
 ## 5.7.27 — 2026-05-02（bot-share 持久化 + 强引导 LLM 调 enhance_share_file）
 
 **触发**：v5.7.26 修复 wecom 失忆事故的同时复盘到一个姊妹问题——

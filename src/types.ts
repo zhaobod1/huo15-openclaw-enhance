@@ -395,6 +395,8 @@ export interface EnhancePluginConfig {
   botShare?: BotShareConfig;
   /** v5.7.26: 跨 reset 把上次会话末尾对话拉回当前 prependContext */
   sessionBridge?: SessionBridgeConfigType;
+  /** v5.8.0: 量化 OpenClaw 端到端首字延迟（log-tailer + profileHook + enhance_hook_doctor 工具） */
+  hookProfiler?: HookProfilerConfig;
 }
 
 // ── Session Bridge (v5.7.26) ──
@@ -437,6 +439,26 @@ export interface BotShareConfig {
   expireHours?: number;
   /** 单文件最大 MB，默认 500 */
   maxFileSizeMB?: number;
+}
+
+// ── Hook Profiler (v5.8.0) ──
+/**
+ * 量化 OpenClaw 端到端首字延迟。三路数据汇合到 enhance-memory.sqlite：
+ *  - log-tailer 解析 ~/.openclaw/logs/gateway.err.log 的 [trace:embedded-run] prep stages
+ *    + [hooks] handler timeout/threw 行
+ *  - profileHook wrapper 包装 enhance 自家 hook 精确测时
+ *  - enhance_hook_doctor 工具输出 P50/P95/timeout 排行 + 行动建议
+ * 完全不动 openclaw 核心，不替用户改 openclaw.json（红线 #1 + #5）。
+ * 实测痛点：用户首字延迟 p50=9.9s/p95=38.8s 不知慢在哪。
+ */
+export interface HookProfilerConfig {
+  enabled?: boolean;
+  /** 数据保留天数，默认 30 */
+  retentionDays?: number;
+  /** log-tailer 子模块开关 */
+  tailer?: {
+    enabled?: boolean;
+  };
 }
 
 export interface NativeMemorySurfacerConfigType {

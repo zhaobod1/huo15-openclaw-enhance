@@ -44,6 +44,7 @@ import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
+import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
@@ -294,6 +295,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.sessionBridge?.enabled !== false,
         load: () => registerSessionBridge(api, config.sessionBridge),
+      },
+      {
+        // v5.8.0: hook-profiler 量化 OpenClaw 端到端首字延迟
+        // tier=1 minimal 也启用——log-tailer + 1 个工具，零行为侵入
+        // 实测痛点：用户首字延迟 p50=9.9s/p95=38.8s 不知慢在哪
+        name: "hook 性能诊断",
+        tier: 1,
+        enabled: config.hookProfiler?.enabled !== false && dbAvailable,
+        load: () => registerHookProfiler(api, openclawHome, config.hookProfiler),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
