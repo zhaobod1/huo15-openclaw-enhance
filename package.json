@@ -18,6 +18,11 @@
   "bin": {
     "openclaw-enhance-setup": "./scripts/setup.sh"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "release": "bash scripts/release.sh",
+    "prepublishOnly": "npm run typecheck"
+  },
   "keywords": [
     "openclaw",
     "plugin",
