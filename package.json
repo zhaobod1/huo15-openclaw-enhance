@@ -1,6 +1,6 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.8.2",
+  "version": "5.8.3",
   "description": "火一五·克劳德·龙虾增强插件 v5.8.2 — chore-only release：刷 ClawHub plugin tag（release.sh 之前默认只 --tags latest 没刷 plugin tag → plugin tag 卡在 5.7.9 那个 bare pluginApi=2026.2.24 老版本 → `openclaw plugins update` 报 'requires plugin API 2026.2.24, but runtime exposes 2026.4.29'）；同步修 release.sh 让以后默认 --tags latest,plugin。零代码逻辑改动。继承 v5.8.1 postinstall hint + v5.8.0 hook-profiler + v5.7.27 bot-share 持久化 + v5.7.26 session-bridge。",
   "type": "module",
   "main": "index.ts",

@@ -1,9 +1,9 @@
 /**
- * 模块: 模型路由器（Model Router）v5.7.12
+ * 模块: 模型路由器（Model Router）v5.7.12 / 接入 v5.8.3
  *
  * Hook: before_model_resolve
  * 时机: Agent 解析模型之前
- * 作用: 检测多模态 + 任务复杂度，在 Sidus / DeepSeek / MiniMax / Google 四供应商间自动路由
+ * 作用: 检测多模态 + 任务复杂度，在 DeepSeek / MiniMax / Google / Sidus 四供应商间自动路由
  *
  * v5.7.12 增强:
  *   - 路由决策缓存（TTL 30s），相同 prompt 结构命中直接返回
@@ -13,16 +13,21 @@
  *   - 中文关键词专项优化，减少误判
  *   - getBestModel 结果缓存，减少 provider 遍历
  *
+ * v5.8.3 修复:
+ *   - 真正注册进 index.ts（5.7.12 起一直未注册，是"幽灵模块"）
+ *   - sidus priority 1 → 4（兜底）：5/2 实战 sidus deepseek-v4-flash 反复 429 限流，
+ *     蓝火 wecom 长任务卡 12 分钟+；sidus 降权后由 deepseek 直连兜住
+ *
  * 供应商注册表（PROVIDER_REGISTRY）
  * ─────────────────────────────────────
  * priority 数值越小优先级越高。每个 tier 选第一个可用的供应商。
  *
- * | 供应商    | priority | 定位                    | tier 支持              |
- * |----------|----------|------------------------|------------------------|
- * | sidus    | 1        | 首选，性价比最高          | flash / pro            |
- * | deepseek | 2        | fallback + 深度推理      | flash / pro / reasoner |
- * | minimax  | 3        | 极速 + 多模态            | fast / vl / hailuo     |
- * | google   | 4        | 长上下文 / 混合多模态     | flash / pro            |
+ * | 供应商    | priority | 定位                          | tier 支持              |
+ * |----------|----------|------------------------------|------------------------|
+ * | deepseek | 1        | 直连首选 + 深度推理              | flash / pro / reasoner |
+ * | minimax  | 2        | 极速 + 多模态                   | fast / vl / hailuo     |
+ * | google   | 3        | 长上下文 / 混合多模态            | flash / pro            |
+ * | sidus    | 4        | 中转兜底（前三家都挂时才用）       | flash / pro            |
  *
  * 新增供应商：只需在 PROVIDER_REGISTRY 添加一行，不需改路由逻辑
  */
@@ -80,18 +85,13 @@ function cacheSet(key: string, decision: RouteDecision): void {
 
 // ── 供应商注册表（可扩展）──────────────────────────────────
 
+// v5.8.3: priority 重排——sidus 从 1（首选）降到 4（兜底）
+//         触发：5/2 16:00 sidus deepseek-v4-flash 反复 429 限流，蓝火 wecom 长
+//               任务卡 12 分钟+；sidus 降权后由 deepseek 直连兜住
 const PROVIDER_REGISTRY = {
-  sidus: {
-    label: "Sidus（中转）",
-    priority: 1,
-    tiers: {
-      flash: "custom-sidus-ai/deepseek-v4-flash",
-      pro:   "custom-sidus-ai/DeepSeek-V4-Pro",
-    },
-  },
   deepseek: {
-    label: "DeepSeek（官方）",
-    priority: 2,
+    label: "DeepSeek（官方直连）",
+    priority: 1,
     tiers: {
       flash:    "deepseek/deepseek-v4-flash",
       pro:      "deepseek/deepseek-v4-pro",
@@ -100,7 +100,7 @@ const PROVIDER_REGISTRY = {
   },
   minimax: {
     label: "MiniMax（极速）",
-    priority: 3,
+    priority: 2,
     tiers: {
       fast:   "minimax/MiniMax-M2.7",
       vl:     "minimax/MiniMax-VL-01",
@@ -109,10 +109,18 @@ const PROVIDER_REGISTRY = {
   },
   google: {
     label: "Google（长上下文）",
-    priority: 4,
+    priority: 3,
     tiers: {
       flash: "google-ai-studio/gemini-2.0-flash",
       pro:   "google-ai-studio/gemini-2.5-pro",
+    },
+  },
+  sidus: {
+    label: "Sidus（中转兜底）",
+    priority: 4,
+    tiers: {
+      flash: "custom-sidus-ai/deepseek-v4-flash",
+      pro:   "custom-sidus-ai/DeepSeek-V4-Pro",
     },
   },
 } as const;

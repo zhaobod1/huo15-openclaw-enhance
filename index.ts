@@ -45,6 +45,7 @@ import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfac
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
+import { registerModelRouter } from "./src/modules/model-router.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
@@ -277,6 +278,17 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.nativeMemorySurfacer?.enabled !== false,
         load: () => registerNativeMemorySurfacer(api, config.nativeMemorySurfacer),
+      },
+      {
+        // v5.7.12 实现 / v5.8.3 真接入：模型路由器（before_model_resolve hook）
+        // tier=1 minimal 也启用——零工具 schema（纯 hook），按 prompt 复杂度 + 多模态自动路由
+        // 5/2 实战发现：5.7.12 起 model-router 一直未接 index.ts，是"幽灵模块"
+        // 5.8.3 改 sidus priority 1 → 4（兜底），deepseek 直连 priority 1（首选）
+        // 触发：sidus deepseek-v4-flash 反复 429 限流卡蓝火 wecom 长任务 12 分钟+
+        name: "模型路由器",
+        tier: 1,
+        enabled: config.modelRouter?.enabled !== false,
+        load: () => registerModelRouter(api),
       },
       {
         // v5.7.22: BOT 文件分享桥（企微/钉钉无法直传大文件时的兜底）

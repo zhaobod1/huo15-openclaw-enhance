@@ -397,6 +397,16 @@ export interface EnhancePluginConfig {
   sessionBridge?: SessionBridgeConfigType;
   /** v5.8.0: 量化 OpenClaw 端到端首字延迟（log-tailer + profileHook + enhance_hook_doctor 工具） */
   hookProfiler?: HookProfilerConfig;
+  /** v5.7.12 / v5.8.3 接入: before_model_resolve hook 多供应商路由 + sidus 降权兜底 */
+  modelRouter?: ModelRouterConfig;
+}
+
+/**
+ * v5.8.3 模型路由器配置：interface 简单（路由实现完全 hardcode 在 model-router.ts）。
+ * 当前唯一 config 就是 enabled 开关；未来可扩展 PROVIDER_REGISTRY override / 黑名单等。
+ */
+export interface ModelRouterConfig {
+  enabled?: boolean;
 }
 
 // ── Session Bridge (v5.7.26) ──
