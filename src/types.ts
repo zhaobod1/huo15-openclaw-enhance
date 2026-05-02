@@ -338,7 +338,7 @@ export interface TrajectoryArchiverConfig {
   label?: string;
   /** mtime 阈值（天）；早于此天数才归档；默认 1 */
   archiveAgeDays?: number;
-  /** size 阈值（MB），≥ 才归档；默认 5 */
+  /** size 阈值（MB），≥ 才归档；默认 2（v5.8.7 起；5/2 实战发现 5 太保守） */
   archiveMinSizeMB?: number;
   /** 触发时刻 hour（0-23）；默认 3 */
   scheduleHour?: number;

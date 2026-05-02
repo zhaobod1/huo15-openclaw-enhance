@@ -113,7 +113,9 @@ export function registerTrajectoryArchiver(
 ) {
   const label = config?.label ?? DEFAULT_LABEL;
   const ageDays = config?.archiveAgeDays ?? 1;
-  const minSizeMB = config?.archiveMinSizeMB ?? 5;
+  // v5.8.7: 默认从 5 → 2。5/2 实战发现 130 个 < 5MB 文件累计 240MB+ 没归档导致
+  // sessions.list 仍卡 14s。+2M 阈值 + mmin+1440（24h）保护活动 session 仍稳。
+  const minSizeMB = config?.archiveMinSizeMB ?? 2;
   const hour = config?.scheduleHour ?? 3;
 
   // 启动期：只读检查 plist 是否已部署
