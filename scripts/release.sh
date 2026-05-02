@@ -257,7 +257,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "  • git push github $TAG"
   fi
   echo "  • npm publish"
-  echo "  • clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin"
+  echo "  • clawhub publish \"\$(pwd)\" --version $VERSION --tags latest"
   echo
   log_ok "DRY-RUN 完成。去掉 --dry-run 即正式发版"
   exit 0
@@ -299,20 +299,21 @@ log_ok "npm publish 完成"
 log_step "clawhub publish $VERSION"
 if [[ -z "${CLAWHUB_TOKEN:-}" ]]; then
   log_warn "CLAWHUB_TOKEN 未设；从 ~/CLAUDE.md §2 取或 export 后重跑这一步"
-  log_warn "${C_YELLOW}手动收尾：CLAWHUB_TOKEN=clh_... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin${C_RESET}"
+  log_warn "${C_YELLOW}手动收尾：CLAWHUB_TOKEN=clh_... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest${C_RESET}"
   exit 1
 fi
-# v0.8.0+ ClawHub 默认只刷 `latest` tag，plugin entry（被 `clawhub:` 协议解析时用）
-# 用的是独立的 `plugin` tag。如果不显式 --tags latest,plugin，plugin tag 会卡在
-# 第一次 publish 时的版本，后续 npm 更新但 ClawHub 端 plugin manifest 缓存不动
-# → 用户跑 `openclaw plugins update` 时 OpenClaw 拉到的是 plugin tag 那个老 manifest，
-# 报错 "requires plugin API X.Y.Z"（X.Y.Z 是 plugin tag 那时的 bare pluginApi）。
+# v5.8.2 之后下架 ClawHub plugin entry 角色：只刷 `latest` tag，停止刷 `plugin` tag。
+# 原因：ClawHub 端 plugin entry manifest 跟 publish 内容是两份独立元数据——
+# `clawhub publish --tags ...,plugin` 只刷 tag 指针，**不刷 entry manifest 字段**
+# （pluginApi 等），导致 `clawhub:@huo15/openclaw-enhance` 协议解析时永远拿到老
+# bare pluginApi → `openclaw plugins install` 报"requires plugin API 2026.2.24"。
+# 用户改用 npm spec 安装：`openclaw plugins install @huo15/openclaw-enhance@<ver>`
 # 详见 ~/knowledge/huo15/2026-05-02-clawhub-plugin-tag-stuck-cache.md
-if ! clawhub publish "$(pwd)" --version "$VERSION" --tags latest,plugin 2>&1 | sed 's/^/  /'; then
-  log_err "clawhub publish 失败——npm 已发；手动重跑 'CLAWHUB_TOKEN=... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin'"
+if ! clawhub publish "$(pwd)" --version "$VERSION" --tags latest 2>&1 | sed 's/^/  /'; then
+  log_err "clawhub publish 失败——npm 已发；手动重跑 'CLAWHUB_TOKEN=... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest'"
   exit 1
 fi
-log_ok "clawhub publish 完成（已刷 latest+plugin 两个 tag）"
+log_ok "clawhub publish 完成（仅刷 latest tag；plugin entry 角色已下架）"
 
 echo
 log_ok "${C_GREEN}🎉 $PKG_NAME@$VERSION 全链路发版成功${C_RESET}"

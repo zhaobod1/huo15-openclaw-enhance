@@ -214,9 +214,21 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 ## 一键安装
 
+> ⚠️ **从 v5.8.2 起本插件不再走 ClawHub plugin entry**：ClawHub 端 plugin entry manifest 跟 publish 内容是两份独立元数据（`clawhub publish` 不刷 entry 字段），不带版本号的 `clawhub:` 协议解析会拿到老 bare pluginApi 报错。请用 npm 路径安装。
+
 ```bash
-openclaw plugins install @huo15/openclaw-enhance
+# 推荐：openclaw 直接传 npm spec（带版本号 → 路由到 npm，不走 marketplace）
+openclaw plugins install @huo15/openclaw-enhance@5.8.2 --force
+
+# 或：先 npm pack 拉 tarball 再装（想看包内容时）
+cd /tmp && npm pack @huo15/openclaw-enhance@5.8.2
+openclaw plugins install /tmp/huo15-openclaw-enhance-5.8.2.tgz --force
+
+# 或：本地源码 link（开发模式）
+openclaw plugins install --link --force /path/to/huo15-openclaw-enhance
 ```
+
+> 升级到新版本：把 `@5.8.2` 换成最新版本号即可。最新版本看 [npm](https://www.npmjs.com/package/@huo15/openclaw-enhance) 或 cnb tag 列表。
 
 重启 OpenClaw 生效：
 
