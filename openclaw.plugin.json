@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.8.0 新增 hook-profiler：增量解析 gateway.err.log 的 prep-stages + hook timeout/error 落入 enhance-memory.sqlite，新工具 enhance_hook_doctor 输出 P50/P95/timeout 排行；非侵入诊断 OpenClaw 首字延迟（用户实测 p50=9.9s/p95=38.8s）。继承 v5.7.27 bot-share 持久化 + v5.7.26 session-bridge + v5.7.22 三件套",
-  "version": "2.5.0",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v6.1.0 trajectory-archiver v2 路径策略：归档到 sessions-archive 而非 sessions/.archive（移出 sessions/ 子树→openclaw sessions.list 看不到→主线程不 JSON.parse），修复 5/2 实战 sample 暴露的 v1 路径不解决卡顿根因。继承 v6.0.0 npm 包改名 + v5.8.0 hook-profiler",
+  "version": "2.6.0",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {

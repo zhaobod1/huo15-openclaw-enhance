@@ -119,7 +119,10 @@ export function checkTrajectories(
   const huge = files
     .filter((f) => f.sizeMB >= warnSingle)
     .sort((a, b) => b.sizeMB - a.sizeMB);
-  const archiveDir = join(openclawDir, "agents", "main", "sessions", ".archive");
+  // v6.1.0 路径策略：归档目录从 sessions/.archive 提升到 sessions-archive
+  // (跟 sessions/ 平级，不在子树) → openclaw sessions.list 不会扫到。
+  // 5/2 sample 实证 v1 路径策略不解决卡顿（99.2% 主线程仍卡 JsonParser）。
+  const archiveDir = join(openclawDir, "agents", "main", "sessions-archive");
 
   const results: CheckResult[] = [];
 
@@ -133,8 +136,10 @@ export function checkTrajectories(
       category: "trajectory-total-huge",
       message:
         `trajectory.jsonl 累计 ${totalMB.toFixed(0)}MB（${files.length} 个文件，阈值 ${warnTotal}MB）。` +
-        `gateway 的 sessions.list 会在主线程 JSON.parse 这些文件，超大时卡 event-loop（曾观测到单次 12-14s，最长 367s，event-loop max delay 13s+，95%+ CPU）。`,
+        `gateway 的 sessions.list 会在主线程 JSON.parse 这些文件，超大时卡 event-loop（曾观测到单次 12-14s，最长 367s，event-loop max delay 13s+，95%+ CPU；5/2 sample 实测 99.2% 主线程卡 V8 JsonParser）。` +
+        `v6.1.0 起归档目标改为 sessions-archive（移出 sessions/ 子树，openclaw 不再扫）。建议跑 enhance_trajectory_archiver_setup 部署 LaunchAgent 自动归档。`,
       fixCommand:
+        `# 一次性手动归档（主推 enhance_trajectory_archiver_setup 部署自动版）：\n` +
         `mkdir -p '${archiveDir}' && find '${join(openclawDir, "agents")}' -name '*.trajectory.jsonl' -size +${warnSingle}M -mtime +${archiveDays} -exec mv {} '${archiveDir}/' \\;`,
     });
   }
@@ -157,7 +162,7 @@ export function checkTrajectories(
       message:
         `检测到 ${huge.length} 个 trajectory.jsonl 单文件 ≥ ${warnSingle}MB（top ${Math.min(topN, huge.length)}）:\n${lines}${more}`,
       fixCommand:
-        `# 请逐个检查后归档（确认 session 不再活跃）：\n` +
+        `# 请逐个检查后归档（确认 session 不再活跃），目标是 sessions-archive（v6.1.0 路径，移出 sessions/ 子树）：\n` +
         `mkdir -p '${archiveDir}'\n` +
         `# mv '<path>' '${archiveDir}/'`,
     });

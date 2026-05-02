@@ -2,6 +2,73 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.0 — 2026-05-02（trajectory-archiver v2 路径策略：移出 sessions/ 子树）
+
+**触发**：用户报"打开 https://keepermac.huo15.com/chat?session=...wecom:direct:zhaobo 超级慢"。早上发了 v5.8.0 hook-profiler 拿数据，晚上接着诊断。
+
+### 故障复盘
+
+1. **trajectory 体量翻倍**：早上 266MB / 141 文件 → 晚上 543MB / 160 文件（12 小时增 277MB），自动归档没起作用
+2. **gateway event-loop 卡 30s**：`liveness warning eventLoopDelayMaxMs=30752.6`，频率每隔几分钟来一次
+3. **第一次清 trajectory 释放 364MB（543→31MB）后用户反映还是慢** —— 证伪 trajectory 体量假设
+4. **`sample 27442 30` 采样 30 秒**：21478/21645 hits（**99.2%**）卡在 V8 `JsonParser::ParseJsonObject` 递归调用 + `Builtins_ArrayMap` —— 典型 `array.map(JSON.parse)` 模式 = `sessions.list` 在 JSON.parse 全部 .jsonl 文件。
+5. **真因**：openclaw 的 `sessions.list` **递归扫整个 sessions/ 子树**，包括旧版 archiver mv 进去的 `sessions/.archive/` 子目录。所以 v1 把文件 mv 到子目录里 = 把垃圾从一个抽屉挪到另一个抽屉，主线程仍然 JSON.parse 全套。
+
+### 根治方案：路径策略修正
+
+把归档目录从 `sessions/.archive`（**子目录**，被扫）提升到 `sessions-archive`（**跟 sessions/ 平级**，不在子树）→ openclaw 看不见 → 主线程不扫。
+
+实测验证（用户本机 5/2 20:27）：
+
+| 指标 | v1 路径策略 | v2 路径策略 |
+|---|---|---|
+| sessions/ 子树体量 | 68 MB / 155 files | **29 MB / 32 files** |
+| keepermac TTFB 5 连测 | 49/34/31/**776**/**3449** ms | **30/32/33/32/32** ms 全部稳定 |
+| liveness 11s 警告频率 | 每 3-4 分钟一次 | 60s 内 0 次 |
+
+### 改动
+
+**`src/modules/trajectory-archiver.ts`**（重写 ~200 行）：
+
+- `archiveDir` 路径：`sessions/.archive` → `sessions-archive`（move-out-of-subtree）
+- 部署模式：从 plist inline `find ... mv ...` 单行命令 → 抽脚本到 `~/.openclaw/scripts/trajectory-archiver.sh`，plist 调脚本路径
+- 脚本内容（`buildArchiveScript`）三步：
+  1. per-agent 循环 `for AGENT_DIR in agents/*/`：mv >ageDays + >minSizeMB 的 trajectory + checkpoint 到 `$AGENT_DIR/sessions-archive/`
+  2. delete sessions-archive 里 >7 天的（彻底释放磁盘）
+  3. delete `*.jsonl.reset.*` / `*.jsonl.bak-*` >3 天
+- 启动期检测：旧版 v1 plist（含 `sessions/.archive` 字面量）→ `api.logger.warn` 强烈建议跑 setup 拿 v2 部署命令重装
+- 新配置：`archiveCheckpoints?: boolean`（默认 true）— 同时归档 `*.checkpoint.*.jsonl`
+- `enhance_trajectory_archiver_setup` 工具升级：v1 检测时输出"重新部署"消息；v2 命令含自动 unload 旧 plist 防 label 冲突
+
+**`src/modules/session-doctor.ts`**：
+
+- `archiveDir` 同步改成 `sessions-archive`
+- `trajectory-total-huge` warning message 加入 v6.1.0 升级路径说明 + 推 enhance_trajectory_archiver_setup 部署
+- fixCommand 模板更新
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心（红线 #1）—— 完全只读 sessions/ 目录树，靠"避开扫描范围"而非"修改扫描逻辑"解决问题
+- ✅ 不复制龙虾原生（archiver 是 enhance 范围，openclaw 没归档机制）
+- ✅ 无 `child_process`（红线 #4）—— LaunchAgent 由 launchd 跑 bash 脚本，不在 plugin 进程
+- ✅ 不替用户改 openclaw.json（红线 #5）—— 只输出 cli-cmd 让用户复制粘贴
+- ✅ `compat.pluginApi >=2026.4.24` 仍为 ranged
+- ✅ 启动期纯 fs.existsSync + readFileSync（只读检测），不写不改用户配置
+- ✅ 不归档活跃 session（mtime > ageDays 才动；`.jsonl` 对话原文一律保留）
+
+### 用户升级路径
+
+```bash
+# 装新版（自动替换旧 plugin record，配置不需迁移）
+openclaw plugins install @huo15/huo15-openclaw-enhance@latest --force
+openclaw restart
+
+# 重启后 enhance 启动 log 会 warn：检测到 v1 LaunchAgent
+# 调用工具拿 v2 部署命令：
+#   AI: 帮我跑一下 enhance_trajectory_archiver_setup
+# 复制返回的 bash 块粘贴到 shell 跑一次即可（自动 unload 旧的、写新脚本和 plist、立即跑一次验证）
+```
+
 ## 6.0.0 — 2026-05-02（**重大改名：npm 包名变更 + ClawHub 重新注册**）
 
 > **BREAKING（npm 包名）**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`
