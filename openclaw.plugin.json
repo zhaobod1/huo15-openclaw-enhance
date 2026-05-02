@@ -1,8 +1,8 @@
 {
   "id": "enhance",
   "name": "火一五·克劳德·龙虾增强插件",
-  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.24 bot-share-link URL 改成独立兄弟 prefix /plugins/enhance-share/<token>-<filename>（不再做 bridge dispatch，bot-share 自己注册 SDK route），跟 dashboard /plugins/enhance 完全独立，结构更清晰。baseUrl 仍走自动检测 zero-config。继承 v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
-  "version": "2.4.15",
+  "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v5.7.27 bot-share 持久化 + 强引导：~/.openclaw/share/config.json 本地保存 baseUrl + enhance_share_set_baseurl 工具 + 启动期 fallback/LAN IP warn + memory prompt supplement 禁止 LLM 手写下载 URL。继承 v5.7.26 session-bridge + v5.7.22 三件套 + v5.7.10 native-memory-surfacer 等",
+  "version": "2.4.16",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {

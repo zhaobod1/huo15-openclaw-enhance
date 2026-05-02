@@ -2,6 +2,40 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 5.7.27 — 2026-05-02（bot-share 持久化 + 强引导 LLM 调 enhance_share_file）
+
+**触发**：v5.7.26 修复 wecom 失忆事故的同时复盘到一个姊妹问题——
+
+- AI 知道企微 IM 渠道有 20MB 文件大小限制后，**直接在文本里凭空编一个下载 URL** 给用户（`http://192.168.x.x:9999/<file>` 这种用户网络相关但完全错误的链接），既没调 `enhance_share_file` 工具，也没让 wecom fallback 接管。
+- 根因 1：`enhance_share_file` 的 tool description 写得再清楚，也只是 LLM "可以读"——没有 prompt level 的强约束。
+- 根因 2：用户首装 enhance 没人提示要配 `BOT_BASE_URL`，链接落到 `localhost` / LAN IP 兜底，外网用户访问不了；AI 看到这种"显然不对"的 URL 自己又编一个看起来更合理的——错上加错。
+
+→ 三件套联动一次性修：让用户能保存一次、让插件主动提示首装问题、让 LLM 在 prompt 层被强约束。
+
+### 改动
+
+`src/modules/bot-share-link.ts`（v5.7.27 新增 248 行）：
+
+1. **持久化 baseUrl**：`~/.openclaw/share/config.json` 本地保存 `{baseUrl, setAt, setBy}`。新工具 `enhance_share_set_baseurl(url=...)` 让 AI 一次性写入（带 URL 校验：必 http/https、不能带路径/query/hash）。
+2. **baseUrl 优先级链**（5 层 → 6 层）：env `BOT_BASE_URL` > `openclaw.json` 里的 `enhance.config.botShare.baseUrl` > 本地保存（新加）> host header 自动检测 > localhost 兜底。
+3. **首装检测 startup warning**：模块 `register` 期主动跑一次 `describeBaseUrlSource`，命中 `fallback` / `LAN IP detected` 时直接 `api.logger.warn` 在 OpenClaw 启动 log 提示用户。
+4. **`enhance_share_file` 输出升级**：`structuredContent` 加 `baseUrlSource / baseUrlIsFallback / baseUrlIsLanDetected` 三字段，让 LLM 能感知"我这次返回的 URL 是不是真的可外网访问"。
+5. **memory prompt supplement 强引导**（核心修复）：通过 `api.registerMemoryPromptSupplement` 注入"## 大文件分享（强制规则）"四条到 system prompt：
+   - IM 渠道发文件必须先调 `enhance_share_file`，把 `structuredContent.url` 原样发给用户
+   - **严禁**手写、拼接、猜测、回忆下载 URL
+   - 文件不在本地时先落盘到绝对路径再调
+   - 看到 `baseUrlIsFallback` / `baseUrlIsLanDetected` 时**先**问用户公网域名，**再**调 `enhance_share_set_baseurl` 保存
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心（红线 #1）
+- ✅ 不复制龙虾原生（openclaw 没本地配置持久化能力，亦无 IM 渠道文件分享桥）
+- ✅ 无 `child_process`（红线 #4）
+- ✅ 写文件只写 plugin 自己的 `~/.openclaw/share/`，不动用户 `~/.openclaw/openclaw.json`（红线 #5 + 6.4 诊断不修复）
+- ✅ `registerMemoryPromptSupplement` 单参（红线 6.3）
+- ✅ `compat.pluginApi >=2026.4.24` 仍为 ranged
+- ✅ tool 用 `parameters / execute` 新字段（不是旧 `schema / handler`）
+
 ## 5.7.26 — 2026-05-02（session-bridge：跨 reset 自动桥接上次会话尾段）
 
 **触发**：今天用户在 `wecom:direct:zhaobo` DM 里反映"openclaw 忘了昨天上下午聊的内容"。复盘发现：

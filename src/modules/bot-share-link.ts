@@ -54,6 +54,7 @@ const DEFAULT_BASE_URL_FALLBACK = "http://localhost:18789";
 const DEFAULT_URL_PREFIX = "/plugins/enhance-share";
 const DEFAULT_EXPIRE_HOURS = 24;
 const DEFAULT_MAX_FILE_MB = 500;
+const LOCAL_CONFIG_FILENAME = "config.json";
 
 const SENSITIVE_DIR_TOKENS = [
   "/.ssh/",
@@ -80,6 +81,24 @@ interface ShareEntry {
 interface Manifest {
   version: 1;
   entries: ShareEntry[];
+}
+
+/**
+ * 本地持久化配置（~/.openclaw/share/config.json）
+ *
+ * 用途：用户首次安装 enhance 没配 env BOT_BASE_URL 也没在 openclaw.json 写
+ * `enhance.config.botShare.baseUrl` 时，让 AI 引导用户提供公网域名后通过
+ * `enhance_share_set_baseurl` 工具保存到这里，下次启动自动生效。
+ *
+ * 红线（与 plugin 整体一致）：
+ *   - 写在 plugin 自己的 share 目录（~/.openclaw/share/），不动用户的 openclaw.json
+ *   - 零 child_process / 零 fs.writeFileSync 用户配置文件
+ *   - 优先级低于 env / pluginConfig，高于 host header 自动检测
+ */
+interface LocalShareConfig {
+  baseUrl?: string;
+  setAt?: string;
+  setBy?: string;
 }
 
 function resolveShareRoot(api: OpenClawPluginApi, config: BotShareConfig | undefined): string {
@@ -163,11 +182,80 @@ function errorResponse(msg: string) {
   return { content: [{ type: "text" as const, text: `✗ ${msg}` }] };
 }
 
-function resolveBaseUrl(config: BotShareConfig | undefined): string {
+function localConfigPath(shareRoot: string): string {
+  return join(shareRoot, LOCAL_CONFIG_FILENAME);
+}
+
+function readLocalConfig(shareRoot: string): LocalShareConfig {
+  const p = localConfigPath(shareRoot);
+  if (!existsSync(p)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf-8")) as LocalShareConfig;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalConfig(shareRoot: string, partial: LocalShareConfig): LocalShareConfig {
+  mkdirSync(shareRoot, { recursive: true });
+  const current = readLocalConfig(shareRoot);
+  const next: LocalShareConfig = { ...current, ...partial };
+  writeFileSync(localConfigPath(shareRoot), JSON.stringify(next, null, 2), "utf-8");
+  return next;
+}
+
+/**
+ * baseUrl 解析优先级（v5.7.27 起新增 local saved 层）：
+ *   1. env BOT_BASE_URL
+ *   2. pluginConfig.botShare.baseUrl（来自 openclaw.json）
+ *   3. ~/.openclaw/share/config.json baseUrl（用户通过 enhance_share_set_baseurl 保存）
+ *   4. detected external host（从浏览器访问 dashboard 的 host header）
+ *   5. detected internal host
+ *   6. http://localhost:18789（兜底）
+ *
+ * 实现：把 (2) 或 (3) 合并喂给 bridge 当 configBaseUrl，bridge 内部再走 env > configBaseUrl > detected > fallback。
+ */
+function resolveBaseUrl(config: BotShareConfig | undefined, shareRoot: string): string {
+  const pluginConfigBaseUrl = config?.baseUrl?.trim();
+  if (pluginConfigBaseUrl) {
+    return resolveBaseUrlFromBridge({
+      configBaseUrl: pluginConfigBaseUrl,
+      fallback: DEFAULT_BASE_URL_FALLBACK,
+    });
+  }
+  const localBaseUrl = readLocalConfig(shareRoot).baseUrl?.trim();
   return resolveBaseUrlFromBridge({
-    configBaseUrl: config?.baseUrl,
+    configBaseUrl: localBaseUrl,
     fallback: DEFAULT_BASE_URL_FALLBACK,
   });
+}
+
+/**
+ * baseUrl 来源诊断——用于工具输出和首装检测时告诉用户"现在用的是哪个值，从哪来的"。
+ */
+function describeBaseUrlSource(
+  config: BotShareConfig | undefined,
+  shareRoot: string,
+): { source: "env" | "pluginConfig" | "localFile" | "detected" | "fallback"; value: string } {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.BOT_BASE_URL?.trim();
+  if (env) return { source: "env", value: env.replace(/\/+$/, "") };
+  if (config?.baseUrl?.trim()) {
+    return { source: "pluginConfig", value: config.baseUrl.trim().replace(/\/+$/, "") };
+  }
+  const localBaseUrl = readLocalConfig(shareRoot).baseUrl?.trim();
+  if (localBaseUrl) {
+    return { source: "localFile", value: localBaseUrl.replace(/\/+$/, "") };
+  }
+  const resolved = resolveBaseUrlFromBridge({
+    fallback: DEFAULT_BASE_URL_FALLBACK,
+  });
+  if (resolved !== DEFAULT_BASE_URL_FALLBACK) {
+    return { source: "detected", value: resolved };
+  }
+  return { source: "fallback", value: DEFAULT_BASE_URL_FALLBACK };
 }
 
 function buildShareUrl(
@@ -331,6 +419,28 @@ export function registerBotShareLink(
     `[enhance] BOT 文件分享模块已加载（root=${shareRoot}，prefix=${urlPrefix}，默认 ${expireHours}h 过期，上限 ${maxFileMB}MB；独立 SDK prefix route，不依赖 dashboard，nginx 反代 /plugins/* 即可）`,
   );
 
+  // ── v5.7.27: 首装检测——load 时给用户一个当前 baseUrl 来源的可见提示 ──
+  // 没有 stdin 交互能力，但可以让首次安装的用户在 OpenClaw 启动 log 里立刻看到
+  // "你的 baseUrl 来自哪、是不是公网可达"。命中 fallback / LAN 检测时升级为 warn。
+  const startupSource = describeBaseUrlSource(config, shareRoot);
+  const looksLan =
+    startupSource.source === "detected" && /\/\/\d+\.\d+\.\d+\.\d+/.test(startupSource.value);
+  if (startupSource.source === "fallback") {
+    api.logger.warn(
+      `[enhance-bot-share] ⚠ 首装检测：未配置 BOT_BASE_URL / openclaw.json botShare.baseUrl / 本地保存，` +
+        `当前 baseUrl=${startupSource.value} 仅本机可达。请用 \`enhance_share_set_baseurl(url=...)\` 工具或 \`export BOT_BASE_URL=...\` 配置公网地址，否则 IM 用户点不开下载链接。`,
+    );
+  } else if (looksLan) {
+    api.logger.warn(
+      `[enhance-bot-share] ⚠ 首装检测：baseUrl=${startupSource.value} 看起来是局域网 IP（可能因为你曾用 LAN IP 访问 dashboard 被自动检测）。` +
+        `公网用户访问不到，请用 \`enhance_share_set_baseurl(url=...)\` 工具保存公网域名覆盖。`,
+    );
+  } else {
+    api.logger.info(
+      `[enhance-bot-share] baseUrl=${startupSource.value}（来源：${startupSource.source}）`,
+    );
+  }
+
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_share_file",
@@ -447,9 +557,19 @@ export function registerBotShareLink(
           );
         }
 
-        const baseUrl = resolveBaseUrl(config);
+        const baseUrlSource = describeBaseUrlSource(config, shareRoot);
+        const baseUrl = baseUrlSource.value;
         const url = buildShareUrl(baseUrl, urlPrefix, finalName);
-        const detected = baseUrl !== DEFAULT_BASE_URL_FALLBACK;
+        const isFallback = baseUrlSource.source === "fallback";
+        const isLanDetected =
+          baseUrlSource.source === "detected" && /\/\/\d+\.\d+\.\d+\.\d+/.test(baseUrl);
+        const sourceLabel: Record<typeof baseUrlSource.source, string> = {
+          env: "env BOT_BASE_URL",
+          pluginConfig: "openclaw.json enhance.config.botShare.baseUrl",
+          localFile: "~/.openclaw/share/config.json（本地保存）",
+          detected: "host header 自动检测",
+          fallback: "默认兜底",
+        };
         const lines = [
           `✓ 已生成临时下载链接（${formatSize(st.size)}，${ttlH}h 后过期）：`,
           ``,
@@ -461,9 +581,13 @@ export function registerBotShareLink(
           `过期：${expireAt.toISOString()}`,
           pruned > 0 ? `（顺手清理了 ${pruned} 个过期文件）` : "",
           ``,
-          detected
-            ? `baseUrl=${baseUrl}（来自 env/config/dashboard 自动检测）`
-            : `⚠ baseUrl 仍是默认 ${baseUrl}——请先在浏览器访问一次你的 dashboard 公网地址（任何 /plugins/enhance/* 都行），让 enhance 自动捕获 host；或显式 export BOT_BASE_URL / 在 botShare.baseUrl 配置`,
+          `baseUrl=${baseUrl}（来源：${sourceLabel[baseUrlSource.source]}）`,
+          isFallback
+            ? `⚠ baseUrl 是 localhost 兜底，外网用户访问不到。建议调用 \`enhance_share_set_baseurl(url="<你的公网域名>")\` 一次性保存（如 https://share.example.com），或 export BOT_BASE_URL / 写入 openclaw.json 的 enhance.config.botShare.baseUrl。`
+            : "",
+          isLanDetected
+            ? `⚠ baseUrl 看起来是局域网 IP，公网用户访问不到。建议调用 \`enhance_share_set_baseurl(url="<你的公网域名>")\` 覆盖。`
+            : "",
         ]
           .filter(Boolean)
           .join("\n");
@@ -480,7 +604,9 @@ export function registerBotShareLink(
             label,
             expireAt: expireAt.toISOString(),
             baseUrl,
-            baseUrlDetected: detected,
+            baseUrlSource: baseUrlSource.source,
+            baseUrlIsFallback: isFallback,
+            baseUrlIsLanDetected: isLanDetected,
             urlPrefix,
             shareRoot,
             prunedExpired: pruned,
@@ -506,7 +632,7 @@ export function registerBotShareLink(
           // 不致命
         }
 
-        const baseUrl = resolveBaseUrl(config);
+        const baseUrl = resolveBaseUrl(config, shareRoot);
         if (manifest.entries.length === 0) {
           const head = pruned > 0 ? `（清理了 ${pruned} 个过期文件）\n` : "";
           return {
@@ -630,4 +756,117 @@ export function registerBotShareLink(
     })) as any,
     { name: "enhance_share_revoke" },
   );
+
+  // ── v5.7.27: 持久化保存 baseUrl 到 ~/.openclaw/share/config.json ──
+  // 解决"首次安装 enhance 没人提示用户配 BOT_BASE_URL → 链接落到 localhost / LAN IP
+  // 兜底 → AI 看到不可达的 URL 自己又编一个"的连环错。
+  //
+  // 红线：写到 plugin 自己的 share 目录，不动用户的 ~/.openclaw/openclaw.json
+  // （后者归 openclaw 控制，参见 6.4 诊断不修复 + 红线 #5）。
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_share_set_baseurl",
+      description:
+        "保存 enhance bot-share 的公网 baseUrl 到 ~/.openclaw/share/config.json，让 enhance_share_file 生成可外网访问的下载链接。" +
+        "典型场景：用户首次安装插件没设 BOT_BASE_URL 也没在 openclaw.json 配 enhance.config.botShare.baseUrl —— 此时 enhance_share_file 生成的链接会落到 localhost 兜底或 LAN IP（host header 自动检测），外网用户访问不了。" +
+        "AI 看到这种情况时应**先问用户公网域名再调本工具**保存（不要自作主张写一个）。" +
+        "优先级：env BOT_BASE_URL > openclaw.json 里的 enhance.config.botShare.baseUrl > 本工具保存到 ~/.openclaw/share/config.json > host header 自动检测 > localhost 兜底。",
+      parameters: Type.Object({
+        url: Type.String({
+          description:
+            "公网 baseUrl，必须 http:// 或 https:// 开头，可带端口但不能带路径 / query / hash。" +
+            "示例：'https://share.example.com'、'http://keepermac.huo15.com'、'http://example.com:18789'。",
+        }),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const raw = String(params.url ?? "").trim();
+        if (!raw) return errorResponse("url 必填。");
+        if (!/^https?:\/\//i.test(raw)) {
+          return errorResponse(`url 必须以 http:// 或 https:// 开头，收到：${raw}`);
+        }
+        let parsed: URL;
+        try {
+          parsed = new URL(raw);
+        } catch (err) {
+          return errorResponse(`url 解析失败：${(err as Error).message}`);
+        }
+        if (parsed.pathname && parsed.pathname !== "/" && parsed.pathname !== "") {
+          return errorResponse(
+            `url 不能带路径（baseUrl 是协议+host[:port]，share path 由插件追加）。请去掉 '${parsed.pathname}'。`,
+          );
+        }
+        if (parsed.search || parsed.hash) {
+          return errorResponse("url 不能带 query 或 hash。");
+        }
+        const normalized = `${parsed.protocol}//${parsed.host}`;
+
+        let saved: LocalShareConfig;
+        try {
+          saved = writeLocalConfig(shareRoot, {
+            baseUrl: normalized,
+            setAt: new Date().toISOString(),
+            setBy: "enhance_share_set_baseurl",
+          });
+        } catch (err) {
+          return errorResponse(
+            `写入 ${shareRoot}/${LOCAL_CONFIG_FILENAME} 失败：${(err as Error).message}`,
+          );
+        }
+
+        const newSource = describeBaseUrlSource(config, shareRoot);
+        const overridden =
+          newSource.source !== "localFile" || newSource.value !== normalized;
+        const lines = [
+          `✓ baseUrl=${normalized} 已保存到 ${shareRoot}/${LOCAL_CONFIG_FILENAME}。`,
+          ``,
+          `下次调 \`enhance_share_file\` 生成的链接会用这个域名（除非 env BOT_BASE_URL 或 openclaw.json 里有更高优先级配置）。`,
+        ];
+        if (overridden) {
+          lines.push(``);
+          lines.push(
+            `⚠ 当前实际生效的 baseUrl=${newSource.value}（来源：${newSource.source}）—— 你刚保存的值被更高优先级源覆盖了。如要让本地保存生效，请先 \`unset BOT_BASE_URL\` / 删掉 openclaw.json 里的 enhance.config.botShare.baseUrl。`,
+          );
+        }
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: {
+            saved: { ...saved },
+            savedTo: localConfigPath(shareRoot),
+            effectiveBaseUrl: newSource.value,
+            effectiveSource: newSource.source,
+            overriddenByHigherPriority: overridden,
+          },
+        };
+      },
+    })) as any,
+    { name: "enhance_share_set_baseurl" },
+  );
+
+  // ── prompt supplement：强引导 LLM 在 IM 渠道发大文件必须调 enhance_share_file ──
+  // 修复 v5.7.26 wecom 失忆事故的姊妹问题：AI 知道企微 20MB 限制后直接在文本里
+  // 凭空编了一个下载 URL（`http://192.168.x.x:9999/file.mp4` 这种用户网络相关
+  // 但完全错误的链接），既没调 enhance_share_file 也没让 wecom fallback 接管。
+  // 根因：tool description 写得再清楚也只是 LLM "可以读"，没有 prompt level 的
+  // 强约束。这里走 memory prompt supplement 把规则注入 system prompt。
+  if (typeof api.registerMemoryPromptSupplement === "function") {
+    try {
+      api.registerMemoryPromptSupplement(({ availableTools }) => {
+        if (!availableTools.has("enhance_share_file")) return [];
+        return [
+          "## 大文件分享（强制规则）",
+          "- 需要让用户从企微 / 钉钉 / 微信等 IM 渠道下载本地文件（≥ 10MB 或不确定大小）时，**必须**先调用 `enhance_share_file(filePath=绝对路径)`，把返回结果中的 `structuredContent.url` 字段原样发给用户。",
+          "- **严禁**手写、拼接、猜测或回忆下载 URL（包括 `http://192.168.x.x:9999/<file>`、`https://localhost/<file>`、缺 token 前缀的 `/plugins/enhance-share/<filename>` 等任何形式）。它们都不是真实链接，用户点了只会 404。`enhance_share_file` 工具的 `structuredContent.url` 是唯一可信的下载 URL 来源。",
+          "- 当文件不在本地（来自远程 URL / 刚生成的 buffer）时，先把文件落盘到 `~/Downloads/` 等绝对路径，再调 `enhance_share_file`；不要让 wecom/dingtalk 的发送工具去 fetch 一个你不确定能访问的 URL。",
+          "- 当 `enhance_share_file` 返回的 `baseUrlIsFallback=true`（localhost 兜底）或 `baseUrlIsLanDetected=true`（局域网 IP）时：**先**问用户公网域名（如 `https://share.your-domain.com`），**再**调用 `enhance_share_set_baseurl(url=用户给的域名)` 把它保存到 `~/.openclaw/share/config.json`，下次自动生效。**不要**自己猜测 / 替换 URL，**不要**只是要求用户 `export BOT_BASE_URL`（除非用户表示不想长期保存）。",
+        ];
+      });
+      api.logger.info(
+        "[enhance-bot-share] prompt supplement 已注册（强引导 LLM 调 enhance_share_file，禁止手写下载 URL）",
+      );
+    } catch (err) {
+      api.logger.warn(
+        `[enhance-bot-share] prompt supplement 注册失败：${(err as Error).message}`,
+      );
+    }
+  }
 }

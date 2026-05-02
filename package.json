@@ -1,7 +1,7 @@
 {
   "name": "@huo15/openclaw-enhance",
-  "version": "5.7.26",
-  "description": "火一五·克劳德·龙虾增强插件 v5.7.26 — 新增 session-bridge：fresh session 自动从同 chat_id 的 .jsonl.reset.* 拉末 N 条 message 注入 prependContext，补 session-recap（只看结构化元数据）+ session-lifecycle（reset 时不一定触发 before_reset）的盲区。修复 5/2 zhaobo 失忆事故：openclaw 硬 reset 时未发 before_reset、enhance lifecycle 抢救丢失，导致次日新 session 完全断片。继承 v5.7.25 channelConfigs 扫描 + v5.7.22 bot-share-link 三件套 + v5.7.10 native-memory-surfacer。",
+  "version": "5.7.27",
+  "description": "火一五·克劳德·龙虾增强插件 v5.7.27 — bot-share 持久化 + 强引导 LLM 调 enhance_share_file：新增 ~/.openclaw/share/config.json 本地保存 baseUrl + 新工具 enhance_share_set_baseurl 让 AI 一次性写入 + 首装检测在启动 log 直接 warn fallback/LAN IP + memory prompt supplement 强引导 LLM 在 IM 渠道发文件**必须**调 enhance_share_file（禁止手写/拼接/猜测下载 URL）。修复 v5.7.26 wecom 凭空编 URL 事故的姊妹问题。继承 v5.7.26 session-bridge + v5.7.22 bot-share-link 三件套 + v5.7.10 native-memory-surfacer。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
