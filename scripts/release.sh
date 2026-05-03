@@ -257,7 +257,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "  • git push github $TAG"
   fi
   echo "  • npm publish"
-  echo "  • clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin"
+  echo "  • clawhub publish \"\$(pwd)\" --slug huo15-huo15-openclaw-enhance --version $VERSION --tags latest,plugin"
   echo
   log_ok "DRY-RUN 完成。去掉 --dry-run 即正式发版"
   exit 0
@@ -299,18 +299,23 @@ log_ok "npm publish 完成"
 log_step "clawhub publish $VERSION"
 if [[ -z "${CLAWHUB_TOKEN:-}" ]]; then
   log_warn "CLAWHUB_TOKEN 未设；从 ~/CLAUDE.md §2 取或 export 后重跑这一步"
-  log_warn "${C_YELLOW}手动收尾：CLAWHUB_TOKEN=clh_... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin${C_RESET}"
+  log_warn "${C_YELLOW}手动收尾：CLAWHUB_TOKEN=clh_... clawhub publish \"\$(pwd)\" --slug huo15-huo15-openclaw-enhance --version $VERSION --tags latest,plugin${C_RESET}"
   exit 1
 fi
 # v6.0.0 起：新 ClawHub slug `huo15-huo15-openclaw-enhance` 是干净起点（老 slug
 # `huo15-openclaw-enhance` 因 1.3.0-5.1.0 期间 27 个 bare pluginApi 留下的
 # ghost manifest 死结被 hide 退役）。重新启用 --tags latest,plugin 让每次发版
 # 同时刷新 plugin entry tag。详见 ~/knowledge/huo15/2026-05-02-clawhub-plugin-tag-stuck-cache.md
-if ! clawhub publish "$(pwd)" --version "$VERSION" --tags latest,plugin 2>&1 | sed 's/^/  /'; then
-  log_err "clawhub publish 失败——npm 已发；手动重跑 'CLAWHUB_TOKEN=... clawhub publish \"\$(pwd)\" --version $VERSION --tags latest,plugin'"
+# v6.1.1 之后强制 --slug：clawhub publish 默认从项目目录名取 slug（这里是
+# huo15-openclaw-enhance，老的）。但 v6.0.0 起仓库的 ClawHub slug 已改成
+# huo15-huo15-openclaw-enhance（跟 npm 包名对齐，逃离 ghost manifest 死结）。
+# 必须显式 --slug 锁定，否则会被发到老 slug（已 hide 但浪费版本号）。
+CLAWHUB_SLUG="huo15-huo15-openclaw-enhance"
+if ! clawhub publish "$(pwd)" --slug "$CLAWHUB_SLUG" --version "$VERSION" --tags latest,plugin 2>&1 | sed 's/^/  /'; then
+  log_err "clawhub publish 失败——npm 已发；手动重跑 'CLAWHUB_TOKEN=... clawhub publish \"\$(pwd)\" --slug $CLAWHUB_SLUG --version $VERSION --tags latest,plugin'"
   exit 1
 fi
-log_ok "clawhub publish 完成（已刷 latest+plugin 两个 tag）"
+log_ok "clawhub publish 完成（slug=$CLAWHUB_SLUG，已刷 latest+plugin 两个 tag）"
 
 echo
 log_ok "${C_GREEN}🎉 $PKG_NAME@$VERSION 全链路发版成功${C_RESET}"
