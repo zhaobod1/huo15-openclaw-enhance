@@ -2,6 +2,12 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.1 — 2026-05-03（chore-only：刷 ClawHub tag）
+
+**触发**：6.1.0 publish 时 ClawHub 端 record 半成功但 tag 没刷新——`clawhub inspect` 显示 `Latest: 6.0.0` 但 publish 6.1.0 报 `Version already exists`。按 §7.6 不重试同版本号 → bump patch 跳过。
+
+零代码改动，零 src/ 变化。
+
 ## 6.1.0 — 2026-05-02（trajectory-archiver v2 路径策略：移出 sessions/ 子树）
 
 **触发**：用户报"打开 https://keepermac.huo15.com/chat?session=...wecom:direct:zhaobo 超级慢"。早上发了 v5.8.0 hook-profiler 拿数据，晚上接着诊断。

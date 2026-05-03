@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.1.0",
+  "version": "6.1.1",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.1.0 — trajectory-archiver v2 路径策略修正：归档目录从 sessions/.archive 提升到 sessions-archive（跟 sessions/ 平级，不在子树）。5/2 实战 sample 实证 v1 路径不解决卡顿（30s 采样 99.2% 主线程卡 V8 JsonParser→openclaw sessions.list 递归扫整个 sessions/ 子树包括 .archive）。v2 实测 main agent sessions/ 子树 68MB→29MB，keepermac TTFB 突刺 49/34/31/776/3449ms→全部 30-33ms 无突刺。同时升级 enhance_trajectory_archiver_setup 工具：检测旧版 v1 plist + 输出 v2 部署命令；session-doctor fixCommand 同步到新路径。继承 v6.0.0 npm 包改名 + v5.8.x trajectory archiver / hook-profiler / postinstall hint 全部能力。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.1.1 — chore-only re-publish 让 ClawHub Latest tag 跟上 6.1.x（6.1.0 publish 时 record 半成功但 tag 没刷新，Latest 仍停在 6.0.0；按 CLAUDE.md §7.6 不重试同版本号，bump patch 跳过）。零代码逻辑改动，继承 v6.1.0 trajectory-archiver v2 路径策略修正 + v6.0.0 npm 包改名 + v5.8.x 全部能力。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
