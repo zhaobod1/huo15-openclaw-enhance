@@ -167,6 +167,16 @@ export function schedulePersist(config: ModelRouteConfig): void {
 /**
  * 返回当前所有 provider 的内存状态（diagnostic / status 工具用）。
  */
+/**
+ * v6.1.4: 给 model-router circuit breaker 用——返回某 provider 当前实时 SpeedSample
+ * （p50/p95/errRate/samples），数据不足返回 null。纯内存计算，零 IO。
+ */
+export function getProviderSpeedSample(providerId: string): SpeedSample | null {
+  const state = stats.get(providerId);
+  if (!state) return null;
+  return computeSample(state, Date.now());
+}
+
 export function snapshotStats(): Record<string, { samples: number; pending: number; lastPersistMs: number }> {
   const out: Record<string, { samples: number; pending: number; lastPersistMs: number }> = {};
   for (const [k, s] of stats) {

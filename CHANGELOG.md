@@ -2,6 +2,97 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.4 — 2026-05-05（model-router 智能路由大重构：动态 capability 扫描 + 5 维路由）
+
+> **核心**：让 model-router 不再硬编码 model id——启动期扫 `~/.openclaw/openclaw.json` 的 `models.providers.<id>.models[]` 自动构建 capability 表。用户加新 provider/model 不用改 enhance 代码。
+
+### 触发
+
+调研 `model-router` 时发现 v6.1.2 的 PROVIDER_REGISTRY 写的是 `sidus`（用户机器实际未注册的 provider id），实际 openclaw.json 里只有 `minimax` + `deepseek` 两个 native provider——**一半路由决策在打空炮**（runtime 找不到 provider，把 model id 整串发给随机 fallback，被远端 400）。jsonl 历史显示路由实际选的是 `deepseek-v4-pro` P50=14.4s P95=31.6s，**deepseek-v4-flash 才是用户最快+最便宜的 model**。
+
+### 改动（src/modules/model-router.ts +400 / -100）
+
+#### A. 启动期 capability 扫描（动态、不死）
+
+新增 `scanAvailableModels(api)` 在 `register()` 启动期 read `~/.openclaw/openclaw.json` 的 `models.providers.<id>.models[]`，按 OpenClaw 4.x 标准 schema 转成 `ModelCapability[]`：
+
+```ts
+interface ModelCapability {
+  id: string;        // "<providerId>/<modelId>" 跟 openclaw.json 完全对齐
+  modalities: { text, image?, video?, audio? };
+  reasoning: boolean;
+  contextWindow: number;
+  maxTokens: number;
+  costInPerM: number;
+  costOutPerM: number;
+  speedScore: number; // 由 cost 反推（启发式）
+}
+```
+
+派生 6 个内存索引：
+- `CAPABILITY_BY_ID` 主键查
+- `IMAGE_CAPABLE_MODELS` 按 cost 升序
+- `VIDEO_CAPABLE_MODELS` / `AUDIO_CAPABLE_MODELS` 同上
+- `REASONING_CAPABLE_MODELS` 按 cost 升序
+- `LONG_CONTEXT_MODELS` ≥500K ctx 按 cost 升序
+- `CHEAP_FAST_MODELS` 非 reasoning 按 cost 升序
+
+`DERIVED_TIER_MAP` 自动从 capability 表派生（flash/fast → 最便宜非 reasoning，pro/reasoner → 最便宜 reasoning，vl → 第一个 image-capable）。
+
+未来加 model：用户在 openclaw.json `models.providers` 加一项 → 重启 OpenClaw → 路由器自动看见。**enhance 不用升级**。
+
+#### B. 5 维智能路由
+
+1. **multimodal 硬路由**：image → 强制 IMAGE_CAPABLE_MODELS[0]（之前 v6.1.2 用 sidus pro 文本兜底是错的，文本 model 收到 image 引用会 400）
+2. **ctx-aware**：估算 token = `prompt.length * 0.6`（中文）—— ≥50K token 强制 LONG_CONTEXT_MODELS（≥500K ctx）的最便宜
+3. **channel-aware**：`ctx.channelId` 透传到 `applyChannelPreference`，wecom/dingtalk/wechat 渠道默认 flash 偏好；只调 tier preference，不写死 model
+4. **circuit breaker**：每次决策后查 latency tracker `getProviderSpeedSample(model)`——errRate > 50% within 1h（≥5 样本）→ 切到同模态、同 reasoning 能力的备选（按 errRate + cost 排）
+5. **cost-budget mode**：新 RouteMode `cost-budget`——按 priority 升序（用户把便宜 model 放高 priority 即生效）；为以后加 monthly budget cap 留扩展点
+
+#### C. cache key 加 channelId
+
+防止跨渠道污染（wecom 群偏 flash vs odoo 偏 pro 不会撞 cache 命中）。
+
+#### D. 老 hardcode 全部清理
+
+- `routeTask` 兜底字符串 `sidus/DeepSeek-V4-*` → `deepseek/deepseek-v4-*`（实际可用的）
+- `provider: "sidus"` → `"deepseek"` 全量替换（17 处）
+- 极短 prompt 短路从 minimax → deepseek-v4-flash（speedScore 9 vs 7、$0.14 vs $0.3、1M ctx vs 200K）
+
+### 性能（红线自查）
+
+- ✅ scanAvailableModels 在 register() 启动期跑一次（IO），hook 路径只查内存表（O(1)）
+- ✅ circuit breaker 用 latency-tracker 内存数据，零额外 IO
+- ✅ channel preference 纯字符串前缀匹配，纳秒级
+- ✅ ctx-aware token 估算就是 `length * 0.6` 算术
+- ✅ cache key 加 channelId 不增加 IO，只是 string concat
+- ✅ 完全没引入新 hook，复用现有 `before_model_resolve` 和 `model_call_ended`
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生（model 路由是 enhance 范围）
+- ✅ 无 `child_process`（grep 命中均为注释）
+- ✅ `compat.pluginApi >=2026.4.24` 仍 ranged
+- ✅ register() 用 `require("node:fs")` dynamic（非 child_process）
+- ✅ scanAvailableModels 失败 fallback 空表，hook 路径仍可工作（走 OpenClaw 原生 fallback）
+
+### latency-tracker.ts 新增 export
+
+`getProviderSpeedSample(providerId): SpeedSample | null` —— 给 circuit breaker 拿实时样本（之前只有 internal `computeSample`）。
+
+### 设计哲学
+
+> **路由器不是越聪明越好，而是"在 hook 路径不死"前提下尽量利用所有"已有的便宜信号"**。
+
+不用 LLM 分类器（RouteLLM-style 50-200ms 慢死）；不用嵌入向量；不查 SQLite；不调外部 HTTP。只用：
+- ctx 已有的 channelId / agentId（O(1)）
+- prompt 已有的 length（O(1)）
+- attachments 已有的 mimeType（O(1)）
+- latency tracker 内存里的 errRate（O(1)）
+- 启动期一次性扫描的 capability 表（O(1) 查表）
+
+每条路径决策 < 1ms。
+
 ## 6.1.3 — 2026-05-04（bot-share prompt supplement 去 10MB 阈值 + 强化"小文件无例外"）
 
 **触发**：群会话 `agent:main:wecom:group:wrgzumeqaadcsaffbvgfobppv-_6ccwg` 里赵博让 `@贾维斯 打包zip发给我`，LLM 把 7754 字节的 zip cp 到 `~/.openclaw/media/outbound/` 后只 emit 了文本 `MEDIA: ~/.openclaw/media/outbound/huo15-rustdesk-deploy.zip`，wecom outbound 不识别这个字面量约定，文件没发出去。用户问"怎么还没发"，LLM 又重复 emit 了一次"MEDIA:"，仍然没下文。

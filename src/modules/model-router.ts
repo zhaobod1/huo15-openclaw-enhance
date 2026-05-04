@@ -43,6 +43,7 @@ import {
   recordSample,
   schedulePersist,
   snapshotStats,
+  getProviderSpeedSample,
 } from "../utils/latency-tracker.js";
 import {
   readHistory,
@@ -106,39 +107,222 @@ function cacheSet(key: string, decision: RouteDecision): void {
 //         路由器选了它们后 runtime 找不到 provider，把 model id 整串发给 sidus，
 //         sidus 拒 400（"model deepseek/deepseek-v4-pro is not supported"）。
 //         现在只用 sidus（priority 1） + minimax（priority 2）。
-const PROVIDER_REGISTRY = {
-  sidus: {
-    label: "Sidus（DeepSeek/GLM 系列）",
-    priority: 1,
-    tiers: {
-      flash:    "sidus/DeepSeek-V4-Flash",
-      pro:      "sidus/DeepSeek-V4-Pro",
-      reasoner: "sidus/DeepSeek-V4-Pro",
-    },
-  },
-  minimax: {
-    label: "MiniMax（极速兜底）",
-    priority: 2,
-    tiers: {
-      fast:  "minimax/MiniMax-M2.7",
-      flash: "minimax/MiniMax-M2.7",
-    },
-  },
-} as const;
+// v6.1.4 ⭐ 动态 capability matrix — **启动期扫 ~/.openclaw/openclaw.json**
+// `models.providers.<id>.models[]` 自动构建。用户加新 provider/model 不用改代码。
+//
+// 之前 v6.1.2 硬编码 sidus 是错的；这次彻底"不死"——读 OpenClaw 标准 schema：
+//   { id, name, reasoning, input: ["text","image",...], cost: {input,output},
+//     contextWindow, maxTokens }
+//
+// 红线：read 在 register() 启动期做一次（IO），hook 路径只查内存表（O(1)）。
+// read 失败 fallback 到空数组——hook 不死，让 OpenClaw 走原生 fallback。
+//
+// 未来加 model：用户只需在 openclaw.json `models.providers.<provider>.models` 里
+// 加一项，重启 OpenClaw 即自动被路由器看见——无需 enhance 升级。
+interface ModelCapability {
+  /** "<providerId>/<modelId>"，跟 openclaw.json 完全对齐，model_call_ended event 的 key */
+  id: string;
+  /** 显示名（log 用）*/
+  label: string;
+  /** 输入模态：image/video/audio 是否支持（text 永远 true）*/
+  modalities: { text: true; image?: boolean; video?: boolean; audio?: boolean };
+  /** 是否原生支持推理（reasoning content）*/
+  reasoning: boolean;
+  /** ctx 窗口大小（token 数）*/
+  contextWindow: number;
+  /** 单次输出 token 上限 */
+  maxTokens: number;
+  /** $/百万输入 token */
+  costInPerM: number;
+  /** $/百万输出 token */
+  costOutPerM: number;
+  /** 综合"快速分"（按 cost 反推：越便宜假设越快，1-10）*/
+  speedScore: number;
+}
+
+// 启动期 build，hook 内只读
+let MODEL_CAPABILITIES: ModelCapability[] = [];
+let CAPABILITY_BY_ID: Map<string, ModelCapability> = new Map();
+let IMAGE_CAPABLE_MODELS: ModelCapability[] = [];
+let VIDEO_CAPABLE_MODELS: ModelCapability[] = [];
+let AUDIO_CAPABLE_MODELS: ModelCapability[] = [];
+let REASONING_CAPABLE_MODELS: ModelCapability[] = [];
+let LONG_CONTEXT_MODELS: ModelCapability[] = []; // ≥ 500K ctx，按 cost 升序
+let CHEAP_FAST_MODELS: ModelCapability[] = []; // 非 reasoning 的便宜 model，按 cost 升序
+
+/** speedScore 启发式：根据 cost 反推（便宜的 model 通常更快）。 */
+function inferSpeedScore(cap: { costInPerM: number; reasoning: boolean }): number {
+  if (cap.costInPerM <= 0.2) return 9;
+  if (cap.costInPerM <= 0.5) return cap.reasoning ? 7 : 8;
+  if (cap.costInPerM <= 1.0) return 6;
+  return cap.reasoning ? 5 : 6;
+}
+
+/**
+ * 启动期扫描 ~/.openclaw/openclaw.json 的 models.providers，把所有声明的 model
+ * 转成 ModelCapability 内存表。失败时返回空数组（让 hook 路径走 OpenClaw 原生 fallback）。
+ *
+ * Schema（OpenClaw 4.x 标准）：
+ *   models.providers.<providerId>.models[] = {
+ *     id: string,           // model 短 id，如 "MiniMax-M2.7"
+ *     name?: string,        // 显示名
+ *     reasoning?: boolean,
+ *     input?: ("text"|"image"|"video"|"audio")[],
+ *     cost?: { input?: number, output?: number, ... },
+ *     contextWindow?: number,
+ *     maxTokens?: number,
+ *   }
+ */
+function scanAvailableModels(api: OpenClawPluginApi): ModelCapability[] {
+  // 用 dynamic require 避免顶层 import fs 失败时整个 module 拒载
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require("node:fs") as typeof import("node:fs");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pathMod = require("node:path") as typeof import("node:path");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const homeMod = require("node:os") as typeof import("node:os");
+
+  const openclawHome =
+    process.env.OPENCLAW_HOME?.trim() ||
+    pathMod.join(homeMod.homedir(), ".openclaw");
+  const cfgPath = pathMod.join(openclawHome, "openclaw.json");
+
+  if (!fs.existsSync(cfgPath)) {
+    api.logger.warn(
+      `[model-router] openclaw.json 不存在 ${cfgPath}，capability 表为空——所有路由走 OpenClaw 原生 fallback`,
+    );
+    return [];
+  }
+
+  let cfg: unknown;
+  try {
+    cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+  } catch (err) {
+    api.logger.warn(
+      `[model-router] openclaw.json 解析失败：${(err as Error).message}——capability 表为空`,
+    );
+    return [];
+  }
+
+  const providers = (cfg as {
+    models?: { providers?: Record<string, unknown> };
+  })?.models?.providers;
+  if (!providers || typeof providers !== "object") return [];
+
+  const out: ModelCapability[] = [];
+  for (const [providerId, raw] of Object.entries(providers)) {
+    const p = raw as { models?: unknown[] };
+    if (!Array.isArray(p?.models)) continue;
+    for (const mRaw of p.models) {
+      const m = mRaw as {
+        id?: string;
+        name?: string;
+        reasoning?: boolean;
+        input?: string[];
+        cost?: { input?: number; output?: number };
+        contextWindow?: number;
+        maxTokens?: number;
+      };
+      if (!m?.id || typeof m.id !== "string") continue;
+
+      const inputs = Array.isArray(m.input) ? m.input.map((s) => String(s).toLowerCase()) : ["text"];
+      const cap: ModelCapability = {
+        id: `${providerId}/${m.id}`,
+        label: m.name || `${providerId}/${m.id}`,
+        modalities: {
+          text: true,
+          ...(inputs.includes("image") ? { image: true } : {}),
+          ...(inputs.includes("video") ? { video: true } : {}),
+          ...(inputs.includes("audio") ? { audio: true } : {}),
+        },
+        reasoning: m.reasoning === true,
+        contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : 32768,
+        maxTokens: typeof m.maxTokens === "number" ? m.maxTokens : 4096,
+        costInPerM: typeof m.cost?.input === "number" ? m.cost.input : 1.0,
+        costOutPerM: typeof m.cost?.output === "number" ? m.cost.output : 2.0,
+        speedScore: 0, // 下面填
+      };
+      cap.speedScore = inferSpeedScore(cap);
+      out.push(cap);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 用扫描出来的 capabilities 重建所有 hook 路径需要的派生索引。
+ * 启动期 + 用户调 enhance_model_route_reload 时跑。
+ */
+function rebuildCapabilityIndices(caps: ModelCapability[], api: OpenClawPluginApi): void {
+  MODEL_CAPABILITIES = caps;
+  CAPABILITY_BY_ID = new Map(caps.map((c) => [c.id, c]));
+  IMAGE_CAPABLE_MODELS = caps
+    .filter((c) => c.modalities.image === true)
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+  VIDEO_CAPABLE_MODELS = caps
+    .filter((c) => c.modalities.video === true)
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+  AUDIO_CAPABLE_MODELS = caps
+    .filter((c) => c.modalities.audio === true)
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+  REASONING_CAPABLE_MODELS = caps
+    .filter((c) => c.reasoning)
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+  LONG_CONTEXT_MODELS = caps
+    .filter((c) => c.contextWindow >= 500_000)
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+  CHEAP_FAST_MODELS = caps
+    .filter((c) => !c.reasoning) // 非 reasoning 的视为"快速档"
+    .sort((a, b) => a.costInPerM - b.costInPerM);
+
+  api.logger.info(
+    `[model-router] capability 索引已重建：${caps.length} models | image=${IMAGE_CAPABLE_MODELS.length} | video=${VIDEO_CAPABLE_MODELS.length} | audio=${AUDIO_CAPABLE_MODELS.length} | reasoning=${REASONING_CAPABLE_MODELS.length} | longCtx≥500K=${LONG_CONTEXT_MODELS.length}`,
+  );
+  if (caps.length === 0) {
+    api.logger.warn(
+      `[model-router] 当前 0 model 可用——所有路由会走 OpenClaw 原生 fallback。检查 ~/.openclaw/openclaw.json 的 models.providers 配置`,
+    );
+  }
+}
+
+// 兼容老代码：从 capability 表派生 PROVIDER_REGISTRY 风格映射（getBestModel 还在用）。
+// 启动期 build 一次，hook 路径只读。
+let DERIVED_TIER_MAP: Record<string, string> = {};
+
+function rebuildDerivedTierMap(): void {
+  DERIVED_TIER_MAP = {};
+  // flash/fast tier：选最便宜的非 reasoning text model（速度+成本最优）
+  if (CHEAP_FAST_MODELS.length > 0) {
+    DERIVED_TIER_MAP.flash = CHEAP_FAST_MODELS[0].id;
+    DERIVED_TIER_MAP.fast = CHEAP_FAST_MODELS[0].id;
+  }
+  // pro/reasoner tier：选最便宜的 reasoning model（性价比）
+  if (REASONING_CAPABLE_MODELS.length > 0) {
+    DERIVED_TIER_MAP.pro = REASONING_CAPABLE_MODELS[0].id;
+    DERIVED_TIER_MAP.reasoner = REASONING_CAPABLE_MODELS[0].id;
+  }
+  // vl tier：image-capable 第一个
+  if (IMAGE_CAPABLE_MODELS.length > 0) {
+    DERIVED_TIER_MAP.vl = IMAGE_CAPABLE_MODELS[0].id;
+    DERIVED_TIER_MAP.hailuo = IMAGE_CAPABLE_MODELS[0].id;
+  }
+}
 
 // ── getBestModel 缓存 ─────────────────────────────────────
 const bestModelCache = new Map<TaskTier, string>();
 
+/**
+ * v6.1.4: 从动态 DERIVED_TIER_MAP 取（启动期由 capability 扫描结果派生）。
+ * 兼容旧调用：tier 没命中返回 null，调用方有 hardcoded fallback string 兜底。
+ */
 function getBestModel(taskTier: TaskTier): string | null {
   const cached = bestModelCache.get(taskTier);
   if (cached) return cached;
-
-  for (const [_provName, prov] of Object.entries(PROVIDER_REGISTRY)) {
-    const tierMap = prov.tiers as Record<string, string>;
-    if (tierMap[taskTier]) {
-      bestModelCache.set(taskTier, tierMap[taskTier]);
-      return tierMap[taskTier];
-    }
+  const id = DERIVED_TIER_MAP[taskTier];
+  if (id) {
+    bestModelCache.set(taskTier, id);
+    return id;
   }
   return null;
 }
@@ -331,38 +515,65 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
   const len = p.length;
 
   // ── 0. 极短 prompt 短路（无媒体，<50 字符）─────────
+  // v6.1.4: minimax M2.7 → deepseek-v4-flash（speedScore 9 vs 7、$0.14 vs $0.3、1M ctx vs 200K）
   if (len <= SHORT_CIRCUIT_THRESHOLD && mediaTypes.size === 0) {
     return {
-      provider: "minimax",
-      model: "minimax/MiniMax-M2.7",
+      provider: "deepseek",
+      model: "deepseek/deepseek-v4-flash",
       taskTier: "fast",
-      reason: `极短文本短路（${len}字符）→ MiniMax M2.7`,
+      reason: `极短文本短路（${len}字符）→ DeepSeek V4 Flash`,
     };
   }
 
-  // ── 1. 多模态路由（最高优先）─────────────────────
-  // v6.1.2: 删掉 minimax/MiniMax-VL-01、Hailuo-2.3、google-ai-studio/gemini-2.0-flash
-  // 这些 model 在用户的 openclaw.json 里都没注册——发出去必 400。
-  // 改成路由器返回 null，让 OpenClaw 走原生 agents.defaults.model.fallbacks 兜底。
-  // 后续接入真正的多模态 model 时再写回来。
-  if (mediaTypes.has("image") || mediaTypes.has("video") || mediaTypes.has("audio")) {
-    // 暂用 sidus pro 顶上（DeepSeek V4 Pro 不支持 vision/audio，但至少不会 400；
-    // 模型会用文本理解描述，质量损失但不死循环）。
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
+  // ── 1. 多模态硬路由（v6.1.4 修对）─────────────────────
+  // image → 强制 minimax M2.7（capability table 唯一支持 image 的）。
+  // 之前 v6.1.2 "用 sidus pro 兜底"是错的——文本 model 收到 image 引用会 400。
+  // video/audio → 用户机器没装支持的 model，让 deepseek-v4-pro 文本兜底（不会 400，但理解会丢）。
+  if (mediaTypes.has("image")) {
+    const imgModel = IMAGE_CAPABLE_MODELS[0];
+    if (imgModel) {
+      return {
+        provider: imgModel.id.split("/")[0]!,
+        model: imgModel.id,
+        taskTier: "vl",
+        reason: `image 输入 → 硬路由到 ${imgModel.label}（capability table 唯一支持 image）`,
+      };
+    }
+  }
+  if (mediaTypes.has("video") || mediaTypes.has("audio")) {
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
     return {
-      provider: "sidus",
+      provider: "deepseek",
       model,
       taskTier: "pro",
-      reason: `多模态输入 (${[...mediaTypes].join(",")}) → 暂用 pro tier 文本兜底（缺真正的 VL/audio model）`,
+      reason: `${[...mediaTypes].join(",")} 输入但无 capable model → 文本兜底 ${model}（用户机器未装 video/audio model）`,
     };
   }
 
-  // ── 2. 超长 prompt（>2000 字符）→ 复杂任务 pro ──
+  // ── 2. ctx-aware 长文本路由（v6.1.4 新增）──
+  // 中文 token 估算：length * 0.6（中文 1 字 ≈ 0.6 token，英文 1 word ≈ 1.3 token，混合粗估 0.6）。
+  // > 50K token（约 80K 字符）→ 强制走 1M ctx model（deepseek-v4-pro 或 v4-flash）
+  // 200K-1M ctx 段：优先 deepseek-v4-flash（便宜 12x 比 pro，快 1.8x）。
+  const estimatedTokens = Math.round(len * 0.6);
+  if (estimatedTokens >= 50_000) {
+    // 找最便宜的长 ctx model
+    const longCtx = LONG_CONTEXT_MODELS[0]; // 已按 cost 升序排
+    if (longCtx) {
+      return {
+        provider: longCtx.id.split("/")[0]!,
+        model: longCtx.id,
+        taskTier: "pro",
+        reason: `超长 ctx 估 ${estimatedTokens} tokens（${len}字符）→ 长 ctx model ${longCtx.label}`,
+      };
+    }
+  }
+
+  // ── 3. 超长 prompt（>2000 字符但 ctx 还在 200K 内）→ 复杂任务 pro ──
   if (len > COMPLEX_LENGTH_THRESHOLD) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
     return {
-      provider: "sidus", model, taskTier: "pro",
-      reason: `超长文本（${len}字符）→ pro tier`,
+      provider: "deepseek", model, taskTier: "pro",
+      reason: `超长文本（${len}字符 / ${estimatedTokens} tokens）→ pro tier`,
     };
   }
 
@@ -370,114 +581,114 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
 
   // 代码任务 — 特征明确，先检查
   if (matchAny(CODE_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "代码任务 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "代码任务 → pro tier" };
   }
 
   // Debug / 报错分析
   if (matchAny(DEBUG_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "Debug/报错分析 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "Debug/报错分析 → pro tier" };
   }
 
   // 推理任务
   if (matchAny(REASONER_PATTERNS, p)) {
-    const model = getBestModel("reasoner") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "reasoner", reason: "推理任务 → reasoner tier" };
+    const model = getBestModel("reasoner") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "reasoner", reason: "推理任务 → reasoner tier" };
   }
 
   // 数学计算
   if (matchAny(MATH_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "数学计算 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "数学计算 → pro tier" };
   }
 
   // 数据分析
   if (matchAny(DATA_ANALYSIS_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "数据分析 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "数据分析 → pro tier" };
   }
 
   // 分析/架构/深度任务
   if (matchAny(ANALYSIS_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "分析/架构 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "分析/架构 → pro tier" };
   }
 
   // 多步骤复杂推理
   if (matchAny(MULTI_STEP_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "多步骤推理 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "多步骤推理 → pro tier" };
   }
 
   // 文档生成 → pro
   if (matchAny(DOC_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "文档生成 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "文档生成 → pro tier" };
   }
 
   // 报告生成 → pro
   if (matchAny(REPORT_PATTERNS, p)) {
-    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-    return { provider: "sidus", model, taskTier: "pro", reason: "报告生成 → pro tier" };
+    const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+    return { provider: "deepseek", model, taskTier: "pro", reason: "报告生成 → pro tier" };
   }
 
   // 写作/文案/创作 — 按长度判断：长文 → pro，短文 → flash
   if (matchAny(WRITING_PATTERNS, p)) {
     if (len > 300) {
-      const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-      return { provider: "sidus", model, taskTier: "pro", reason: `写作创作（${len}字符，长文）→ pro tier` };
+      const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+      return { provider: "deepseek", model, taskTier: "pro", reason: `写作创作（${len}字符，长文）→ pro tier` };
     }
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: `写作创作（${len}字符，短文）→ flash tier` };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: `写作创作（${len}字符，短文）→ flash tier` };
   }
 
   // 长文本摘要 → pro（>500 字）
   if (matchAny(SUMMARIZATION_PATTERNS, p)) {
     if (len > 500) {
-      const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
-      return { provider: "sidus", model, taskTier: "pro", reason: `长文本摘要（${len}字符）→ pro tier` };
+      const model = getBestModel("pro") || "deepseek/deepseek-v4-pro";
+      return { provider: "deepseek", model, taskTier: "pro", reason: `长文本摘要（${len}字符）→ pro tier` };
     }
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: `简短摘要 → flash tier` };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: `简短摘要 → flash tier` };
   }
 
   // ── 以下为 flash-tier 任务 ──
 
   // 翻译任务
   if (matchAny(TRANSLATION_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "翻译任务 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "翻译任务 → flash tier" };
   }
 
   // 信息检索
   if (matchAny(RETRIEVAL_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "信息检索 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "信息检索 → flash tier" };
   }
 
   // 情绪/情感分析
   if (matchAny(SENTIMENT_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "情感分析 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "情感分析 → flash tier" };
   }
 
   // 客服/闲聊
   if (matchAny(CHAT_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "闲聊对话 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "闲聊对话 → flash tier" };
   }
 
   // 快速问答
   if (matchAny(QUICK_QA_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "快速问答 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "快速问答 → flash tier" };
   }
 
   // 简单任务兜底
   if (matchAny(SIMPLE_PATTERNS, p)) {
-    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
-    return { provider: "sidus", model, taskTier: "flash", reason: "简单任务 → flash tier" };
+    const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
+    return { provider: "deepseek", model, taskTier: "flash", reason: "简单任务 → flash tier" };
   }
 
   // 急迫关键词兜底（用户催）
@@ -519,29 +730,137 @@ function persistConfig(): void {
 }
 
 /**
- * 主路由：先用 routeTask 选 tier（auto-task 模式的 task-aware 部分），
- * 再用 selectProvider 按 mode 选 provider。
+ * v6.1.4: channel 偏好——路由 tier 提升/降级。仅在 task tier 是默认 flash/fast 时生效，
+ * 显式 task 关键词（CODE/REASONER 等）已经命中的不动。
+ *
+ * 不写死硬规则，**只调 tier preference**——具体 model 仍由 capability 表 + selectProvider 决定。
+ *
+ * 内置启发式：
+ *   - wecom:group / wecom:direct（IM 短消息）→ flash 偏好（速度优先）
+ *   - dingtalk / wechat-service → flash 偏好
+ *   - cli / api / web（开发场景）→ pro 偏好（精度优先）
+ *   - 其他 → 不动
  */
-function pickModel(prompt: string, mediaTypes: Set<string>): RouteDecision | null {
+function applyChannelPreference(
+  baseDecision: RouteDecision,
+  channelId: string | undefined,
+): RouteDecision {
+  if (!channelId) return baseDecision;
+  const tier = baseDecision.taskTier;
+  // 只调"默认级别"的 tier，避免覆盖明确意图（pro/reasoner 命中后不降级）
+  if (tier !== "flash" && tier !== "fast") return baseDecision;
+
+  const lower = channelId.toLowerCase();
+  // IM 渠道：偏 flash（已经是 flash/fast 不变；只是 reason 标注）
+  if (lower.startsWith("wecom") || lower.startsWith("dingtalk") || lower.startsWith("wechat")) {
+    return { ...baseDecision, reason: `${baseDecision.reason} | channel=${channelId} (IM,速度优先)` };
+  }
+  return baseDecision;
+}
+
+/**
+ * v6.1.4: circuit breaker —— 选定 model 后查 latency tracker 的 errRate，
+ * > 0.5 within 1h 时跳过该 model，找下一个同 tier 内 cost 最接近的备选。
+ * 数据完全在 latency-tracker 内存里，零 IO。
+ */
+function applyCircuitBreaker(
+  decision: RouteDecision,
+  api: OpenClawPluginApi,
+): RouteDecision {
+  const sample = getProviderSpeedSample(decision.model);
+  // 数据不足（< 5 样本）或错误率正常：不动
+  if (!sample || sample.samples < 5 || sample.errRate <= 0.5) return decision;
+
+  // errRate 高 → 找候选替代（同模态、同 reasoning 能力）
+  const failed = CAPABILITY_BY_ID.get(decision.model);
+  if (!failed) return decision;
+  const candidates = MODEL_CAPABILITIES.filter(
+    (c) =>
+      c.id !== decision.model &&
+      (failed.modalities.image ? c.modalities.image === true : true) &&
+      c.reasoning === failed.reasoning,
+  );
+  if (candidates.length === 0) return decision;
+  // 选 errRate 最低（无数据按 0 算）+ cost 升序 tiebreaker
+  const ranked = candidates.sort((a, b) => {
+    const sa = getProviderSpeedSample(a.id);
+    const sb = getProviderSpeedSample(b.id);
+    const errA = sa && sa.samples >= 5 ? sa.errRate : 0;
+    const errB = sb && sb.samples >= 5 ? sb.errRate : 0;
+    if (errA !== errB) return errA - errB;
+    return a.costInPerM - b.costInPerM;
+  });
+  const winner = ranked[0];
+  api.logger.warn(
+    `[model-router] circuit-breaker: ${decision.model} errRate=${(sample.errRate * 100).toFixed(0)}% (${sample.samples} samples) → 切到 ${winner.id}`,
+  );
+  return {
+    provider: winner.id.split("/")[0]!,
+    model: winner.id,
+    taskTier: decision.taskTier,
+    reason: `${decision.reason} | circuit-breaker(${decision.model} err=${(sample.errRate * 100).toFixed(0)}%)→${winner.label}`,
+  };
+}
+
+/**
+ * 主路由：先用 routeTask 选 tier（auto-task 模式的 task-aware 部分），
+ * 再用 selectProvider 按 mode 选 provider，
+ * 再走 channel preference + circuit breaker 调整。
+ */
+function pickModel(
+  prompt: string,
+  mediaTypes: Set<string>,
+  channelId?: string,
+  api?: OpenClawPluginApi,
+): RouteDecision | null {
   const taskDecision = routeTask(prompt, mediaTypes);
   const tier = taskDecision.taskTier;
   const picked = selectProvider(runtimeConfig, tier);
+
+  let decision: RouteDecision;
   if (!picked) {
-    // 走兜底：原 getBestModel（hardcode 顺序）
-    return taskDecision;
+    // selectProvider 没命中（用户 model-route.json 删空了某个 tier）
+    // → 直接用 routeTask 的硬选（基于 capability 表 + DERIVED_TIER_MAP）
+    decision = taskDecision;
+  } else {
+    decision = {
+      provider: picked.id.split("/")[0] ?? "?",
+      model: picked.id,
+      taskTier: tier,
+      reason: `${runtimeConfig.mode} | ${taskDecision.reason} | ${picked.reason}`,
+    };
   }
-  return {
-    provider: picked.id.split("/")[0] ?? "?",
-    model: picked.id,
-    taskTier: tier,
-    reason: `${runtimeConfig.mode} | ${taskDecision.reason} | ${picked.reason}`,
-  };
+
+  // channel 偏好（轻量调整）
+  decision = applyChannelPreference(decision, channelId);
+
+  // circuit breaker（基于历史 errRate）
+  if (api) {
+    decision = applyCircuitBreaker(decision, api);
+  }
+
+  return decision;
 }
 
 // ── Hook 注册 ─────────────────────────────────────────────
 
 export function registerModelRouter(api: OpenClawPluginApi) {
-  api.on("before_model_resolve", (event, _ctx) => {
+  // v6.1.4: 启动期扫 ~/.openclaw/openclaw.json 自动构建 capability 表
+  // —— 用户加新 provider/model 不用改代码，重启 OpenClaw 即生效。
+  // 这里是 IO 但发生在 register() 阶段（plugin 加载期），不在 hook 路径，无延迟成本。
+  try {
+    const caps = scanAvailableModels(api);
+    rebuildCapabilityIndices(caps, api);
+    rebuildDerivedTierMap();
+    bestModelCache.clear();
+    routeCache.clear();
+  } catch (err) {
+    api.logger.warn(
+      `[model-router] capability 启动期扫描失败：${(err as Error).message}——hook 路径仍可工作（走原生 fallback）`,
+    );
+  }
+
+  api.on("before_model_resolve", (event, ctx) => {
     // 检测媒体类型
     let mediaTypes: Set<string>;
     if (event?.attachments?.length) {
@@ -550,9 +869,13 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       mediaTypes = detectPromptInlineMedia(event?.prompt);
     }
 
+    // v6.1.4: ctx 透传给 pickModel 做 channel-aware 路由（channel/agent 偏好）
+    const channelId = (ctx as { channelId?: string } | undefined)?.channelId;
+
     // 缓存查找（mode=weighted/speed 时跳缓存——每次都要重新抽样/调权）
-    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task") {
-      const ck = cacheKey(event?.prompt || "", mediaTypes);
+    // cache key 加 channelId 防止跨渠道污染（wecom 群偏 flash vs odoo 偏 pro）
+    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task" || runtimeConfig.mode === "cost-budget") {
+      const ck = `${channelId ?? ""}|${cacheKey(event?.prompt || "", mediaTypes)}`;
       const cached = cacheGet(ck);
       if (cached) {
         api.logger.info(`[model-router] CACHE HIT: ${cached.reason} | → ${cached.model}`);
@@ -560,12 +883,12 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       }
     }
 
-    // 执行路由决策
-    const decision = pickModel(event?.prompt || "", mediaTypes);
+    // 执行路由决策（带 channelId 做偏好调整 + circuit breaker 接 errRate）
+    const decision = pickModel(event?.prompt || "", mediaTypes, channelId, api);
     if (!decision) return undefined;
 
-    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task") {
-      const ck = cacheKey(event?.prompt || "", mediaTypes);
+    if (runtimeConfig.mode === "priority" || runtimeConfig.mode === "auto-task" || runtimeConfig.mode === "cost-budget") {
+      const ck = `${channelId ?? ""}|${cacheKey(event?.prompt || "", mediaTypes)}`;
       cacheSet(ck, decision);
     }
 
@@ -698,7 +1021,7 @@ export function registerModelRouter(api: OpenClawPluginApi) {
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_model_route_mode",
       description:
-        "切换路由模式。priority=严格按优先级 / weighted=按权重抽样 / speed=按最近延迟自动调权（v5.8.5+） / auto-task=按任务自动选 tier 内首选（默认）。",
+        "切换路由模式。priority=严格按优先级 / weighted=按权重抽样 / speed=按最近延迟自动调权（v5.8.5+） / auto-task=按任务自动选 tier 内首选（默认） / cost-budget=优先成本最低（v6.1.4+，priority 升序选第一个，用户把便宜 model 放高 priority）。",
       parameters: Type.Object({
         mode: Type.Union(
           [
@@ -712,8 +1035,8 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const mode = String(params.mode ?? "").trim() as RouteMode;
-        if (!["priority", "weighted", "speed", "auto-task"].includes(mode)) {
-          return { content: [{ type: "text" as const, text: `mode 必须是 priority / weighted / speed / auto-task` }] };
+        if (!["priority", "weighted", "speed", "auto-task", "cost-budget"].includes(mode)) {
+          return { content: [{ type: "text" as const, text: `mode 必须是 priority / weighted / speed / auto-task / cost-budget` }] };
         }
         const old = runtimeConfig.mode;
         runtimeConfig.mode = mode;

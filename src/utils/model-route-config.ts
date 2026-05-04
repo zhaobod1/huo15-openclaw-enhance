@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export type RouteMode = "priority" | "weighted" | "speed" | "auto-task";
+export type RouteMode = "priority" | "weighted" | "speed" | "auto-task" | "cost-budget";
 
 export interface ProviderBinding {
   /** "<provider>/<model-id>"，与 openclaw.json#models.providers.* 对齐 */
@@ -187,15 +187,22 @@ export function selectProvider(
       .map((p) => {
         const s = tracking[p.id];
         if (!s || s.samples < 5) {
-          // 数据不足，按 priority 兜底（小优先）
           return { p, score: 100000 + p.priority };
         }
-        // score = p50 * (1 + errRate * 5)；越小越好
         return { p, score: s.p50Ms * (1 + s.errRate * 5) };
       })
       .sort((a, b) => a.score - b.score);
     const winner = scored[0];
     return { id: winner.p.id, reason: `speed (score=${Math.round(winner.score)}) → ${taskTier}` };
+  }
+
+  // v6.1.4 ⭐ cost-budget：按 priority 升序选第一个（用户在 model-route.json 里
+  // 把"便宜的"放高 priority 即生效）。这其实跟 priority mode 等效，但语义上明示
+  // "我在意成本而非延迟"——为以后加"硬性 monthly budget cap"留扩展点。
+  // 当前实现：priority 升序 → 取第一个。
+  if (mode === "cost-budget") {
+    const sorted = [...enabled].sort((a, b) => a.priority - b.priority);
+    return { id: sorted[0].id, reason: `cost-budget (priority=${sorted[0].priority}) → ${taskTier}` };
   }
 
   return null;

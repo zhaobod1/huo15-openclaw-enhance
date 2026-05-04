@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.1.3 — bot-share prompt supplement 去掉 ≥10MB 阈值：任意大小（含几 KB 小文件）的 IM 渠道文件分享都强制走 enhance_share_file；明示 'MEDIA:' / 'FILE:' / '📎 path' 等字面量约定不被 wecom/钉钉 outbound 识别（修群里发 7.7KB zip 失败事故）。tool description 同步加 'small file no exception' 强约束。继承 v6.1.2 model-router PROVIDER_REGISTRY 修复、v6.0.0 npm 改名、v5.8.x 25+ 模块（分类记忆/工具安全/任务/章节/工作流/statusline/定时桥接/仪表盘/生命周期/bot-share/native-memory-surfacer/session-bridge/hook-profiler/model-router 等）。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.1.3
+description: "火一五·克劳德·龙虾增强插件 v6.1.4 — model-router 智能路由重构：启动期扫 openclaw.json 自动构建 capability 表（加新 model 不改代码）+ image 硬路由 + ctx-aware 长 ctx 优先 + channel-aware（IM 偏 flash）+ circuit breaker（errRate>50% 自动切备选）+ cost-budget mode。零 IO in hook 路径，不拖慢首字延迟。继承 v6.1.3 bot-share 小文件强约束、v6.0.0 npm 改名、v5.8.x 25+ 模块（分类记忆/工具安全/任务/章节/工作流/statusline/定时桥接/仪表盘/生命周期/bot-share/native-memory-surfacer/session-bridge/hook-profiler 等）。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.1.4
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
