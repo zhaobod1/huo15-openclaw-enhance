@@ -2,6 +2,40 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.3 — 2026-05-04（bot-share prompt supplement 去 10MB 阈值 + 强化"小文件无例外"）
+
+**触发**：群会话 `agent:main:wecom:group:wrgzumeqaadcsaffbvgfobppv-_6ccwg` 里赵博让 `@贾维斯 打包zip发给我`，LLM 把 7754 字节的 zip cp 到 `~/.openclaw/media/outbound/` 后只 emit 了文本 `MEDIA: ~/.openclaw/media/outbound/huo15-rustdesk-deploy.zip`，wecom outbound 不识别这个字面量约定，文件没发出去。用户问"怎么还没发"，LLM 又重复 emit 了一次"MEDIA:"，仍然没下文。
+
+### 根因
+
+bot-share-link.ts 的 prompt supplement 写「需要让用户从企微/钉钉/微信等 IM 渠道下载本地文件（**≥ 10MB 或不确定大小**）时，必须先调用 enhance_share_file」——LLM 解读为"小文件不用调"，于是脑补了一个`MEDIA:` 字面量当成 wecom 约定。但 wecom outbound 只识别 `![alt](url)` markdown 图片语法，不识别 `MEDIA:` / `FILE:` / `📎` 等任何文件路径字面量。
+
+### 改动
+
+[`src/modules/bot-share-link.ts`](src/modules/bot-share-link.ts):
+
+1. **prompt supplement 标题去掉"大文件"**：`## 大文件分享` → `## 文件分享（强制规则，无大小阈值）`
+2. **第一条规则**：`(≥ 10MB 或不确定大小)` → `（任意大小，包括几 KB 的小文件）`
+3. **新增一条针对小文件的明确规则**：
+   - "小文件没有例外：不要因为文件 < 10MB 就跳过这个工具去 emit `MEDIA: <path>` / `FILE: <path>` / `📎 <path>` 等任何字面量约定——wecom / 钉钉 outbound **不识别**这些约定，发出去的就是普通文本，用户什么都收不到。"
+   - "如果上游渠道（如 v2.8.19+ 的 wecom）暴露了 `wecom_send_file` 之类的直发工具，可以优先用它（直接群里收到附件）；没有的话一律走 `enhance_share_file` 给链接。"
+4. **`enhance_share_file` 工具 description 同步加 'small file no exception'**：开头加「**任意大小都用这个工具**（包括 < 10MB 的小文件）—— wecom/钉钉等 IM 渠道的 outbound 不识别 'MEDIA:'/'FILE:' 等文本约定，不调本工具就只能发普通文字，用户什么也收不到。」
+
+### 配套上游变化
+
+wecom v2.8.19（同日发布）暴露 `wecom_send_file` 工具支持"群里直接附件"——本版 prompt supplement 已经知道引导 LLM 优先用它（capability detection by name），不依赖 wecom 必须升级。wecom 不升时 LLM 自动降级到 `enhance_share_file` 链接路径，仍可工作。
+
+### 红线自查
+
+- ✅ 不修改 openclaw 核心 / 不复制龙虾原生功能
+- ✅ 没引入 `child_process`（grep 命中均为注释）
+- ✅ `compat.pluginApi` 仍是 `>=2026.4.24` ranged
+- ✅ 不假设 wecom 必须装（capability detection 按 `availableTools.has` 决定）—— enhance 单装即用
+
+## 6.1.2 — 2026-05-04（model-router PROVIDER_REGISTRY 修复）
+
+详见 git log v6.1.2 commit `5cdad3b`。修复钉钉/企微等渠道用户被回 `model deepseek/deepseek-v4-pro is not supported` 错误字符串的 bug：旧的 deepseek/google-ai-studio/custom-sidus-ai 三个 provider id 都不存在，runtime 找不到 → 把 model id 整串塞给 sidus → 拒 400。重写为只用实际注册的 sidus + minimax。
+
 ## 6.1.1 — 2026-05-03（chore-only：刷 ClawHub tag）
 
 **触发**：6.1.0 publish 时 ClawHub 端 record 半成功但 tag 没刷新——`clawhub inspect` 显示 `Latest: 6.0.0` 但 publish 6.1.0 报 `Version already exists`。按 §7.6 不重试同版本号 → bump patch 跳过。

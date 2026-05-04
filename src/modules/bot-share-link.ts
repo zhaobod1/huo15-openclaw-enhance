@@ -445,8 +445,8 @@ export function registerBotShareLink(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_share_file",
       description:
-        "把本地大文件投递到 OpenClaw share 目录，返回对外的临时下载链接。" +
-        "用于企微/钉钉等无法直传大文件（>20-50MB）的场景：传一个绝对路径，返回 https://<公网域名>/plugins/enhance-share/<token>-<filename> 给用户下载。" +
+        "把本地文件投递到 OpenClaw share 目录，返回对外的临时下载链接。**任意大小都用这个工具**（包括 < 10MB 的小文件）—— wecom/钉钉等 IM 渠道的 outbound 不识别 'MEDIA:'/'FILE:' 等文本约定，不调本工具就只能发普通文字，用户什么也收不到。" +
+        "用于企微/钉钉/微信等渠道发文件：传一个绝对路径，返回 https://<公网域名>/plugins/enhance-share/<token>-<filename> 给用户下载。" +
         "zero-config：用户访问过 dashboard 或点过任何 share 链接后，公网 baseUrl 自动从 host header 检测，不需要配 env / nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。",
       parameters: Type.Object({
         filePath: Type.String({
@@ -853,8 +853,9 @@ export function registerBotShareLink(
       api.registerMemoryPromptSupplement(({ availableTools }) => {
         if (!availableTools.has("enhance_share_file")) return [];
         return [
-          "## 大文件分享（强制规则）",
-          "- 需要让用户从企微 / 钉钉 / 微信等 IM 渠道下载本地文件（≥ 10MB 或不确定大小）时，**必须**先调用 `enhance_share_file(filePath=绝对路径)`，把返回结果中的 `structuredContent.url` 字段原样发给用户。",
+          "## 文件分享（强制规则，无大小阈值）",
+          "- 需要让用户从企微 / 钉钉 / 微信等 IM 渠道下载本地文件时（**任意大小，包括几 KB 的小文件**），**必须**先调用 `enhance_share_file(filePath=绝对路径)`，把返回结果中的 `structuredContent.url` 字段原样发给用户。",
+          "- **小文件没有例外**：不要因为文件 < 10MB 就跳过这个工具去 emit `MEDIA: <path>` / `FILE: <path>` / `📎 <path>` 等任何字面量约定——wecom / 钉钉 outbound **不识别**这些约定，发出去的就是普通文本，用户什么都收不到。如果上游渠道（如 v2.8.19+ 的 wecom）暴露了 `wecom_send_file` 之类的直发工具，可以优先用它（直接群里收到附件）；没有的话一律走 `enhance_share_file` 给链接。",
           "- **严禁**手写、拼接、猜测或回忆下载 URL（包括 `http://192.168.x.x:9999/<file>`、`https://localhost/<file>`、缺 token 前缀的 `/plugins/enhance-share/<filename>` 等任何形式）。它们都不是真实链接，用户点了只会 404。`enhance_share_file` 工具的 `structuredContent.url` 是唯一可信的下载 URL 来源。",
           "- 当文件不在本地（来自远程 URL / 刚生成的 buffer）时，先把文件落盘到 `~/Downloads/` 等绝对路径，再调 `enhance_share_file`；不要让 wecom/dingtalk 的发送工具去 fetch 一个你不确定能访问的 URL。",
           "- 当 `enhance_share_file` 返回的 `baseUrlIsFallback=true`（localhost 兜底）或 `baseUrlIsLanDetected=true`（局域网 IP）时：**先**问用户公网域名（如 `https://share.your-domain.com`），**再**调用 `enhance_share_set_baseurl(url=用户给的域名)` 把它保存到 `~/.openclaw/share/config.json`，下次自动生效。**不要**自己猜测 / 替换 URL，**不要**只是要求用户 `export BOT_BASE_URL`（除非用户表示不想长期保存）。",
