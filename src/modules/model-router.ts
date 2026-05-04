@@ -1,35 +1,29 @@
 /**
- * 模块: 模型路由器（Model Router）v5.7.12 / 接入 v5.8.3
+ * 模块: 模型路由器（Model Router）v5.7.12 / 接入 v5.8.3 / v6.1.2 重写 PROVIDER_REGISTRY
  *
  * Hook: before_model_resolve
  * 时机: Agent 解析模型之前
- * 作用: 检测多模态 + 任务复杂度，在 DeepSeek / MiniMax / Google / Sidus 四供应商间自动路由
+ * 作用: 检测多模态 + 任务复杂度，在已注册 provider 间自动路由
  *
- * v5.7.12 增强:
- *   - 路由决策缓存（TTL 30s），相同 prompt 结构命中直接返回
- *   - 极短 prompt（<50 字符，无媒体）直接短路到 fastest，跳过复杂检测
- *   - 超长 prompt（>2000 字符）视为复杂任务直接进 pro
- *   - 新增 10+ 任务类型识别（翻译/写作/数据分析/情绪/数学/摘要/客服/报告/多步骤/快速问答/debug）
- *   - 中文关键词专项优化，减少误判
- *   - getBestModel 结果缓存，减少 provider 遍历
- *
- * v5.8.3 修复:
- *   - 真正注册进 index.ts（5.7.12 起一直未注册，是"幽灵模块"）
- *   - sidus priority 1 → 4（兜底）：5/2 实战 sidus deepseek-v4-flash 反复 429 限流，
- *     蓝火 wecom 长任务卡 12 分钟+；sidus 降权后由 deepseek 直连兜住
+ * v6.1.2 修复（2026-05-04）:
+ *   - 之前 PROVIDER_REGISTRY 硬编码 deepseek/google-ai-studio/custom-sidus-ai 三个不存在
+ *     的 provider，导致路由器选了它们后 runtime 把 model id 整串塞给 sidus，sidus 拒 400
+ *     ("model deepseek/deepseek-v4-pro is not supported")。
+ *   - 现在只用实际注册的 sidus（priority 1）+ minimax（priority 2）。
+ *   - 同步替换 getBestModel(...) || "..." 兜底字符串里的旧 id。
  *
  * 供应商注册表（PROVIDER_REGISTRY）
  * ─────────────────────────────────────
  * priority 数值越小优先级越高。每个 tier 选第一个可用的供应商。
  *
- * | 供应商    | priority | 定位                          | tier 支持              |
- * |----------|----------|------------------------------|------------------------|
- * | deepseek | 1        | 直连首选 + 深度推理              | flash / pro / reasoner |
- * | minimax  | 2        | 极速 + 多模态                   | fast / vl / hailuo     |
- * | google   | 3        | 长上下文 / 混合多模态            | flash / pro            |
- * | sidus    | 4        | 中转兜底（前三家都挂时才用）       | flash / pro            |
+ * | 供应商   | priority | 定位                | tier 支持                  |
+ * |---------|----------|--------------------|---------------------------|
+ * | sidus   | 1        | DeepSeek/GLM 全家   | flash / pro / reasoner     |
+ * | minimax | 2        | 极速兜底             | fast / flash               |
  *
- * 新增供应商：只需在 PROVIDER_REGISTRY 添加一行，不需改路由逻辑
+ * 新增供应商：只需在 PROVIDER_REGISTRY 添加一行，且 provider id 必须与
+ * openclaw.json `models.providers.<id>` 完全一致；model id 必须与
+ * 该 provider 的 `models[].id` 完全一致。
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
@@ -107,42 +101,27 @@ function cacheSet(key: string, decision: RouteDecision): void {
 
 // ── 供应商注册表（可扩展）──────────────────────────────────
 
-// v5.8.3: priority 重排——sidus 从 1（首选）降到 4（兜底）
-//         触发：5/2 16:00 sidus deepseek-v4-flash 反复 429 限流，蓝火 wecom 长
-//               任务卡 12 分钟+；sidus 降权后由 deepseek 直连兜住
+// v6.1.2: 重排为只用实际注册的 provider
+//         之前的 deepseek/google-ai-studio/custom-sidus-ai 都是不存在的 provider id，
+//         路由器选了它们后 runtime 找不到 provider，把 model id 整串发给 sidus，
+//         sidus 拒 400（"model deepseek/deepseek-v4-pro is not supported"）。
+//         现在只用 sidus（priority 1） + minimax（priority 2）。
 const PROVIDER_REGISTRY = {
-  deepseek: {
-    label: "DeepSeek（官方直连）",
+  sidus: {
+    label: "Sidus（DeepSeek/GLM 系列）",
     priority: 1,
     tiers: {
-      flash:    "deepseek/deepseek-v4-flash",
-      pro:      "deepseek/deepseek-v4-pro",
-      reasoner: "deepseek/deepseek-reasoner",
+      flash:    "sidus/DeepSeek-V4-Flash",
+      pro:      "sidus/DeepSeek-V4-Pro",
+      reasoner: "sidus/DeepSeek-V4-Pro",
     },
   },
   minimax: {
-    label: "MiniMax（极速）",
+    label: "MiniMax（极速兜底）",
     priority: 2,
     tiers: {
-      fast:   "minimax/MiniMax-M2.7",
-      vl:     "minimax/MiniMax-VL-01",
-      hailuo: "minimax/MiniMax-Hailuo-2.3",
-    },
-  },
-  google: {
-    label: "Google（长上下文）",
-    priority: 3,
-    tiers: {
-      flash: "google-ai-studio/gemini-2.0-flash",
-      pro:   "google-ai-studio/gemini-2.5-pro",
-    },
-  },
-  sidus: {
-    label: "Sidus（中转兜底）",
-    priority: 4,
-    tiers: {
-      flash: "custom-sidus-ai/deepseek-v4-flash",
-      pro:   "custom-sidus-ai/DeepSeek-V4-Pro",
+      fast:  "minimax/MiniMax-M2.7",
+      flash: "minimax/MiniMax-M2.7",
     },
   },
 } as const;
@@ -362,34 +341,25 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
   }
 
   // ── 1. 多模态路由（最高优先）─────────────────────
-  if (mediaTypes.has("image")) {
+  // v6.1.2: 删掉 minimax/MiniMax-VL-01、Hailuo-2.3、google-ai-studio/gemini-2.0-flash
+  // 这些 model 在用户的 openclaw.json 里都没注册——发出去必 400。
+  // 改成路由器返回 null，让 OpenClaw 走原生 agents.defaults.model.fallbacks 兜底。
+  // 后续接入真正的多模态 model 时再写回来。
+  if (mediaTypes.has("image") || mediaTypes.has("video") || mediaTypes.has("audio")) {
+    // 暂用 sidus pro 顶上（DeepSeek V4 Pro 不支持 vision/audio，但至少不会 400；
+    // 模型会用文本理解描述，质量损失但不死循环）。
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return {
-      provider: "minimax",
-      model: "minimax/MiniMax-VL-01",
-      taskTier: "vl",
-      reason: "图片理解 → MiniMax VL-01",
-    };
-  }
-  if (mediaTypes.has("video")) {
-    return {
-      provider: "minimax",
-      model: "minimax/MiniMax-Hailuo-2.3",
-      taskTier: "hailuo",
-      reason: "视频内容 → MiniMax Hailuo",
-    };
-  }
-  if (mediaTypes.has("audio")) {
-    return {
-      provider: "google",
-      model: "google-ai-studio/gemini-2.0-flash",
-      taskTier: "flash",
-      reason: "音频内容 → Gemini Flash",
+      provider: "sidus",
+      model,
+      taskTier: "pro",
+      reason: `多模态输入 (${[...mediaTypes].join(",")}) → 暂用 pro tier 文本兜底（缺真正的 VL/audio model）`,
     };
   }
 
   // ── 2. 超长 prompt（>2000 字符）→ 复杂任务 pro ──
   if (len > COMPLEX_LENGTH_THRESHOLD) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return {
       provider: "sidus", model, taskTier: "pro",
       reason: `超长文本（${len}字符）→ pro tier`,
@@ -400,75 +370,75 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
 
   // 代码任务 — 特征明确，先检查
   if (matchAny(CODE_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "代码任务 → pro tier" };
   }
 
   // Debug / 报错分析
   if (matchAny(DEBUG_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "Debug/报错分析 → pro tier" };
   }
 
   // 推理任务
   if (matchAny(REASONER_PATTERNS, p)) {
-    const model = getBestModel("reasoner") || "deepseek/deepseek-reasoner";
-    return { provider: "deepseek", model, taskTier: "reasoner", reason: "推理任务 → reasoner tier" };
+    const model = getBestModel("reasoner") || "sidus/DeepSeek-V4-Pro";
+    return { provider: "sidus", model, taskTier: "reasoner", reason: "推理任务 → reasoner tier" };
   }
 
   // 数学计算
   if (matchAny(MATH_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "数学计算 → pro tier" };
   }
 
   // 数据分析
   if (matchAny(DATA_ANALYSIS_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "数据分析 → pro tier" };
   }
 
   // 分析/架构/深度任务
   if (matchAny(ANALYSIS_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "分析/架构 → pro tier" };
   }
 
   // 多步骤复杂推理
   if (matchAny(MULTI_STEP_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "多步骤推理 → pro tier" };
   }
 
   // 文档生成 → pro
   if (matchAny(DOC_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "文档生成 → pro tier" };
   }
 
   // 报告生成 → pro
   if (matchAny(REPORT_PATTERNS, p)) {
-    const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+    const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
     return { provider: "sidus", model, taskTier: "pro", reason: "报告生成 → pro tier" };
   }
 
   // 写作/文案/创作 — 按长度判断：长文 → pro，短文 → flash
   if (matchAny(WRITING_PATTERNS, p)) {
     if (len > 300) {
-      const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+      const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
       return { provider: "sidus", model, taskTier: "pro", reason: `写作创作（${len}字符，长文）→ pro tier` };
     }
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: `写作创作（${len}字符，短文）→ flash tier` };
   }
 
   // 长文本摘要 → pro（>500 字）
   if (matchAny(SUMMARIZATION_PATTERNS, p)) {
     if (len > 500) {
-      const model = getBestModel("pro") || "custom-sidus-ai/DeepSeek-V4-Pro";
+      const model = getBestModel("pro") || "sidus/DeepSeek-V4-Pro";
       return { provider: "sidus", model, taskTier: "pro", reason: `长文本摘要（${len}字符）→ pro tier` };
     }
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: `简短摘要 → flash tier` };
   }
 
@@ -476,37 +446,37 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
 
   // 翻译任务
   if (matchAny(TRANSLATION_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "翻译任务 → flash tier" };
   }
 
   // 信息检索
   if (matchAny(RETRIEVAL_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "信息检索 → flash tier" };
   }
 
   // 情绪/情感分析
   if (matchAny(SENTIMENT_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "情感分析 → flash tier" };
   }
 
   // 客服/闲聊
   if (matchAny(CHAT_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "闲聊对话 → flash tier" };
   }
 
   // 快速问答
   if (matchAny(QUICK_QA_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "快速问答 → flash tier" };
   }
 
   // 简单任务兜底
   if (matchAny(SIMPLE_PATTERNS, p)) {
-    const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+    const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
     return { provider: "sidus", model, taskTier: "flash", reason: "简单任务 → flash tier" };
   }
 
@@ -521,7 +491,7 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
   }
 
   // ── 4. 默认：Sidus flash ──────────────────────────
-  const model = getBestModel("flash") || "custom-sidus-ai/deepseek-v4-flash";
+  const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
   return {
     provider: "sidus", model, taskTier: "flash",
     reason: `默认 → Sidus flash（${len}字符）`,

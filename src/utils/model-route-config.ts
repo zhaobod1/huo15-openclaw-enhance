@@ -59,10 +59,14 @@ export function getModelRouteConfigPath(): string {
 }
 
 /**
- * v5.8.4 默认值——从 v5.8.3 PROVIDER_REGISTRY 反向工程而来；用户可改。
+ * v6.1.2 默认值——和 PROVIDER_REGISTRY 保持一致。
  *
- * weight 分配体现"sidus 兜底"语义：weighted 模式默认偏向 deepseek，
- * 极少抽到 sidus（5/2 实战 sidus 限流卡蓝火 12 分钟）。
+ * 之前的默认（deepseek/* + google-ai-studio/* + custom-sidus-ai/*）三个 provider
+ * 都不存在于通用 OpenClaw 配置里，导致 selectProvider 选了它们后 runtime 找不到
+ * provider，把 model id 整串塞给 fallback provider，被远端拒 400。
+ *
+ * 新默认只用通用名 sidus（DeepSeek/GLM 全家）+ minimax（M2.7）；vl/hailuo 留空，
+ * 让上层走 OpenClaw 原生 fallback，避免发不存在的 model id。
  */
 export function getDefaultModelRouteConfig(): ModelRouteConfig {
   return {
@@ -71,38 +75,32 @@ export function getDefaultModelRouteConfig(): ModelRouteConfig {
     models: {
       flash: {
         providers: [
-          { id: "deepseek/deepseek-v4-flash", priority: 1, weight: 60, enabled: true },
+          { id: "sidus/DeepSeek-V4-Flash", priority: 1, weight: 70, enabled: true },
           { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
-          { id: "google-ai-studio/gemini-2.0-flash", priority: 3, weight: 5, enabled: true },
-          { id: "custom-sidus-ai/deepseek-v4-flash", priority: 4, weight: 5, enabled: true },
         ],
       },
       pro: {
         providers: [
-          { id: "deepseek/deepseek-v4-pro", priority: 1, weight: 70, enabled: true },
-          { id: "google-ai-studio/gemini-2.5-pro", priority: 2, weight: 20, enabled: true },
-          { id: "custom-sidus-ai/DeepSeek-V4-Pro", priority: 3, weight: 10, enabled: true },
+          { id: "sidus/DeepSeek-V4-Pro", priority: 1, weight: 70, enabled: true },
+          { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
         ],
       },
       reasoner: {
         providers: [
-          { id: "deepseek/deepseek-reasoner", priority: 1, weight: 100, enabled: true },
+          { id: "sidus/DeepSeek-V4-Pro", priority: 1, weight: 100, enabled: true },
         ],
       },
       fast: {
         providers: [
-          { id: "minimax/MiniMax-M2.7", priority: 1, weight: 100, enabled: true },
+          { id: "sidus/DeepSeek-V4-Flash", priority: 1, weight: 70, enabled: true },
+          { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
         ],
       },
       vl: {
-        providers: [
-          { id: "minimax/MiniMax-VL-01", priority: 1, weight: 100, enabled: true },
-        ],
+        providers: [],
       },
       hailuo: {
-        providers: [
-          { id: "minimax/MiniMax-Hailuo-2.3", priority: 1, weight: 100, enabled: true },
-        ],
+        providers: [],
       },
     },
   };

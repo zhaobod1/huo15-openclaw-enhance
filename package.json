@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.1.1",
+  "version": "6.1.2",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.1.1 — chore-only re-publish 让 ClawHub Latest tag 跟上 6.1.x（6.1.0 publish 时 record 半成功但 tag 没刷新，Latest 仍停在 6.0.0；按 CLAUDE.md §7.6 不重试同版本号，bump patch 跳过）。零代码逻辑改动，继承 v6.1.0 trajectory-archiver v2 路径策略修正 + v6.0.0 npm 包改名 + v5.8.x 全部能力。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.1.2 — 修复 model-router 的 PROVIDER_REGISTRY：旧的 deepseek/google-ai-studio/custom-sidus-ai 三个 provider id 都是不存在的（runtime 找不到 → 把 model id 整串塞给 sidus → 拒 400）。重写为只用实际注册的 sidus（priority 1，DeepSeek/GLM 全家）+ minimax（priority 2，极速兜底）；多模态分支（image/video/audio）暂时回退到 sidus pro 文本兜底，避免不存在 model id 死循环。继承 v6.1.1 trajectory-archiver v2 路径策略 + v6.0.0 npm 包改名 + v5.8.x 全部能力。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
