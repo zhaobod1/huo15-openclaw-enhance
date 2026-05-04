@@ -45,6 +45,7 @@ import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfac
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
+import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
 import { registerModelRouter } from "./src/modules/model-router.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
@@ -316,6 +317,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.hookProfiler?.enabled !== false && dbAvailable,
         load: () => registerHookProfiler(api, openclawHome, config.hookProfiler),
+      },
+      {
+        // v6.1.5: 蓝火 / cc-media-bridge dashboard 引导
+        // tier=1 minimal 也启用——单一 prompt supplement 注入，零工具/零 hook，
+        // capability detection by filesystem path（不强 require cc-media-bridge 装）
+        name: "蓝火 dashboard 引导",
+        tier: 1,
+        enabled: config.ccBridgePrompt?.enabled !== false,
+        load: () => registerCcBridgePrompt(api),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

@@ -399,6 +399,8 @@ export interface EnhancePluginConfig {
   hookProfiler?: HookProfilerConfig;
   /** v5.7.12 / v5.8.3 接入: before_model_resolve hook 多供应商路由 + sidus 降权兜底 */
   modelRouter?: ModelRouterConfig;
+  /** v6.1.5: 蓝火 / cc-media-bridge dashboard 引导 — capability detection by ~/.openclaw-media-bridge */
+  ccBridgePrompt?: { enabled?: boolean };
 }
 
 /**

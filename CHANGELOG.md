@@ -2,6 +2,57 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.5 — 2026-05-05（蓝火 dashboard 引导：prompt supplement 强约束 LLM 附 dashboard URL）
+
+**触发**：5/5 zhaobo 反馈在 `agent:main:wecom:direct:zhaobo` 会话里 LLM 列蓝火任务 / 看任务详情时常常忘附 dashboard 链接（`https://keepermac.huo15.com/dashboard`），用户得自己记 URL。但蓝火（cc-media-bridge）跑出来的 claude CLI session **不会**进 Claude App pinned/recents（IndexedDB 白名单），dashboard 是 IM 用户唯一的可视化入口——不附 = 用户无法在群里直接点开看进度/历史。
+
+cc-media-bridge SKILL.md v2.7.7 已经写过这条规则，但属"按需加载"——LLM 看 SKILL 时记得，离开 SKILL 上下文容易漏。**v5.7.27 enhance_share_file 用同样套路解决过类似问题**：tool description 写得再清楚也只是 LLM "可以读"，没有 prompt level 强约束 → 走 `registerMemoryPromptSupplement` 把规则注入 system prompt 才稳。
+
+> 用户原意还提过"把 cc-media-bridge 整个项目合到 enhance"——拒绝该方案，因为：
+> (1) 红线 #3「插件不内嵌 skill 内容」；(2) bridge 是 LaunchAgent 长进程 + bash 脚本 + SQLite WAL，跟 enhance 插件运行时（同 gateway 进程、不能 child_process、不能起独立 HTTP server）架构生命周期不匹配；(3) 真因不是 skill 分离而是 prompt 力度。
+> 改用 prompt supplement 是正确切口——零跨项目耦合、零 bridge 改动、零红线违反、~30 行解决。
+
+### 改动
+
+新增 1 个文件 / 改 2 个：
+
+- **`src/modules/cc-bridge-prompt.ts`**（74 行新）：
+  - `bridgeInstalled()` — capability detection by filesystem path：先看 `~/.openclaw-media-bridge/` 是否存在（bridge LaunchAgent / setup.sh 跑过会自动建），fallback 看 `~/.local/bin/cc-media-task` 是否在 PATH。两者皆无 → bridge 没装 → 跳过 supplement，避免 enhance 单装用户看到无意义指令。
+  - `resolveDashboardBaseUrl()` — 跟 bot-share-link 一致的 baseUrl 解析：env BOT_BASE_URL > `~/.openclaw/share/config.json` baseUrl > `http://127.0.0.1:18790` localhost 兜底。**复用** enhance 已有的 baseUrl 配置，用户配过一次 bot-share 就同时给 dashboard URL 用。
+  - `registerCcBridgePrompt()` — `api.registerMemoryPromptSupplement` 注入 6 条强引导文案：
+    - 解释为什么必附（Claude App 看不到外部 session）
+    - 强制规则：响应里出现 `cc-YYYYMMDD-HHMMSS-XXXX` 格式 ID 必附 dashboard 链接
+    - 列表 → `<base>/dashboard`，详情 → `<base>/dashboard?task=<id>`
+    - 当 baseUrl 是 localhost 时额外提示用户先调 `enhance_share_set_baseurl` 设公网域名（不然 IM 群里其他人点不开）
+- **`src/types.ts`**：`EnhancePluginConfig` 加 `ccBridgePrompt?: { enabled?: boolean }`
+- **`index.ts`**：import + 注册新模块（`tier=1` minimal 也启用，与 bot-share / hook-profiler 同级）
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心（红线 #1）
+- ✅ 不复制龙虾原生（红线 #2）—— prompt supplement 是 enhance 范围
+- ✅ 不内嵌 skill 内容（红线 #3）—— supplement 是 prompt-level 注入，不是 skill markdown
+- ✅ 无 `child_process`（红线 #4）—— 仅 fs.existsSync + fs.readFileSync 内置 module
+- ✅ 不替用户改配置（红线 #5）—— 只读 `~/.openclaw/share/config.json` + env，不写
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ capability detection by filesystem path —— enhance 单装 / bridge 没装时静默跳过，零硬耦合
+
+### 验证
+
+启动 OpenClaw 后日志应有：
+
+```
+[enhance-cc-bridge-prompt] prompt supplement 已注册（强引导 LLM 给蓝火任务附 dashboard 链接）
+```
+
+或（bridge 没装时）：
+
+```
+[enhance-cc-bridge-prompt] cc-media-bridge 未装（…），跳过 prompt supplement
+```
+
+OpenClaw LLM 下次列任务 / 看详情时会自动附 `<baseUrl>/dashboard?task=<id>`，不再漏。
+
 ## 6.1.4 — 2026-05-05（model-router 智能路由大重构：动态 capability 扫描 + 5 维路由）
 
 > **核心**：让 model-router 不再硬编码 model id——启动期扫 `~/.openclaw/openclaw.json` 的 `models.providers.<id>.models[]` 自动构建 capability 表。用户加新 provider/model 不用改 enhance 代码。
