@@ -2,6 +2,45 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.8 — 2026-05-05（bot-share prompt 翻转：按大小分流，渠道本地直发优先）
+
+**触发**：赵博 5/5 群里实测 `@贾维斯 直接发文件给我，不要发下载链接` —— wecom v2.8.23 + v2.8.24 修了群聊主动推送通道 + UI 锁交互后，MEDIA: 渠道本地直发已稳定可靠（5/5 23:42 实测群里直接收到 docx 附件成功）。v6.1.3 当时怀疑 stream 截断把 share_file 设为"任意大小都强制"，现在按用户偏好翻转回 MEDIA: 直发优先。
+
+### 改动
+
+[`src/modules/bot-share-link.ts:856-862`](src/modules/bot-share-link.ts:856) — prompt supplement 6 行重写：
+
+| 旧（v6.1.3）| 新（v6.1.8）|
+|---|---|
+| 任意大小都强制 `enhance_share_file` | 按大小分流，渠道本地直发优先 |
+| 标题：「文件分享（强制规则，无大小阈值）」 | 标题：「文件分享（按大小分流，v6.1.8 — 优先渠道本地直发）」 |
+| 小文件没有例外，禁 emit `MEDIA:` 字面量 | 小文件优先 wecom MEDIA: 等渠道本地直发 |
+| — | 用户明确说「不要发链接」时强制直发 |
+| — | 决策表（图/视频 ≤10MB / 语音 ≤2MB / 文件 ≤20MB → 直发；超阈值 → 链接）|
+
+### 配套上游
+
+`@huo15/wecom@2.8.25`（同日发布）的 `WECOM_BOT_WS_MEDIA_GUIDANCE` 同步翻转。两边 prompt 互补不冲突。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心
+- ✅ 无 `child_process`
+- ✅ `compat.pluginApi >=2026.4.24` 仍 ranged
+- ✅ 不假设 wecom 装着 — capability detection 按 availableTools 决定（wecom 不装时降级行为不变）
+
+### 设计哲学
+
+GUIDANCE 优先级随**底层能力 + 用户偏好**动态调，不是一次写死：
+
+- v6.1.3：怀疑 stream 截断 → 强制 share_file
+- v2.8.23/24（wecom 侧）：群聊主动推送通道 work + UI 锁交互修了 → MEDIA: 重新可靠
+- v6.1.8：按用户偏好（群里直接附件 > 链接）翻回直发优先
+
+每次大改路径选择都要回头评估 prompt。
+
+
+
 ## 6.1.7 — 2026-05-05（model-router pickModel 加 capability 验证：修 image 路由被死 entry 覆盖事故）
 
 ### 触发
