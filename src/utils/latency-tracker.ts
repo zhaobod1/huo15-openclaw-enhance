@@ -38,6 +38,138 @@ interface ProviderState {
 const stats = new Map<string, ProviderState>();
 let persistTimer: NodeJS.Timeout | null = null;
 
+// ── v6.1.5 ⭐ quota-aware ban list ───────────────────────────────
+//
+// 跟 errRate window 累积式不同：某些错误（HTTP 422 配额超限 / 429 rate-limit /
+// 402 payment required + 中文"额度"/"超限"/"quota exceeded" 关键词）是**确定性硬错**，
+// 后续请求一定也失败——不该等 5 个样本积累 50% errRate，**第一次命中就立刻 ban**。
+//
+// 默认 ban 1 小时（用户额度大概率隔天/月 reset；1h 后自动恢复，circuit breaker 接力监控）。
+// 用户可调 enhance_model_route_unban 手动提前解除。
+//
+interface BanEntry {
+  providerId: string;
+  reason: string;
+  bannedAt: number;
+  expireAt: number;
+  /** 触发的关键词或 status code，便于诊断 */
+  trigger: string;
+}
+
+const banList = new Map<string, BanEntry>();
+
+const DEFAULT_BAN_TTL_MS = 60 * 60_000; // 1 小时
+
+/** 配额耗尽相关的 HTTP status code（明确告诉你"不行了"，不是网络抖动） */
+const QUOTA_HARD_FAIL_STATUSES = new Set([402, 422, 429]);
+
+/** 配额耗尽相关的中英文关键词（错误消息里出现就立刻 ban） */
+const QUOTA_KEYWORDS = [
+  "额度",
+  "超限",
+  "余额不足",
+  "已用完",
+  "已耗尽",
+  "已超限",
+  "限额",
+  "未支付",
+  "quota",
+  "exceeded",
+  "exhausted",
+  "insufficient_quota",
+  "rate limit",
+  "rate_limit",
+  "billing",
+  "payment_required",
+  "credit",
+  "out of credits",
+];
+
+function detectQuotaError(httpStatus: number | null, errorMessage: string): { hit: boolean; trigger: string } {
+  if (httpStatus !== null && QUOTA_HARD_FAIL_STATUSES.has(httpStatus)) {
+    return { hit: true, trigger: `HTTP ${httpStatus}` };
+  }
+  if (errorMessage) {
+    const lower = errorMessage.toLowerCase();
+    for (const kw of QUOTA_KEYWORDS) {
+      if (errorMessage.includes(kw) || lower.includes(kw.toLowerCase())) {
+        return { hit: true, trigger: `keyword="${kw}"` };
+      }
+    }
+  }
+  return { hit: false, trigger: "" };
+}
+
+/** v6.1.5: 立刻 ban 一个 model（quota-exhausted 等硬错时调用） */
+export function banModel(
+  providerId: string,
+  reason: string,
+  trigger: string,
+  ttlMs: number = DEFAULT_BAN_TTL_MS,
+): void {
+  const now = Date.now();
+  banList.set(providerId, {
+    providerId,
+    reason,
+    bannedAt: now,
+    expireAt: now + ttlMs,
+    trigger,
+  });
+}
+
+/** 查询某 model 是否在 ban 期。过期会自动清理。 */
+export function isModelBanned(providerId: string): BanEntry | null {
+  const entry = banList.get(providerId);
+  if (!entry) return null;
+  if (Date.now() >= entry.expireAt) {
+    banList.delete(providerId);
+    return null;
+  }
+  return entry;
+}
+
+/** 手动解除 ban（enhance_model_route_unban 工具调用）*/
+export function unbanModel(providerId: string): boolean {
+  return banList.delete(providerId);
+}
+
+/** 列出当前所有 active ban（自动清理过期）*/
+export function listBannedModels(): BanEntry[] {
+  const now = Date.now();
+  const out: BanEntry[] = [];
+  for (const [id, entry] of banList) {
+    if (now >= entry.expireAt) {
+      banList.delete(id);
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * v6.1.5: 记一次错误样本，并检测是否是 quota-exhausted 类硬错——是的话立刻 banModel。
+ * 跟 recordSample 互补：recordSample 累积 errRate 用于 circuit breaker（5+ 样本），
+ * recordError 单次硬错就立刻 ban（不等积累）。可同时调用。
+ *
+ * 返回是否触发了 ban。
+ */
+export function recordError(
+  providerId: string,
+  errorMessage: string,
+  httpStatus: number | null,
+  ttlMs?: number,
+): { banned: boolean; trigger: string } {
+  const detected = detectQuotaError(httpStatus, errorMessage);
+  if (!detected.hit) return { banned: false, trigger: "" };
+
+  const reason = errorMessage
+    ? errorMessage.slice(0, 200)
+    : `HTTP ${httpStatus ?? "?"}`;
+  banModel(providerId, reason, detected.trigger, ttlMs ?? DEFAULT_BAN_TTL_MS);
+  return { banned: true, trigger: detected.trigger };
+}
+
 function ensure(providerId: string): ProviderState {
   let s = stats.get(providerId);
   if (!s) {

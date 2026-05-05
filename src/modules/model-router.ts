@@ -41,9 +41,13 @@ import {
 } from "../utils/model-route-config.js";
 import {
   recordSample,
+  recordError,
   schedulePersist,
   snapshotStats,
   getProviderSpeedSample,
+  isModelBanned,
+  unbanModel,
+  listBannedModels,
 } from "../utils/latency-tracker.js";
 import {
   readHistory,
@@ -763,34 +767,45 @@ function applyChannelPreference(
  * > 0.5 within 1h 时跳过该 model，找下一个同 tier 内 cost 最接近的备选。
  * 数据完全在 latency-tracker 内存里，零 IO。
  */
+/**
+ * v6.1.5: 对给定 decision 检查并切换。两个独立的"切换条件"：
+ *   1. quota-ban（来自 recordError 的硬错检测，即时切，不等累积）
+ *   2. circuit-breaker（基于 errRate window 累积式判断 > 50%）
+ *
+ * 共用同一个候选选择逻辑（同模态/同 reasoning，按 errRate + cost 排）。
+ */
 function applyCircuitBreaker(
   decision: RouteDecision,
   api: OpenClawPluginApi,
 ): RouteDecision {
+  // 检查 1: quota ban（v6.1.5 新增）—— 优先级最高，单次硬错就切
+  const banEntry = isModelBanned(decision.model);
+  if (banEntry) {
+    const winner = pickFallbackCandidate(decision.model);
+    if (winner) {
+      const remainMin = Math.round((banEntry.expireAt - Date.now()) / 60_000);
+      api.logger.warn(
+        `[model-router] quota-ban active on ${decision.model} (${banEntry.trigger}, 剩 ${remainMin}min) → 切到 ${winner.id}`,
+      );
+      return {
+        provider: winner.id.split("/")[0]!,
+        model: winner.id,
+        taskTier: decision.taskTier,
+        reason: `${decision.reason} | quota-ban(${decision.model} 剩${remainMin}min)→${winner.label}`,
+      };
+    }
+    // 没备选——只能让原 model 继续（OpenClaw 会再失败一次，但路由器尽力了）
+    api.logger.warn(
+      `[model-router] quota-ban active on ${decision.model} 但无同类备选，继续用原 model`,
+    );
+  }
+
+  // 检查 2: circuit breaker（v6.1.4，errRate 累积式）
   const sample = getProviderSpeedSample(decision.model);
-  // 数据不足（< 5 样本）或错误率正常：不动
   if (!sample || sample.samples < 5 || sample.errRate <= 0.5) return decision;
 
-  // errRate 高 → 找候选替代（同模态、同 reasoning 能力）
-  const failed = CAPABILITY_BY_ID.get(decision.model);
-  if (!failed) return decision;
-  const candidates = MODEL_CAPABILITIES.filter(
-    (c) =>
-      c.id !== decision.model &&
-      (failed.modalities.image ? c.modalities.image === true : true) &&
-      c.reasoning === failed.reasoning,
-  );
-  if (candidates.length === 0) return decision;
-  // 选 errRate 最低（无数据按 0 算）+ cost 升序 tiebreaker
-  const ranked = candidates.sort((a, b) => {
-    const sa = getProviderSpeedSample(a.id);
-    const sb = getProviderSpeedSample(b.id);
-    const errA = sa && sa.samples >= 5 ? sa.errRate : 0;
-    const errB = sb && sb.samples >= 5 ? sb.errRate : 0;
-    if (errA !== errB) return errA - errB;
-    return a.costInPerM - b.costInPerM;
-  });
-  const winner = ranked[0];
+  const winner = pickFallbackCandidate(decision.model);
+  if (!winner) return decision;
   api.logger.warn(
     `[model-router] circuit-breaker: ${decision.model} errRate=${(sample.errRate * 100).toFixed(0)}% (${sample.samples} samples) → 切到 ${winner.id}`,
   );
@@ -800,6 +815,32 @@ function applyCircuitBreaker(
     taskTier: decision.taskTier,
     reason: `${decision.reason} | circuit-breaker(${decision.model} err=${(sample.errRate * 100).toFixed(0)}%)→${winner.label}`,
   };
+}
+
+/**
+ * v6.1.5: 给定一个失败 model，选同模态+同 reasoning 能力的备选。
+ * 跳过当前 banned 的，按 errRate 升序 + cost 升序排。
+ */
+function pickFallbackCandidate(failedModelId: string): ModelCapability | null {
+  const failed = CAPABILITY_BY_ID.get(failedModelId);
+  if (!failed) return null;
+  const candidates = MODEL_CAPABILITIES.filter(
+    (c) =>
+      c.id !== failedModelId &&
+      !isModelBanned(c.id) && // 跳过同样在 ban 期的
+      (failed.modalities.image ? c.modalities.image === true : true) &&
+      c.reasoning === failed.reasoning,
+  );
+  if (candidates.length === 0) return null;
+  const ranked = candidates.sort((a, b) => {
+    const sa = getProviderSpeedSample(a.id);
+    const sb = getProviderSpeedSample(b.id);
+    const errA = sa && sa.samples >= 5 ? sa.errRate : 0;
+    const errB = sb && sb.samples >= 5 ? sb.errRate : 0;
+    if (errA !== errB) return errA - errB;
+    return a.costInPerM - b.costInPerM;
+  });
+  return ranked[0];
 }
 
 /**
@@ -916,6 +957,33 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       const latencyMs = typeof ttfb === "number" ? ttfb : (typeof dur === "number" ? dur : 0);
       const errored = event?.outcome === "error";
       recordSample(providerId, latencyMs, errored);
+
+      // v6.1.5 ⭐ quota-aware 即时切换：检测"配额耗尽/超限/限流"类硬错 → 立刻 ban
+      // 不等 errRate 累积（5 样本 50%）—— 这种错后续请求一定也失败，越早切越好。
+      // event 字段命名各 OpenClaw 版本不一，全部尝试一遍。
+      if (errored) {
+        const errorMessage =
+          event?.errorMessage ??
+          event?.error?.message ??
+          event?.error ??
+          event?.outcomeReason ??
+          (typeof event?.body === "string" ? event.body : "") ??
+          "";
+        const httpStatus =
+          (typeof event?.httpStatus === "number" ? event.httpStatus : null) ??
+          (typeof event?.error?.status === "number" ? event.error.status : null) ??
+          (typeof event?.statusCode === "number" ? event.statusCode : null) ??
+          null;
+        const result = recordError(providerId, String(errorMessage), httpStatus);
+        if (result.banned) {
+          api.logger.warn(
+            `[model-router] ⛔ quota-ban: ${providerId} 触发 ${result.trigger} → 1h 内不再路由到此 model（其他备选自动接管）。手动恢复：enhance_model_route_unban("${providerId}")`,
+          );
+          // 立刻清缓存——下次 prompt 不命中老 model 缓存
+          routeCache.clear();
+        }
+      }
+
       schedulePersist(runtimeConfig);
     } catch {
       // hook 内永不抛 —— 防止把 openclaw 主流程拖坏
@@ -1168,10 +1236,81 @@ export function registerModelRouter(api: OpenClawPluginApi) {
     { name: "enhance_model_route_disable" },
   );
 
+  // ── v6.1.5 ⭐ quota-aware ban 管理工具（2 个）─────────────────
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_ban_status",
+      description:
+        "查看当前因 quota-exhausted（HTTP 422/429/402 或'额度超限'类错误）被自动 ban 的 model 列表。" +
+        "v6.1.5 新增：model_call_ended hook 检测到硬错时立刻 ban 1h，下次路由自动跳过该 model 选同模态/同 reasoning 备选。",
+      parameters: Type.Object({}),
+      async execute() {
+        const banned = listBannedModels();
+        if (banned.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "✅ 当前无 model 处于 quota-ban 期" }],
+          };
+        }
+        const now = Date.now();
+        const lines = ["⛔ 当前 quota-ban 列表：", ""];
+        for (const e of banned) {
+          const remainMin = Math.round((e.expireAt - now) / 60_000);
+          lines.push(
+            `  · ${e.providerId}`,
+            `    触发: ${e.trigger}`,
+            `    原因: ${e.reason.slice(0, 100)}${e.reason.length > 100 ? "..." : ""}`,
+            `    剩余: ${remainMin} 分钟（自动恢复）`,
+            `    手动解除: enhance_model_route_unban("${e.providerId}")`,
+            "",
+          );
+        }
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { banned },
+        };
+      },
+    })) as any,
+    { name: "enhance_model_route_ban_status" },
+  );
+
+  api.registerTool(
+    ((_ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_model_route_unban",
+      description:
+        "手动解除某个 model 的 quota-ban（默认 1h 自动恢复，但用户额度立刻补了的话可提前解）。" +
+        "传 providerId 形如 'minimax/MiniMax-M2.7' 或 'deepseek/deepseek-v4-pro'。",
+      parameters: Type.Object({
+        providerId: Type.String({
+          description: "<provider>/<model> 格式，如 minimax/MiniMax-M2.7",
+        }),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const id = String(params?.providerId ?? "").trim();
+        if (!id) {
+          return { content: [{ type: "text" as const, text: "❌ providerId 必填" }] };
+        }
+        const removed = unbanModel(id);
+        if (!removed) {
+          return {
+            content: [{ type: "text" as const, text: `ℹ️ ${id} 不在 ban 列表（可能已自动过期或从未被 ban）` }],
+          };
+        }
+        // 顺手清缓存让下次路由立刻能选回这个 model
+        routeCache.clear();
+        bestModelCache.clear();
+        return {
+          content: [{ type: "text" as const, text: `✅ 已解除 ${id} 的 quota-ban，路由器下次决策起可重新选它` }],
+        };
+      },
+    })) as any,
+    { name: "enhance_model_route_unban" },
+  );
+
   // 暴露 reload，方便未来 enhance_loop 触发
   void reloadConfig;
 
   api.logger.info(
-    `[enhance] 模型路由器 v5.8.6 已加载（before_model_resolve + model_call_ended hooks + 5 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | latency tracker 在线（P50/P95/errRate 1h 滑窗）+ history 自动归档`,
+    `[enhance] 模型路由器 v6.1.5 已加载（before_model_resolve + model_call_ended hooks + 7 工具）| mode=${runtimeConfig.mode} | tiers=${Object.keys(runtimeConfig.models).join(",")} | latency tracker 在线（P50/P95/errRate 1h 滑窗）+ history 自动归档 + quota-aware ban（HTTP 422/429/402 + '额度超限' 关键词立即切）`,
   );
 }

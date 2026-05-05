@@ -2,6 +2,69 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.6 — 2026-05-05（model-router quota-aware 即时切换）
+
+### 触发
+
+用户实测某 model provider 返回：
+
+```
+HTTP/1.1 422 Unprocessable Entity
+{"status":20125,"message":"成员月度消费额度已超限","result":null,"timestamp":1777942606632}
+```
+
+v6.1.4 的 circuit breaker 是 **errRate 累积式**（5 样本 / errRate > 50%）—— 这种"配额耗尽"是确定性硬错（后续每次都会 422），等 5 个样本累积纯属浪费。**应该单次命中就立刻切**。
+
+### 改动
+
+`src/utils/latency-tracker.ts` 新增 quota-aware ban list（~150 行）：
+
+- `recordError(providerId, errorMessage, httpStatus)` — 检测 quota 类硬错命中后**立刻** ban
+- `detectQuotaError`：HTTP **402 / 422 / 429** 状态码、或错误消息含中英文关键词（`额度`/`超限`/`余额不足`/`quota`/`exceeded`/`exhausted`/`insufficient_quota`/`rate limit`/`billing`/`out of credits` 等 17 条）
+- `banModel` / `isModelBanned` / `unbanModel` / `listBannedModels` — 内存 Map<modelId, BanEntry>，TTL 默认 1 小时
+- 过期自动清理（lazy）
+
+`src/modules/model-router.ts` 接入：
+
+- `model_call_ended` hook 在 `errored=true` 时尝试拿 `errorMessage`/`httpStatus`（多字段 fallback：`event.errorMessage` / `event.error.message` / `event.outcomeReason` / `event.body` / `event.httpStatus` / `event.statusCode` / `event.error.status`），调用 `recordError`。命中 ban → log warn + 清 routeCache
+- `applyCircuitBreaker` 拆成两层检查：① quota-ban（v6.1.6 新增，优先级最高，单次硬错就切）② circuit-breaker（v6.1.4 errRate 累积式）。共用 `pickFallbackCandidate(failedId)` 候选选择
+- `pickFallbackCandidate`：跳过当前 banned 的同模态/同 reasoning 候选，按 errRate + cost 升序排
+- 2 个新工具：
+  - `enhance_model_route_ban_status` — 查当前 ban 列表（含触发关键词、剩余分钟、手动解除命令）
+  - `enhance_model_route_unban(providerId)` — 提前解除（用户额度立即补了的场景）
+
+### 设计哲学
+
+**两层 circuit 互补**：
+
+- **quota-ban（即时）**：明确告诉你"不行了"的硬错（HTTP 4xx + 关键词）→ 单次命中就切
+- **circuit-breaker（累积）**：网络抖动 / 偶发 5xx / 不确定故障 → 5+ 样本 + errRate > 50% 才切
+
+加起来覆盖 LLM provider 两类典型故障：「确定性的没钱了」和「不确定的网络糟」。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生（quota 检测 / ban 全在 enhance 自家）
+- ✅ 无 `child_process`
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ ban list 是内存 Map，hook 路径只读 + O(1)，零额外 IO
+- ✅ event 字段读取多 fallback，OpenClaw 任何版本字段命名漂移不影响功能
+
+### 用户使用
+
+正常情况无需做任何事——LLM 报 quota 错时路由器自动切。可观测：
+
+```
+# AI / 用户调:
+- enhance_model_route_ban_status              # 看当前哪些 model 在 ban 期
+- enhance_model_route_unban("minimax/MiniMax-M2.7")   # 手动解除
+```
+
+启动 log 在 ban 触发时会大字 warn：
+```
+[model-router] ⛔ quota-ban: minimax/MiniMax-M2.7 触发 HTTP 422 → 1h 内不再路由到此 model（其他备选自动接管）
+```
+
 ## 6.1.5 — 2026-05-05（蓝火 dashboard 引导：prompt supplement 强约束 LLM 附 dashboard URL）
 
 **触发**：5/5 zhaobo 反馈在 `agent:main:wecom:direct:zhaobo` 会话里 LLM 列蓝火任务 / 看任务详情时常常忘附 dashboard 链接（`https://keepermac.huo15.com/dashboard`），用户得自己记 URL。但蓝火（cc-media-bridge）跑出来的 claude CLI session **不会**进 Claude App pinned/recents（IndexedDB 白名单），dashboard 是 IM 用户唯一的可视化入口——不附 = 用户无法在群里直接点开看进度/历史。

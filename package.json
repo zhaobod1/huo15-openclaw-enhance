@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.1.5",
+  "version": "6.1.6",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.1.4 — model-router 智能路由大重构：(1) 启动期扫 ~/.openclaw/openclaw.json 自动构建 capability 表（用户加新 provider/model 不用改代码、不再硬编码 sidus 撞空炮）；(2) image 硬路由到 capability 表唯一 image-capable model（之前 v6.1.2 用 pro 文本兜底是错的）；(3) ctx-aware：> 50K token 强制走 ≥500K ctx model（用户实际有 1M ctx 的 deepseek-v4 系列）；(4) channel-aware：wecom/钉钉/微信渠道偏 flash（速度优先）；(5) circuit breaker：errRate > 50% 自动切到同模态/同 reasoning 备选；(6) cost-budget mode：明示成本优先模式。零 IO in hook 路径（capability 扫描在 register() 启动期），不拖慢首字延迟。继承 v6.1.3 bot-share 强约束、v6.0.0 npm 改名、v5.8.x 全部能力。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.1.6 — model-router quota-aware 即时切换：HTTP 422/429/402 + '额度超限/quota exceeded/insufficient_quota'类硬错命中 → 立刻 ban 该 model 1h（不再等 errRate 累积），下次路由自动选同模态/同 reasoning 备选；新工具 enhance_model_route_ban_status / enhance_model_route_unban。继承 v6.1.5 蓝火 dashboard 引导 prompt supplement、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker + cost-budget）、v6.1.3 bot-share 强约束、v6.0.0 npm 改名、v5.8.x 全部能力。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {
