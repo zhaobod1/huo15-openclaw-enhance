@@ -2,6 +2,53 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.7 — 2026-05-05（model-router pickModel 加 capability 验证：修 image 路由被死 entry 覆盖事故）
+
+### 触发
+
+ZhaoBo 在 wecom 发了张图片，LLM 没识别。看 gateway.log：
+
+```
+[model-router] auto-task | image 输入 → 硬路由到 MiniMax M2.7（capability table 唯一支持 image） | auto-task → vl priority=1 | tier=vl | → minimax/MiniMax-VL-01
+                                       ↑ routeTask 给的对：M2.7                                                    ↑ 最终发出去的：VL-01（不存在！）
+```
+
+`routeTask` 已经基于 v6.1.4 的动态 capability 扫描给出正确硬路由（`minimax/MiniMax-M2.7`），但 `pickModel` 内部 `selectProvider(runtimeConfig, "vl")` 又用**用户 `~/.openclaw/enhance/model-route.json` 的老 vl tier 配置**覆盖回 `minimax/MiniMax-VL-01`——后者**根本没在 openclaw.json `models.providers.minimax.models` 注册**，是 v5.x 时代留下的死 entry。
+
+→ OpenClaw runtime 收到不存在的 model id → fallback 到默认 model（无 image 能力的 deepseek-v4-flash）→ LLM 看不到图片，回了句"我看不到图片"。
+
+### 改动
+
+`src/modules/model-router.ts:pickModel` 给 `selectProvider` 返回值加 capability 验证：
+
+```typescript
+const picked = selectProvider(runtimeConfig, tier);
+if (picked && !CAPABILITY_BY_ID.has(picked.id)) {
+  // 用户 model-route.json 残留的死 entry → 抛弃，回退到 routeTask 的硬路由
+  api?.logger.warn(`selectProvider 返回 ${picked.id} 但不在 capability 表，回退到硬路由 ${taskDecision.model}`);
+  decision = { ...taskDecision, reason: `... | ⚠ ${picked.id} 不存在，回退硬路由` };
+}
+```
+
+`CAPABILITY_BY_ID` 是 v6.1.4 的启动期扫描产物（动态读 `~/.openclaw/openclaw.json` 实际注册的 model）—— 任何 model-route.json 写错的 model id 都会被自动跳过，**不再覆盖硬路由**。
+
+### 为什么 v6.1.4 的动态扫描没解决这个？
+
+v6.1.4 改了 `routeTask`（image 硬路由 + capability 表派生），但**没改** `pickModel` 里 `selectProvider` 返回的优先级——routeTask 给的硬路由仍然被 selectProvider 覆盖。这次一并补齐。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生
+- ✅ 不擅自改用户 model-route.json（红线 §6.4 诊断不修复）—— 只 log warn 提示用户，不动文件
+- ✅ 无 `child_process`、pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 性能零成本：CAPABILITY_BY_ID 是 v6.1.4 启动期 build 的内存 Map，O(1) 查表
+
+### 用户使用
+
+正常情况无需做任何事——image 路由现在自动走 capability 表唯一可用的 image model。
+
+可选：清理 `~/.openclaw/enhance/model-route.json` 里 `vl` / `hailuo` tier 的死 entry（如 `MiniMax-VL-01`），改成实际可用的 `MiniMax-M2.7`，或直接置空让 routeTask 自动选——清理后 log 不再有 ⚠ 警告。
+
 ## 6.1.6 — 2026-05-05（model-router quota-aware 即时切换）
 
 ### 触发

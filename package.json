@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.1.6",
+  "version": "6.1.7",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.1.6 — model-router quota-aware 即时切换：HTTP 422/429/402 + '额度超限/quota exceeded/insufficient_quota'类硬错命中 → 立刻 ban 该 model 1h（不再等 errRate 累积），下次路由自动选同模态/同 reasoning 备选；新工具 enhance_model_route_ban_status / enhance_model_route_unban。继承 v6.1.5 蓝火 dashboard 引导 prompt supplement、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker + cost-budget）、v6.1.3 bot-share 强约束、v6.0.0 npm 改名、v5.8.x 全部能力。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.1.7 — model-router selectProvider 返回值过 capability 验证 + v6.1.6 quota-aware 即时切换：HTTP 422/429/402 + '额度超限/quota exceeded/insufficient_quota'类硬错命中 → 立刻 ban 该 model 1h（不再等 errRate 累积），下次路由自动选同模态/同 reasoning 备选；新工具 enhance_model_route_ban_status / enhance_model_route_unban。继承 v6.1.5 蓝火 dashboard 引导 prompt supplement、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker + cost-budget）、v6.1.3 bot-share 强约束、v6.0.0 npm 改名、v5.8.x 全部能力。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

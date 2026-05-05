@@ -863,6 +863,22 @@ function pickModel(
     // selectProvider 没命中（用户 model-route.json 删空了某个 tier）
     // → 直接用 routeTask 的硬选（基于 capability 表 + DERIVED_TIER_MAP）
     decision = taskDecision;
+  } else if (!CAPABILITY_BY_ID.has(picked.id)) {
+    // v6.1.7 ⭐ capability 验证：picked.id 不在 ~/.openclaw/openclaw.json 实际注册
+    // 的 model 列表里——是用户 model-route.json 残留的死 entry（典型如 minimax/MiniMax-VL-01
+    // 实际未注册，但老配置写着）。这种情况覆盖硬路由会把不存在的 model 发给 OpenClaw runtime
+    // → fallback 到默认 model → image 任务收不到 image。
+    //
+    // 修：picked 不在 capability 表 → 抛弃 picked，回退到 routeTask 给的硬路由
+    // （routeTask 是从 IMAGE_CAPABLE_MODELS / LONG_CONTEXT_MODELS 等动态扫描出来的，
+    // 一定是用户实际可用的 model）。
+    api?.logger.warn(
+      `[model-router] selectProvider 返回 ${picked.id} 但不在 capability 表（model-route.json 残留死 entry，可能是历史配置漂移），回退到硬路由 ${taskDecision.model}`,
+    );
+    decision = {
+      ...taskDecision,
+      reason: `${taskDecision.reason} | ⚠ ${picked.id} 不存在，回退硬路由`,
+    };
   } else {
     decision = {
       provider: picked.id.split("/")[0] ?? "?",
