@@ -34,11 +34,11 @@ export interface SessionBridgeConfig {
   enabled?: boolean;
   /** prior 文件 mtime 距今需 ≥ 多少分钟才桥接（防止活跃流被自己重复注入），默认 75 */
   bridgeIdleMinutes?: number;
-  /** 检索 prior session 文件的最大年龄（小时），默认 48 */
+  /** 检索 prior session 文件的最大年龄（小时），默认 72（v6.1.9 起从 48 → 72，跨周末 OK） */
   priorMaxAgeHours?: number;
-  /** 桥接的末 N 条 message，默认 8 */
+  /** 桥接的末 N 条 message，默认 20（v6.1.9 起从 8 → 20，跨夜大半天会话覆盖） */
   tailMessages?: number;
-  /** 桥接文本字符上限（含模板），默认 4000 */
+  /** 桥接文本字符上限（含模板），默认 12000（v6.1.9 起从 4000 → 12000，3x 容量） */
   maxChars?: number;
   /** 当前 session jsonl ≥ 多少字节就视为非 fresh、不再桥接，默认 200KB */
   freshSessionMaxBytes?: number;
@@ -251,9 +251,14 @@ export function registerSessionBridge(
 
   const home = resolveOpenClawHome(api);
   const idleMinutes = config?.bridgeIdleMinutes ?? 75;
-  const priorMaxAgeMs = (config?.priorMaxAgeHours ?? 48) * 3600_000;
-  const tailN = config?.tailMessages ?? 8;
-  const maxChars = config?.maxChars ?? 4000;
+  // v6.1.9: 默认值 3x 扩容（48h→72h, 8msg→20msg, 4000字→12000字）
+  // 触发：用户报"第二天失忆严重"。诊断：session-bridge 在跑但 4KB 窗口太小，
+  // 跨夜的项目背景/决策/上下文全在窗口外丢失。3x 扩容覆盖大半天会话。
+  // 实测验证：v6.1.0 实测一个会话 jsonl tail 20msg ≈ 8-10KB 中文文本，给 12000 字
+  // 上限留 20-50% buffer 不会截断到信息丢失。
+  const priorMaxAgeMs = (config?.priorMaxAgeHours ?? 72) * 3600_000;
+  const tailN = config?.tailMessages ?? 20;
+  const maxChars = config?.maxChars ?? 12000;
   const freshMaxBytes = config?.freshSessionMaxBytes ?? 200 * 1024;
   const debug = config?.debug === true;
   const perMsgCap = Math.max(120, Math.floor(maxChars / Math.max(1, tailN)));

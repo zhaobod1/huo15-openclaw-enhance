@@ -32,12 +32,16 @@ export interface NativeMemorySurfacerConfig {
   enabled?: boolean;
   /** 显式指定 memory 目录;不指定则按 cwd 推断 (fallback 到 home memory) */
   memoryDir?: string;
-  /** 单次注入最多展示的文件数,默认 5 */
+  /** 单次注入最多展示的文件数,默认 12（v6.1.9 起从 5 → 12，让更多 .md 进 surface） */
   maxFiles?: number;
   /** 单文件 description 截断长度,默认 80 */
   descriptionMaxChars?: number;
-  /** 评分阈值 (0-1),低于此分数的文件不进入 surface,默认 0.15 */
+  /** 评分阈值 (0-1),低于此分数的文件不进入 surface,默认 0.05（v6.1.9 起从 0.15 → 0.05，REFERENCE/USER 类也能 surface） */
   threshold?: number;
+  /** v6.1.9: cwd 匹配额外加权（默认 0.2，让项目目录相关 .md 优先） */
+  cwdRelevanceBoost?: number;
+  /** v6.1.9: 近 7 天文件额外加权（默认 0.1，让最近编辑的 .md 优先） */
+  ageRecencyBoost?: number;
   debug?: boolean;
 }
 
@@ -180,6 +184,8 @@ function scoreFile(
   meta: MemoryFileMeta,
   cwdTokens: Set<string>,
   remoteTokens: Set<string>,
+  cwdRelevanceBoost: number = 0.2,
+  ageRecencyBoost: number = 0.1,
 ): number {
   const haystack = [meta.name, meta.description, meta.basename]
     .filter(Boolean)
@@ -198,14 +204,16 @@ function scoreFile(
 
   let score = 0;
   const denom = Math.min(fileTokens.length, 8);
-  if (cwdTokens.size > 0) score += (cwdHits / denom) * 0.45;
+  // v6.1.9: cwdRelevanceBoost 从 hardcoded 0.45 提到可配置（默认 0.2 + 0.45 = 0.65 总加权）
+  if (cwdTokens.size > 0) score += (cwdHits / denom) * (0.45 + cwdRelevanceBoost);
   if (remoteTokens.size > 0) score += (remoteHits / denom) * 0.35;
 
   score += TYPE_WEIGHT[meta.type ?? ""] ?? 0.05;
 
+  // v6.1.9: ageRecencyBoost 从 hardcoded 0.1 提到可配置（默认 0.1，近 7 天加倍 → 0.2）
   const ageDays = (Date.now() - meta.mtimeMs) / 86_400_000;
-  if (ageDays <= 7) score += 0.1;
-  else if (ageDays <= 30) score += 0.05;
+  if (ageDays <= 7) score += ageRecencyBoost * 2; // 近 7 天 2x 加权
+  else if (ageDays <= 30) score += ageRecencyBoost * 0.5; // 近 30 天 0.5x
 
   return Math.min(1, score);
 }
@@ -244,9 +252,15 @@ export function registerNativeMemorySurfacer(
     return;
   }
 
-  const maxFiles = config?.maxFiles ?? 5;
+  // v6.1.9: 默认值松绑——从「5 文件 / 0.15 阈值」改成「12 文件 / 0.05 阈值」。
+  // 触发：用户报"第二天失忆"。诊断：用户有 37 个 .md 但 REFERENCE(0.1)/USER(0.15) 类
+  // 权重突破不了 0.15 阈值 → 72% 文件不被 surface → LLM 上下文残缺。
+  // 新默认让 ≥10 个 .md 进 surface，覆盖 user 偏好/project 进度/reference 文档全部类型。
+  const maxFiles = config?.maxFiles ?? 12;
   const descriptionMaxChars = config?.descriptionMaxChars ?? 80;
-  const threshold = config?.threshold ?? 0.15;
+  const threshold = config?.threshold ?? 0.05;
+  const cwdRelevanceBoost = config?.cwdRelevanceBoost ?? 0.2;
+  const ageRecencyBoost = config?.ageRecencyBoost ?? 0.1;
   const debug = config?.debug === true;
 
   const surfacedSessions = new Map<string, number>();
@@ -268,7 +282,7 @@ export function registerNativeMemorySurfacer(
     const remoteTokens = new Set(tokenize(readGitRemoteText(cwd)));
 
     const scored = entries
-      .map((meta) => ({ meta, score: scoreFile(meta, cwdTokens, remoteTokens) }))
+      .map((meta) => ({ meta, score: scoreFile(meta, cwdTokens, remoteTokens, cwdRelevanceBoost, ageRecencyBoost) }))
       .filter(({ score }) => score >= threshold)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
@@ -298,6 +312,6 @@ export function registerNativeMemorySurfacer(
   });
 
   api.logger.info(
-    `[enhance] 原生记忆 surface 模块已加载 (dir=${memoryDir}, maxFiles=${maxFiles}, threshold=${threshold})`,
+    `[enhance] 原生记忆 surface 模块已加载 (dir=${memoryDir}, maxFiles=${maxFiles}, threshold=${threshold}, cwdBoost=${cwdRelevanceBoost}, ageBoost=${ageRecencyBoost})`,
   );
 }

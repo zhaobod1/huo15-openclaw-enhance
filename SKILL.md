@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.1.8 — bot-share prompt supplement 翻转：按大小分流（小文件优先渠道本地直发如 wecom MEDIA:、大文件才走 enhance_share_file 链接）。v6.1.3 当时怀疑 stream 截断把 share_file 设为强制，wecom v2.8.23/24 修了群聊主动推送通道 + UI 锁交互后渠道本地直发稳定可靠，翻转回直发优先 + 新增决策表 + 用户偏好覆盖。继承 v6.1.7 pickModel capability 验证、v6.1.6 quota-aware 即时切换、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.1.8
+description: "火一五·克劳德·龙虾增强插件 v6.1.9 — 修第二天失忆：(A) session-bridge 窗口 3x 扩容（8msg→20msg、4KB→12KB、48h→72h）跨夜上下文不丢；(B) native-memory-surfacer 松绑（maxFiles 5→12、threshold 0.15→0.05、加 cwdBoost+ageBoost）让 user/reference 类 .md 也能 surface。继承 v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.1.9
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

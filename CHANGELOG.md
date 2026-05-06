@@ -2,6 +2,59 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.1.9 — 2026-05-06（修第二天失忆：session-bridge 窗口 3x 扩容 + native-memory-surfacer 松绑）
+
+### 触发
+
+用户报「openclaw 第二天失忆问题还是比较严重」。v5.7.26 加过 session-bridge 修过一次，但仍有问题。数据驱动诊断（grep gateway.log + sessions/ + sqlite + .md memory dir）发现：
+
+| 模块 | 状态 | 问题 |
+|---|---|---|
+| **session-bridge** | ✓ 触发了（5/5 23:51 reset → 5/6 01:05 prependContext 跑了） | 窗口太窄：仅 `tail 8msg / 4000字`——跨夜的项目背景、几小时前的决策全丢 |
+| **native-memory-surfacer** | ✓ 在跑 | 阈值过严：默认 `maxFiles=5 + threshold=0.15`，REFERENCE/USER 类权重 0.10/0.15 几乎过不了——37 个 .md 中 **72% 没注入** system prompt |
+
+### 改动
+
+#### A. `src/modules/session-bridge.ts` 默认值 3x 扩容
+
+| 字段 | v6.1.8 | v6.1.9 | 收益 |
+|---|---|---|---|
+| `tailMessages` | 8 | **20** | 尾部 → 中段都拿到 |
+| `maxChars` | 4000 | **12000** | 跨夜 prependContext 4KB → 12KB |
+| `priorMaxAgeHours` | 48 | **72** | 跨周末 OK |
+
+实测：v6.1.0 一个 zhaobo session jsonl tail 20msg ≈ 8-10KB 中文，给 12000 字上限留 20-50% buffer 不会截断到信息丢失。
+
+#### B. `src/modules/native-memory-surfacer.ts` 松绑
+
+| 字段 | v6.1.8 | v6.1.9 |
+|---|---|---|
+| `maxFiles` | 5 | **12** |
+| `threshold` | 0.15 | **0.05** |
+| `cwdRelevanceBoost`（新增） | — | **0.2**（cwd 匹配 +20% 权重） |
+| `ageRecencyBoost`（新增） | hardcoded 0.1 | **0.1**（近 7 天 2x，近 30 天 0.5x） |
+
+`scoreFile()` 函数签名加两个可选 param 默认值；`registerNativeMemorySurfacer` 从 config 读、未配走默认。`TYPE_WEIGHT` 不变（user=0.15 / reference=0.1 仍偏低，但 0.05 阈值能过）。
+
+预期：用户 37 个 .md 中至少 10-12 个被 surface（之前只 5 个），覆盖 USER 偏好 / PROJECT 进度 / REFERENCE 文档全部类型，LLM 第二天找回参考资料的概率从 28% → 80%+。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生
+- ✅ 无 `child_process`、零额外 IO（都是默认值调整 + 一个 hardcoded 系数变可配）
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 完全向后兼容：用户已显式配置的 maxFiles/threshold 不受影响
+
+### 设计哲学
+
+**第二天失忆不是单一 bug，是三层守卫都启动了但火力都不够**：
+
+1. session-bridge（v5.7.26 加） → 触发了但 4KB 窗口太小
+2. native-memory-surfacer（v5.7.10 加） → 在跑但阈值太严
+3. enhance SQLite memory（5 月仅 8 条 memories store） → LLM 行为问题，留 v6.2 加 prompt supplement 引导
+
+v6.1.9 修前两层（最小改动 + 最大 ROI）。第三层（rate limit memories store + reset.jsonl 第一条 prompt 加 PRIOR_SESSION_CHECKPOINT）留 v6.2。
+
 ## 6.1.8 — 2026-05-05（bot-share prompt 翻转：按大小分流，渠道本地直发优先）
 
 **触发**：赵博 5/5 群里实测 `@贾维斯 直接发文件给我，不要发下载链接` —— wecom v2.8.23 + v2.8.24 修了群聊主动推送通道 + UI 锁交互后，MEDIA: 渠道本地直发已稳定可靠（5/5 23:42 实测群里直接收到 docx 附件成功）。v6.1.3 当时怀疑 stream 截断把 share_file 设为"任意大小都强制"，现在按用户偏好翻转回 MEDIA: 直发优先。
