@@ -2,6 +2,61 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.2.0 — 2026-05-06（第二天失忆三层守卫第二期：memory store 强引导 + PRIOR_SESSION_CHECKPOINT banner）
+
+### 触发
+
+v6.1.9 修了第二天失忆的前两层（session-bridge 窗口 + surfacer 阈值），但诊断还指出**第三层**问题：
+
+- **enhance SQLite `memories` 表低写入**：5 月以来只 8 条记录 vs 146 章节，**LLM 几乎没主动调过 store 工具**——chapters 是自动 hook 写入的（session_start/end/subagent_*）；memories 是 LLM 主动 store 的。原 prompt supplement 只一句"提供分类记忆"，LLM 知道工具但不知何时该调。
+- **session-bridge 注入了但 LLM 不知道是历史**：v5.7.26 + v6.1.9 都塞了 prependContext，但 LLM 不知是"昨天的延续"还是"当下要回应的新内容"——被动用、不主动检索完整 jsonl。
+
+### 改动
+
+#### A. memory-integrator prompt supplement 强化（按 v5.7.27 给 enhance_share_file 同款套路）
+
+`src/modules/memory-integrator.ts:343-373`：
+
+之前 1 行说明 → 升级为 12 行明确引导：
+- 工具签名 + corpus 集成解释
+- **应主动 store 的 5 类**：`decision` / `project` / `user` / `feedback` / `reference`，每类配具体场景例子 + importance 范围
+- **判据**：『下次 reset / 第二天 / 跨会话被问到时是否要重新解释一遍？』是 → store
+- **anti-pattern**：纯过程性 tool result / 临时变量 / 含敏感凭据 / 可重新计算的内容 —— 不要 store
+- 跟章节标记互补关系：章节是『何时发生』，store 是『是什么、为什么、怎么用』
+
+预期：从 8 条/月 → 几十-上百条/月，构建真正的"长期记忆"。
+
+#### B. session-bridge PRIOR_SESSION_CHECKPOINT banner
+
+`src/modules/session-bridge.ts:buildBridgeText`：
+
+| 维度 | v6.1.9 之前 | v6.2.0 |
+|---|---|---|
+| 标题 | `【会话桥接 — 上次会话末尾】` | `🔄 PRIOR_SESSION_CHECKPOINT —— 上一段会话的尾段` |
+| 明确性 | 隐含"是历史" | **明示**"这是历史延续，不是用户当下的新请求" |
+| 完整 jsonl 路径 | 缺（只显前 8 字符 sessionId） | ✓ 完整路径 + 提示需要更多上下文可主动 Read |
+| 使用建议 | 缺 | 3 条：① 不主动 echo/复述 ② 需更多上下文 Read 完整文件 ③ 重要决策 store 到分类记忆 |
+| 截断提示 | "用 enhance_transcript_search 检索" | + 加"或 Read 完整 jsonl"二选一 |
+
+预期：LLM 看到 PRIOR_SESSION_CHECKPOINT 字面 banner 立即知道"这是历史"——不会困惑、不会主动 echo；需要更多时主动 Read 完整文件（>>> 12KB 的 prependContext）。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生
+- ✅ 无 `child_process`、零额外 IO（都是 prompt 文本调整）
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ supplement 仅在 `availableTools.has("enhance_memory_store")` 时注入（capability detection），enhance 单装 / 多 agent 场景不破坏
+
+### 设计哲学
+
+第二天失忆的"三层守卫"模型：
+
+1. **session-bridge**（v5.7.26 加 → v6.1.9 扩容到 12KB → v6.2.0 加 banner 明示历史身份）
+2. **native-memory-surfacer**（v5.7.10 加 → v6.1.9 松绑到 12 文件）
+3. **memory store 行为**（v6.2.0 强引导补完）
+
+三层互补、各司其职：bridge 抢救最近会话尾、surfacer 把 .md 锚点 surface、store 攒长期记忆。**任一层失火都会"第二天失忆"**——v6.2.0 完成全套加固。
+
 ## 6.1.9 — 2026-05-06（修第二天失忆：session-bridge 窗口 3x 扩容 + native-memory-surfacer 松绑）
 
 ### 触发

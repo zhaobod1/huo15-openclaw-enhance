@@ -339,17 +339,34 @@ export function registerMemoryIntegrator(
     );
   }
 
-  // 可选：在 memory system prompt 里追加一行说明（仅当龙虾暴露此 API）
+  // v6.2.0 ⭐ 强化 prompt supplement：引导 LLM **主动**调 enhance_memory_store
+  //
+  // 实测痛点：用户机器 5 月以来 memories 表仅 8 条记录（vs 146 章节）—— LLM 几乎没
+  // 主动用过 store 工具，导致跨 session 长期"遗忘"。原 supplement 只是简单一行
+  // "提供分类记忆"——LLM 知道有这工具但不知**何时该调**。本次升级按 v5.7.27 给
+  // enhance_share_file 强约束的同款套路：列具体场景 + 给可执行的判据。
+  //
   if (typeof api.registerMemoryPromptSupplement === "function") {
     try {
       api.registerMemoryPromptSupplement(({ availableTools }) => {
-        if (availableTools.has("enhance_memory_search") || availableTools.has("enhance_memory_store")) {
-          return [
-            "- `enhance_memory_*` 工具提供分类记忆（user/project/feedback/reference/decision）；已通过 corpus supplement 并入 `memory` 搜索结果。",
-          ];
+        if (!availableTools.has("enhance_memory_store") && !availableTools.has("enhance_memory_search")) {
+          return [];
         }
-        return [];
+        return [
+          "## 长期记忆（强引导，主动 store）",
+          "- `enhance_memory_store(category, content, tags?, importance?)` 把『这次会话产生的、未来跨 session 还会用上的事实』写进分类记忆，下次自动召回。`enhance_memory_search` 取出。已通过 corpus supplement 并入龙虾原生 `memory` 搜索结果。",
+          "- **应主动 store 的 5 类 + 判据**：",
+          "  · `decision` 重要决策：会议结论、技术选型、版本号 bump、red line 解释（importance 6-8）",
+          "  · `project` 项目进度：当前架构、模块边界、todo 清单、里程碑（importance 4-6）",
+          "  · `user` 用户偏好：「ZhaoBo 喜欢中文回复」「不要在群里发 @all」（importance 5-7）",
+          "  · `feedback` 用户反馈：踩坑、报错、抱怨、复盘要点（importance 5-8）",
+          "  · `reference` 长期参考：API endpoint、命令清单、第三方约定、官方文档摘要（importance 3-5）",
+          "- **判据**：「下次 reset / 第二天 / 跨会话被问到时是否要重新解释一遍？」是 → store；否则 → 不必。",
+          "- **anti-pattern**（不要 store）：纯过程性 tool result（已在 trajectory）、当前 session 临时变量、含敏感凭据/token、可重新计算的内容。",
+          "- 跟章节标记互补：章节是『何时发生』，store 是『是什么、为什么、怎么用』。两者都不要忽略——都不写就是『第二天失忆』的根因之一。",
+        ];
       });
+      api.logger.info("[enhance] memory prompt supplement v6.2 已注册（强引导主动 store + 5 类场景 + anti-pattern）");
     } catch (err) {
       api.logger.warn(`[enhance] prompt supplement 注册失败: ${err}`);
     }

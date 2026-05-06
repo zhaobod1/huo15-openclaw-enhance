@@ -220,9 +220,28 @@ function buildBridgeText(
 ): string {
   if (msgs.length === 0) return "";
   const ageStr = fmtAge(Date.now() - prior.mtimeMs);
+  const lastMsgTime = msgs[msgs.length - 1]?.timestamp
+    ? fmtTimestamp(msgs[msgs.length - 1].timestamp)
+    : "";
+  // v6.2.0 ⭐ PRIOR_SESSION_CHECKPOINT banner：明确告诉 LLM 这是"延续"，不是"当下要回应的新内容"。
+  // 实测痛点：v5.7.26 + v6.1.9 注入了 prependContext 但 LLM 不知是历史 → 被动用、不主动检索。
+  // 给清晰 banner + 完整 jsonl 路径，让 LLM 知道：① 这是上一段的尾段 ② 需要更多上下文可以 Read 整个文件。
   const lines: string[] = [
-    `【会话桥接 — 上次会话末尾（${ageStr}，共 ${msgs.length} 条 message）】`,
-    `（当前 session 因 reset/compact 与上下文断开，自动从 .jsonl.reset.${prior.sessionId.slice(0, 8)}… 拉回最后几轮原始对话）`,
+    "🔄 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    `   PRIOR_SESSION_CHECKPOINT —— 上一段会话的尾段（${ageStr}）`,
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "",
+    `当前 session 因 OpenClaw runtime 硬 reset / compact 跟上文断了。enhance session-bridge 自动从前一个 session 文件拉回最后 ${msgs.length} 条 user/assistant 原始对话——**这是历史延续，不是用户当下的新请求**。`,
+    "",
+    `**前 session 完整文件**（需要中段/决策/tool result 时 Read 这个）：\`${prior.filePath}\``,
+    lastMsgTime ? `**最后一条消息时间**：${lastMsgTime}` : "",
+    "",
+    "**使用建议**：",
+    "1. 用户没明示『延续昨天的话题』时，先把这段当作背景理解，不要主动 echo / 复述",
+    "2. 需要更多上下文 → 主动 Read 上面那个完整 jsonl 文件（或 enhance_transcript_search）",
+    "3. 重要决策 / 进展 / 用户偏好 → 调 `enhance_memory_store` 记到分类记忆，避免下次 reset 又得重新拉",
+    "",
+    "──── 历史尾段 message ────",
     "",
   ];
   let acc = lines.join("\n").length;
@@ -230,15 +249,17 @@ function buildBridgeText(
     const head = `· [${m.role}${m.timestamp ? `@${fmtTimestamp(m.timestamp)}` : ""}]`;
     const piece = `${head} ${m.text}`;
     if (acc + piece.length + 1 > totalCharCap) {
-      lines.push("…(后续被字数上限截断；用 enhance_transcript_search 检索完整内容)");
+      lines.push("");
+      lines.push("…（后续被字数上限截断；需要全文请 Read 上面那个完整 jsonl 文件，或调 enhance_transcript_search）");
       break;
     }
     lines.push(piece);
     acc += piece.length + 1;
   }
   lines.push("");
+  lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   lines.push(
-    "(@huo15/openclaw-enhance session-bridge 自动注入；可在 enhance.sessionBridge.enabled=false 关闭)",
+    "(由 @huo15/openclaw-enhance session-bridge 自动注入；可在 enhance.sessionBridge.enabled=false 关闭)",
   );
   return lines.join("\n");
 }

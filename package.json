@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.1.9",
+  "version": "6.2.0",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.1.9 — 修第二天失忆问题：(A) session-bridge 窗口 3x 扩容（tailMessages 8→20、maxChars 4000→12000、priorMaxAgeHours 48→72），跨夜会话上下文从 4KB → 12KB；(B) native-memory-surfacer 松绑（maxFiles 5→12、threshold 0.15→0.05、新增 cwdRelevanceBoost + ageRecencyBoost），让 user/reference 类 .md 也能被 surface（用户实测 37 个 .md 之前只 surface 5 个，72% 没注入）。继承 v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.2.0 — 第二天失忆三层守卫第二期：(A) memory-integrator prompt supplement 强化引导 LLM 主动调 enhance_memory_store，列 5 类应 store 场景（decision/project/user/feedback/reference）+ 判据 + anti-pattern（解决用户 5 月以来 memories 表仅 8 条记录的低写入痛点）；(B) session-bridge prependContext 注入升级——加 PRIOR_SESSION_CHECKPOINT 明确 banner + 完整 jsonl 文件路径，让 LLM 知道这是历史延续而非新请求，需要中段/决策可主动 Read 完整文件。继承 v6.1.9 session-bridge 3x 扩容 + native-memory-surfacer 松绑、v6.1.8 bot-share、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由。",
   "type": "module",
   "main": "index.ts",
   "openclaw": {

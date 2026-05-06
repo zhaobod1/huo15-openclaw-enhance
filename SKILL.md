@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.1.9 — 修第二天失忆：(A) session-bridge 窗口 3x 扩容（8msg→20msg、4KB→12KB、48h→72h）跨夜上下文不丢；(B) native-memory-surfacer 松绑（maxFiles 5→12、threshold 0.15→0.05、加 cwdBoost+ageBoost）让 user/reference 类 .md 也能 surface。继承 v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.1.9
+description: "火一五·克劳德·龙虾增强插件 v6.2.0 — 第二天失忆三层守卫第二期：(A) memory-integrator prompt supplement 升级强引导 LLM 主动调 enhance_memory_store（5 类场景 + 判据 + anti-pattern）；(B) session-bridge 注入加 PRIOR_SESSION_CHECKPOINT banner + 完整 jsonl 文件路径让 LLM 主动 Read 拿全。继承 v6.1.9 session-bridge 3x 扩容 + surfacer 松绑、v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.2.0
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
