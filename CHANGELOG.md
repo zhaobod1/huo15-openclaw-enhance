@@ -2,6 +2,57 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.2.1 — 2026-05-06（memory supplement token 优化：12 行 → 3 行，省 350 token/call）
+
+### 触发
+
+用户反馈："不要拖慢 OpenClaw 速度，也不要增加太多 token 消耗负担"。
+
+精确分析 v6.2.0 token 开销：
+
+| 模块 | 字符数 | token 估算 | 触发频率 | 月度（按 100K 调用） |
+|---|---|---|---|---|
+| **A. memory supplement**（v6.2.0 加） | ~800 | ~500 token | **每次 LLM 调用** | ~5000 万 token |
+| B. PRIOR_SESSION_CHECKPOINT banner | ~700 | ~450 token | reset 后偶发（1-3 次/天） | ~30K-90K token |
+
+A 部分**每次 LLM 调用 +500 token** —— 按 deepseek-v4-pro $1.74/M 估，月度浪费 ~$52。
+
+虽有 prompt cache 缓解（5min TTL，命中后 0.1x 成本），但：
+- 不连续会话每次重建 cache
+- multi-agent 场景互不复用
+- supplement 任何变动让所有 cache 失效
+
+### 改动
+
+`src/modules/memory-integrator.ts:342-373`：12 行 → 3 行精简版
+
+| 维度 | v6.2.0 | v6.2.1 |
+|---|---|---|
+| 行数 | 12 行 | **3 行** |
+| 字符数 | ~800 | **~220** |
+| token | ~500 | **~150** |
+| 月度成本（100K calls）| ~$52 | **~$16** |
+| 引导力度 | ★★★★★ | ★★★ |
+
+**保留**：工具签名 + 5 类枚举 + 判据 + 召回方式
+
+**去掉**：每类的具体场景例子（LLM 训练时本就懂）、importance 范围（让 LLM 自己判断）、anti-pattern 详述（trajectory 里有 LLM 不会重复 store）、章节互补关系（cross-reference 浪费 token）
+
+### 设计哲学
+
+prompt supplement 是**每次 LLM 调用都加的**——成本敏感。设计原则：
+
+1. **保留 LLM 训练里没有的信息**（你的工具名、5 类 schema、判据）
+2. **去掉 LLM 训练里已有的常识**（不要 store 临时变量、importance 数值范围这些）
+3. **观察后调**：先精简发版，看实测 memories 写入率。如果 ★★★ 引导够用 → 保持；如果 LLM 仍不主动 store → 加回 1-2 行最关键引导（不是恢复全部 12 行）
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心、不复制龙虾原生
+- ✅ 无 `child_process`、零额外 IO
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 完全向后兼容（仅 prompt 文本调整，行为不变）
+
 ## 6.2.0 — 2026-05-06（第二天失忆三层守卫第二期：memory store 强引导 + PRIOR_SESSION_CHECKPOINT banner）
 
 ### 触发

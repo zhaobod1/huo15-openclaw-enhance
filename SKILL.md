@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.2.0 — 第二天失忆三层守卫第二期：(A) memory-integrator prompt supplement 升级强引导 LLM 主动调 enhance_memory_store（5 类场景 + 判据 + anti-pattern）；(B) session-bridge 注入加 PRIOR_SESSION_CHECKPOINT banner + 完整 jsonl 文件路径让 LLM 主动 Read 拿全。继承 v6.1.9 session-bridge 3x 扩容 + surfacer 松绑、v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.2.0
+description: "火一五·克劳德·龙虾增强插件 v6.2.1 — memory supplement token 优化（500→150 token/call，月度 ~$52→~$16），保留 5 类枚举 + 判据。继承 v6.2.0 第二天失忆三层守卫第二期：(A) memory-integrator prompt supplement 升级强引导 LLM 主动调 enhance_memory_store（5 类场景 + 判据 + anti-pattern）；(B) session-bridge 注入加 PRIOR_SESSION_CHECKPOINT banner + 完整 jsonl 文件路径让 LLM 主动 Read 拿全。继承 v6.1.9 session-bridge 3x 扩容 + surfacer 松绑、v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.2.1
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
