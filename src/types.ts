@@ -401,6 +401,13 @@ export interface EnhancePluginConfig {
   modelRouter?: ModelRouterConfig;
   /** v6.1.5: 蓝火 / cc-media-bridge dashboard 引导 — capability detection by ~/.openclaw-media-bridge */
   ccBridgePrompt?: { enabled?: boolean };
+  /**
+   * v6.x: 蓝火预查询 hook（真 harness 反幻觉）—
+   * before_prompt_build 检测"蓝火+任务/列表/历史"模式 → 自动 fetch /cc-sessions
+   * 把真实数据注入 system prompt 作为 prependContext。LLM 不需"决定要不要调工具"
+   * = 杜绝 hallucinate cc-YYYYMMDD task ID。
+   */
+  ccBridgePreFetch?: { enabled?: boolean };
 }
 
 /**

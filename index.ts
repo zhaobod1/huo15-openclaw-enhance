@@ -46,6 +46,7 @@ import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
+import { registerCcBridgePreFetch } from "./src/modules/cc-bridge-pre-fetch.js";
 import { registerModelRouter } from "./src/modules/model-router.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
@@ -326,6 +327,16 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.ccBridgePrompt?.enabled !== false,
         load: () => registerCcBridgePrompt(api),
+      },
+      {
+        // v6.x: 蓝火预查询 hook（真 harness 反幻觉）
+        // before_prompt_build 检测"蓝火+任务/列表/历史"模式 → 自动 fetch /cc-sessions
+        // 把真实数据注入 system prompt 作为 prependContext，LLM 不需"决定要不要调工具"
+        // = 杜绝 hallucinate cc-YYYYMMDD task ID 编造列表
+        name: "蓝火预查询 (反幻觉)",
+        tier: 1,
+        enabled: config.ccBridgePreFetch?.enabled !== false,
+        load: () => registerCcBridgePreFetch(api),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {
