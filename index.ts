@@ -47,6 +47,7 @@ import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
 import { registerCcBridgePreFetch } from "./src/modules/cc-bridge-pre-fetch.js";
+import { registerCcBridgeDispatchHarness } from "./src/modules/cc-bridge-dispatch-harness.js";
 import { registerModelRouter } from "./src/modules/model-router.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
@@ -337,6 +338,16 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.ccBridgePreFetch?.enabled !== false,
         load: () => registerCcBridgePreFetch(api),
+      },
+      {
+        // v6.x: 蓝火派活 harness（强制真原生 CC 会话）
+        // before_prompt_build 检测"蓝火+动词"模式 → 注入硬约束 + 设 90s session lockdown
+        // before_tool_call 在 lockdown 窗口拦 sessions_spawn / Task / spawn_task / exec claude
+        // = 钉死"蓝火 dispatch 必走 Bash cc-media-task"，杜绝 ACP/子 agent 截胡
+        name: "蓝火派活 harness",
+        tier: 1,
+        enabled: config.ccBridgeDispatchHarness?.enabled !== false,
+        load: () => registerCcBridgeDispatchHarness(api),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

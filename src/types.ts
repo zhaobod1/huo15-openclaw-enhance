@@ -408,6 +408,14 @@ export interface EnhancePluginConfig {
    * = 杜绝 hallucinate cc-YYYYMMDD task ID。
    */
   ccBridgePreFetch?: { enabled?: boolean };
+  /**
+   * v6.x: 蓝火派活 harness（hook 级钉死"真原生 CC 会话"）—
+   * before_prompt_build 检测"蓝火+动词"模式 → 设 90s session lockdown + 注入硬约束。
+   * before_tool_call 在 lockdown 窗口拦 sessions_spawn / Task / spawn_task / exec
+   * claude，强迫 LLM 走 Bash cc-media-task。配合 ccBridgePreFetch（query 侧）形成
+   * "读+写"两侧 harness 闭环。
+   */
+  ccBridgeDispatchHarness?: { enabled?: boolean };
 }
 
 /**
