@@ -1,12 +1,12 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.4.0",
+  "version": "6.4.1",
   "publishConfig": {
     "access": "public"
   },
   "description": "火一五·克劳德·龙虾增强插件 v6.2.1 — memory supplement token 优化：v6.2.0 把 supplement 从 1 行扩到 12 行（~500 token/call）成本太高，按用户反馈精简到 3 行（~150 token/call）保留核心 5 类枚举 + 判据，去掉详情/反例/具体例子（这些 LLM 训练时本就有常识）。月度成本从 ~$52 → ~$16（按 100K 调用、deepseek-v4-pro $1.74/M 估）。继承 v6.2.0 第二天失忆三层守卫：(A) memory-integrator prompt supplement 强化引导 LLM 主动调 enhance_memory_store，列 5 类应 store 场景（decision/project/user/feedback/reference）+ 判据 + anti-pattern（解决用户 5 月以来 memories 表仅 8 条记录的低写入痛点）；(B) session-bridge prependContext 注入升级——加 PRIOR_SESSION_CHECKPOINT 明确 banner + 完整 jsonl 文件路径，让 LLM 知道这是历史延续而非新请求，需要中段/决策可主动 Read 完整文件。继承 v6.1.9 session-bridge 3x 扩容 + native-memory-surfacer 松绑、v6.1.8 bot-share、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由。",
   "type": "module",
-  "main": "index.ts",
+  "main": "./dist/index.js",
   "openclaw": {
     "extensions": [
       "./index.ts"
@@ -24,8 +24,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "release": "bash scripts/release.sh",
-    "prepublishOnly": "npm run typecheck",
-    "postinstall": "node scripts/postinstall.cjs"
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "postinstall": "node scripts/postinstall.cjs",
+    "build": "tsc && cp package.json dist/ && cp openclaw.plugin.json dist/ 2>/dev/null || true"
   },
   "keywords": [
     "openclaw",
@@ -53,7 +54,8 @@
     "openclaw.plugin.json",
     "src/**/*",
     "templates/**/*",
-    "scripts/**/*"
+    "scripts/**/*",
+    "dist/**/*"
   ],
   "repository": {
     "type": "git",
