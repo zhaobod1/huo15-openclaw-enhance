@@ -231,8 +231,21 @@ interface SessionUsage {
   estimatedCostUSD: number;
   /** v6.6.0 P1-4：是否已发出过预算警告 banner（防抖；月度预算 ≥80% 时一次性） */
   budgetWarnedAt?: number;
+  /**
+   * v6.6.1 P3-13：最近见过的 runId 集合（bounded，最多 SEEN_RUNIDS_LIMIT 个 FIFO）。
+   * 防止龙虾 model-fallback retry 时 llm_output 同 runId 来两次导致 token/cost 重复累加。
+   * 仅内存（重启后置空 — retry 风险也消失）。
+   */
+  seenRunIds: Set<string>;
+  /**
+   * v6.6.1 P2-10：mute 截止时间戳（ms）。在此之前 before_prompt_build 不发任何 banner
+   * （revert / threshold / prediction / budget 都跳过）。仅内存，重启自动解除。
+   */
+  mutedUntilMs?: number;
   lastUpdatedAt: number;
 }
+
+const SEEN_RUNIDS_LIMIT = 20;
 
 const PREDICTION_HISTORY_LEN = 5;
 const PREDICTION_LOOKAHEAD_TURNS = 3;
@@ -564,6 +577,7 @@ export function registerContextWatchdog(
             lastWarnedThreshold: row.last_warned_threshold,
             tokensPerTurnHistory: [], // hydrate 后从 0 重建（不持久化轮次历史避免 schema 复杂化）
             estimatedCostUSD: row.estimated_cost_usd ?? 0,
+            seenRunIds: new Set(),
             lastUpdatedAt: row.last_updated_at,
           };
           sessionPeakPercent.set(sessionKey, row.peak_percent);
@@ -595,6 +609,7 @@ export function registerContextWatchdog(
         lastWarnedThreshold: 0,
         tokensPerTurnHistory: [],
         estimatedCostUSD: 0,
+        seenRunIds: new Set(),
         lastUpdatedAt: Date.now(),
       };
       sessions.set(sessionKey, s);
@@ -621,8 +636,30 @@ export function registerContextWatchdog(
     const agentId = pickAgentId(ctx);
     const modelId = (event as any)?.resolvedRef ?? (event as any)?.model;
     const usageDelta = sumUsage((event as any)?.usage);
+    const runId = String((event as any)?.runId ?? "").trim();
 
     const s = getOrCreate(sessionKey, agentId, modelId);
+
+    // v6.6.1 P3-13: runId 去重防 retry 重复累加
+    // 龙虾 model-fallback 触发 retry 后 llm_output 会再次 emit（同 runId），
+    // 不去重的话 token/cost 会被算两次
+    if (runId) {
+      if (s.seenRunIds.has(runId)) {
+        if (debug) {
+          api.logger.info(
+            `[ctx-watchdog] retry detected runId=${runId} | session=${sessionKey.slice(0, 12)} — skipping (dedup)`,
+          );
+        }
+        return;
+      }
+      s.seenRunIds.add(runId);
+      if (s.seenRunIds.size > SEEN_RUNIDS_LIMIT) {
+        // FIFO eviction（Set 保持插入顺序）
+        const first = s.seenRunIds.values().next().value;
+        if (first !== undefined) s.seenRunIds.delete(first);
+      }
+    }
+
     // v6.5.5：本轮 LLM 调用结束 → 清 pendingTokens（事前估算已被真实值替代）
     s.pendingTokens = 0;
     if (usageDelta <= 0) {
@@ -870,6 +907,14 @@ export function registerContextWatchdog(
     const s = sessions.get(sessionKey);
     if (!s) return undefined;
 
+    // v6.6.1 P2-10: mute 期间跳过所有 banner
+    if (s.mutedUntilMs && Date.now() < s.mutedUntilMs) {
+      return undefined;
+    }
+    if (s.mutedUntilMs && Date.now() >= s.mutedUntilMs) {
+      s.mutedUntilMs = undefined; // 过期清掉，避免反复检查
+    }
+
     // v6.5.6 P1-5: 消费 pending revert 建议（compact 后 ctx 降下来 → 建议切回原 model）
     const revertTarget = revertSuggestPending.get(sessionKey);
     if (revertTarget) {
@@ -1025,6 +1070,9 @@ export function registerContextWatchdog(
           avgTokensPerTurn: s.tokensPerTurnHistory.length > 0
             ? Math.round(s.tokensPerTurnHistory.reduce((a, b) => a + b, 0) / s.tokensPerTurnHistory.length)
             : undefined,
+          // v6.6.1 新字段
+          mutedUntilMs: s.mutedUntilMs && Date.now() < s.mutedUntilMs ? s.mutedUntilMs : undefined,
+          seenRunIdsCount: s.seenRunIds.size,
         };
       },
     }) as any,
@@ -1203,6 +1251,43 @@ export function registerContextWatchdog(
     { tier: "tools" } as any,
   );
 
+  // ── tool 5: enhance_ctx_silence（v6.6.1 P2-10）静音 ctx 提醒 N 分钟 ──
+  // 用户嫌 70%-85% 阶段反复提醒烦时调；mute 期间所有 banner（revert / threshold /
+  // prediction / budget）都跳过。仅内存（重启自动解除，避免持久化静音错过真正风险）。
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_ctx_silence",
+      description: "静音上下文守护的 banner 提醒 N 分钟。mute 期间所有 banner（revert/threshold/prediction/budget）都跳过；过期自动解除；重启也自动解除。仅在用户明确表示烦提醒时调",
+      inputSchema: Type.Object({
+        minutes: Type.Number({
+          description: "静音分钟数，1-60；默认 15",
+          minimum: 1,
+          maximum: 60,
+        }),
+        reason: Type.Optional(Type.String({ description: "静音原因（log 友好）" })),
+      }),
+      async execute(params: any) {
+        const sessionKey = pickSessionKey(ctx);
+        if (!sessionKey) return { ok: false, reason: "no session key in ctx" };
+        const minutes = Math.max(1, Math.min(60, Number(params?.minutes) || 15));
+        const s = getOrCreate(sessionKey, pickAgentId(ctx));
+        s.mutedUntilMs = Date.now() + minutes * 60 * 1000;
+        const untilStr = new Date(s.mutedUntilMs).toLocaleTimeString("zh-CN");
+        api.logger.info(
+          `[ctx-watchdog] silenced for ${minutes}min until ${untilStr} | reason="${params?.reason ?? '-'}" | session=${sessionKey.slice(0, 12)}`,
+        );
+        return {
+          ok: true,
+          mutedUntilMs: s.mutedUntilMs,
+          mutedUntilLocal: untilStr,
+          minutes,
+          message: `已静音 ${minutes} 分钟（到 ${untilStr} 自动解除）。期间不会有 ctx-watchdog banner。重启后立即解除。`,
+        };
+      },
+    }) as any,
+    { tier: "tools" } as any,
+  );
+
   // ── v6.5.6: 启动期清理 30 天前的 ctx_usage 行（防止 sqlite 无限增长）──
   try {
     const db = getDb();
@@ -1230,6 +1315,6 @@ export function registerContextWatchdog(
   }
 
   api.logger.info(
-    `[enhance] context-watchdog v6.6.0 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | cost+image+subagent+prediction+sqlite all on）`,
+    `[enhance] context-watchdog v6.6.2 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | runId-dedup + silence + cost+image+subagent+prediction+sqlite all on）`,
   );
 }

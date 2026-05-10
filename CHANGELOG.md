@@ -2,6 +2,84 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.2 — 2026-05-11（上下文守护『runId 去重 + 静音工具』bug fix + UX）
+
+### 触发
+
+v6.6.0 上线后，路线图剩余 P3 / P2 项里挑两个最痛的：
+
+1. **P3-13 龙虾 model-fallback retry 重算 bug**：龙虾 `model-fallback.ts:1011` 检测 ctx overflow 后会触发 retry，retry 时 `llm_output` 同一个 `runId` 会**再 emit 一次**——ctx-watchdog 不去重则 token / cost 累加翻倍，预警提前误触发。
+2. **P2-10 用户烦提醒**：70%-85% 阶段 banner 反复出现，长会话用户希望能临时静音，等任务完了再恢复。
+
+### 改动
+
+#### A. P3-13 runId 去重（context-watchdog.ts）
+
+`SessionUsage` 新增字段：
+
+```ts
+seenRunIds: Set<string>;  // bounded 20 FIFO, in-memory only
+```
+
+`llm_output` 入口：
+
+```ts
+const runId = String(event?.runId ?? "").trim();
+if (runId) {
+  if (s.seenRunIds.has(runId)) {
+    // retry 重复 emit — 跳过 (dedup)
+    return;
+  }
+  s.seenRunIds.add(runId);
+  if (s.seenRunIds.size > SEEN_RUNIDS_LIMIT) {
+    // FIFO eviction（Set 保持插入顺序）
+    s.seenRunIds.delete(s.seenRunIds.values().next().value);
+  }
+}
+```
+
+仅内存（不持久化）—— 重启后 retry 风险自动消失，无需 sqlite schema 复杂化。
+
+#### B. P2-10 enhance_ctx_silence 工具
+
+新工具：
+
+```jsonc
+enhance_ctx_silence({ minutes: 1-60, reason?: string })
+// → 返回 mutedUntilMs / mutedUntilLocal
+```
+
+`before_prompt_build` 入口检查：
+
+```ts
+if (s.mutedUntilMs && Date.now() < s.mutedUntilMs) return undefined;
+if (s.mutedUntilMs && Date.now() >= s.mutedUntilMs) s.mutedUntilMs = undefined;
+```
+
+mute 期间所有 banner（revert / threshold / prediction / budget）都跳过。过期自动解除；重启自动解除（仅内存，不持久化，保护用户不错过真正风险）。
+
+`enhance_ctx_status` 工具响应加 `mutedUntilMs` / `seenRunIdsCount` 字段方便排查。
+
+### 红线自查
+
+- ✅ 不修龙虾核心（仅修自己的累加逻辑防 retry）
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ Silence 不持久化 → 重启自动解除，避免静音错过真正风险（红线 #5"诊断不修复"邻位的安全默认）
+
+### 完整路线图状态
+
+v6.5.4 起 16 个完善点已落地 13 个：
+
+| 类 | 完成 | 剩 |
+|---|---|---|
+| P0 | 3/3 | 0 |
+| P1 | 4/4 | 0 |
+| P2 | 4/5 | P2-11/12 dashboard 可视化（依赖 dashboard.ts 改造） |
+| P3 | 2/4 | P3-15 ctx_growth_rate / P3-16 provider-usage 联动 |
+
+剩余 3 项按需启动。ctx-watchdog 主能力已经『跑完一圈』可以稳定服役。
+
 ## 6.6.0 — 2026-05-11（上下文守护『cost-aware + 多模态精算 + channel 差异化』收尾）
 
 ### 触发

@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.0",
+  "version": "6.6.2",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.0 — 上下文守护『cost-aware + 多模态精算 + channel 差异化』：(1) P1-4 cost-aware：18 个 model 单价表 + llm_output 按 (input × in + output × out + cacheRead × 0.1) / 1M 累加 estimatedCostUSD，sqlite v7→v8 持久化；monthlyBudgetUSD ≥80% 时 banner 预算告警 + escalate 偏好低成本 long-ctx；(2) P1-6 多模态精算：每张图按 model 不同 800-1500 token（gemini 800 / gpt 1200 / claude 1500）；(3) P2-8 channel-aware 阈值：群聊 60/75/90 + 单聊 65/80/92 + terminal 沿用 70/85/95，wecom 按 agentId 自动拆 group/direct。继承 v6.5.7 subagent 累加 + 预测式提醒 + v6.5.6 sqlite 持久化 + v6.5.5 真实切换 + v6.5.4 三阶预警。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.6.2 — 上下文守护『runId 去重 + 静音工具』bug fix + UX：(1) P3-13 修 retry 重算 bug — seenRunIds Set 内存去重（bounded 20 FIFO），龙虾 model-fallback retry 时 llm_output 同 runId 二次 emit 跳过累加；(2) P2-10 enhance_ctx_silence({minutes, reason?}) 工具 — 1-60 分钟静音，期间所有 banner（revert/threshold/prediction/budget）跳过，过期自动解除，重启自动解除。enhance_ctx_status 加 mutedUntilMs / seenRunIdsCount 字段。继承 v6.6.0 cost-aware + 多模态精算 + channel 差异化 + v6.5.7 subagent 累加 + 预测式提醒。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
