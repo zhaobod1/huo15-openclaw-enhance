@@ -43,6 +43,7 @@ import { registerSkillRecommender } from "./src/modules/skill-recommender.js";
 import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
+import { registerBotUploadLink } from "./src/modules/bot-upload-link.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
@@ -303,6 +304,17 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.botShare?.enabled !== false,
         load: () => registerBotShareLink(api, config.botShare),
+      },
+      {
+        // v6.5.2: BOT 文件上传桥（用户 → AI 反向兜底，token 化基建）
+        // 与 bot-share-link 镜像对称：share=出站下载，upload=入站上传。
+        // 触发：企微 ≤100MB 限制无法回传给 LLM；用户拿 token URL 浏览器上传任意大小（≤2GB），
+        // LLM 用 enhance_upload_check 拉清单。零新依赖（fetch+octet-stream，不引 multer/busboy）。
+        // 与 large-file-bridge 并行：那个是"hook 检测错误文本→提示链接"，这个是"token 隔离基建"
+        name: "BOT 文件上传",
+        tier: 1,
+        enabled: config.botUpload?.enabled !== false,
+        load: () => registerBotUploadLink(api, config.botUpload, config.botShare),
       },
       {
         // v5.7.26: 跨 reset 自动桥接上次会话末尾对话（修复 5/2 zhaobo 失忆事故）

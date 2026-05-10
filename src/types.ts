@@ -425,6 +425,20 @@ export interface EnhancePluginConfig {
   ccBridgeKeywordDispatch?: { enabled?: boolean };
   /** v6.x: 大文件上传桥接（检测企微 >100MB 错误 + 用户意图 + 上传表单） */
   largeFileBridge?: LargeFileBridgeConfig;
+  /**
+   * v6.5.2: BOT 文件上传桥（用户 → AI 反向兜底，token 化基建）
+   * 与 bot-share-link 镜像对称：bot-share-link = AI → 用户（出站下载链接）
+   * bot-upload-link = 用户 → AI（入站上传链接）。
+   *
+   * 触发：企微（≤100MB）/ 钉钉等渠道无法把大文件传给 LLM（hook/SDK 收不到）。
+   * 用户拿到 token URL 后在浏览器上传任意大文件，LLM 用 enhance_upload_check 拉清单。
+   *
+   * 与 large-file-bridge 区别：
+   *   - large-file-bridge：单一上传端点 /plugins/enhance/upload（无 token 隔离，hook 触发型）
+   *   - bot-upload-link：per-token 隔离目录 + HTML 上传页 + 3 工具，类比 bot-share-link
+   * 二者并行运行，互不干涉。
+   */
+  botUpload?: BotUploadConfig;
 }
 
 /**
@@ -516,6 +530,33 @@ export interface LargeFileBridgeConfig {
   detectWecomError?: boolean;
   /** 用户提大文件/上传相关关键词时主动提供链接，默认 true */
   proactiveOffer?: boolean;
+}
+
+// ── BOT 文件上传桥（v6.5.2，token 化基建，类比 bot-share-link 镜像对称） ──
+/**
+ * 用户 → AI 反向兜底。triggers：
+ *  - 企微等渠道收到 "视频/文件超过 100M，无法下载" 文本
+ *  - 用户主动说"传文件给 LLM"
+ * LLM 调 enhance_upload_link 生成 token URL（24h TTL），用户浏览器打开上传任意大小（默认 ≤2GB），
+ * 用户回复"传完了" → LLM 调 enhance_upload_check 拉清单。
+ *
+ * 落盘：<uploadRoot>/<token>/<basename> + manifest.json。
+ * baseUrl 优先级：env BOT_BASE_URL > pluginConfig.botUpload.baseUrl > http://localhost:18789。
+ *
+ * 零新依赖：用 fetch+octet-stream，不引 multer/busboy。
+ */
+export interface BotUploadConfig {
+  enabled?: boolean;
+  /** 公网 base URL（不含尾部 /）。优先级：env BOT_BASE_URL > 此配置 > http://localhost:18789 */
+  baseUrl?: string;
+  /** 落盘根目录（每 token 一个子目录），默认 ~/.openclaw/upload */
+  uploadRoot?: string;
+  /** URL 路径前缀，默认 /upload */
+  urlPrefix?: string;
+  /** 链接默认过期小时数，默认 24 */
+  expireHours?: number;
+  /** 单文件最大 MB，默认 2048（2GB） */
+  maxFileSizeMB?: number;
 }
 
 export interface NativeMemorySurfacerConfigType {

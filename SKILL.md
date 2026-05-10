@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.2.1 — memory supplement token 优化（500→150 token/call，月度 ~$52→~$16），保留 5 类枚举 + 判据。继承 v6.2.0 第二天失忆三层守卫第二期：(A) memory-integrator prompt supplement 升级强引导 LLM 主动调 enhance_memory_store（5 类场景 + 判据 + anti-pattern）；(B) session-bridge 注入加 PRIOR_SESSION_CHECKPOINT banner + 完整 jsonl 文件路径让 LLM 主动 Read 拿全。继承 v6.1.9 session-bridge 3x 扩容 + surfacer 松绑、v6.1.8 bot-share 翻转、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由（动态 capability 扫描 + image 硬路由 + ctx-aware + channel-aware + circuit breaker）、v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.4.2
+description: "火一五·克劳德·龙虾增强插件 v6.5.2 — BOT 文件上传桥（用户 → AI 反向兜底）+ v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复。bot-upload-link 新模块解企微 100MB 上限：LLM 调 enhance_upload_link 给 token URL，用户浏览器拖拽上传任意大小（≤2GB），LLM 调 enhance_upload_check 拉清单——零新 npm 依赖（fetch+octet-stream），跟 bot-share-link 共享 baseUrl 配置。v6.5.1 蓝火智能体关键词触发器：用户发『蓝火 X』/『@蓝火 X』hook 直接 HTTP POST cc-media-bridge:18790/dispatch 真派活，完全绕开 LLM 决策。v6.4.2 session-bridge 修群聊场景跨夜失忆（chat_id null fallback + 多字段）。继承 v6.2.1 token 优化 + v6.2.0 三层守卫 + v6.1.x 智能路由 + v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.5.2
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

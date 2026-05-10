@@ -2,6 +2,90 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.2 — 2026-05-11（BOT 文件上传桥：用户 → AI 反向兜底，修企微 100MB 上限）
+
+### 触发
+
+5/10 用户实测：群里有人转发 200MB 视频，企微只发系统通知文本『视频/文件超过 100M，无法下载』给 bot——**没附件、没 hook 错误、什么都没**。LLM 看到这段文本但不知该怎么办，直接回了句"没有上下文啊——你要我发哪个 HTML 给我？"
+
+`bot-share-link`（v5.7.22）解决的是**反方向**（AI 发文件 → 用户下载）。这次需要镜像版：用户传文件 → AI 收。
+
+### 改动
+
+新建 `src/modules/bot-upload-link.ts`（~580 行），完全镜像 `bot-share-link` 设计：
+
+| | bot-share-link（已有，v5.7.22）| **bot-upload-link**（新，v6.5.2）|
+|---|---|---|
+| 方向 | AI → 用户（下载） | 用户 → AI（上传） |
+| URL prefix | `/plugins/enhance-share/` | `/plugins/enhance-upload/` |
+| HTTP route | GET 服务文件 | GET HTML 上传页 + GET api/list + POST api/upload |
+| 落盘 | `~/.openclaw/share/files/<token>-<file>` | `~/.openclaw/upload/<token>/files/<file>` |
+| LLM 工具 | `enhance_share_file` | `enhance_upload_link` / `enhance_upload_check` / `enhance_upload_revoke` |
+| 单文件上限 | 500 MB | 2 GB |
+
+**关键设计决策**：
+
+- **零新 npm 依赖**：故意不用 multipart——浏览器 `fetch(url, { body: file })` 自带 octet-stream，服务端 `req.pipe(createWriteStream)` 流式写。完整规避 busboy / formidable 等包的 native binding 风险（红线 #4 child_process 邻位的 binary-binding 红线）。
+- **共享 baseUrl 配置**：跟 bot-share-link 用同一份 `~/.openclaw/share/config.json`——用户配过一次 share 就同时给 upload URL 用，零额外配置。
+- **拖拽上传页**（200 行原生 HTML/JS）：浅色主题 + 多文件 + XHR 进度条 + 深色模式适配。
+- **prompt supplement**（~80 token）：把企微 100MB 系统提示文本字面写进去，LLM 看到立即识别该调 enhance_upload_link。
+
+### 与 v6.5.x large-file-bridge 关系
+
+两个模块**互补共存**，不是替代关系：
+
+| | large-file-bridge（v6.5.0）| bot-upload-link（v6.5.2）|
+|---|---|---|
+| 性质 | hook 触发型 | token 化基建 |
+| 触发 | regex 检测错误文本自动注入 prompt | LLM 调工具按需创建 token |
+| 上传端点 | 单一 `/plugins/enhance/upload`（无隔离）| `/plugins/enhance-upload/<token>`（per-token 目录）|
+| 用途 | "看到错误立即提示链接" | "给具体用户具体场景一个隔离上传位" |
+| 启用 | tier=2 默认 enabled | tier=1 默认 enabled |
+
+LLM 流程：先 large-file-bridge hook 注入提示（"用户传文件超 100M 了，调 enhance_upload_link 给链接"），LLM 看到提示后调 `enhance_upload_link` 拿 token URL 发回去。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心 / 不动 wecom 插件 / 不复制龙虾原生
+- ✅ 无 `child_process`、零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ Token 12-hex sanitizer + filename path traversal 防御 + 单文件 2GB 上限
+- ✅ 24h TTL + lazy 清理过期 token 目录
+- ✅ baseUrl 跟 bot-share-link 完全共享解析逻辑
+- ✅ tier=1 minimal 也启用（渠道兜底类，没了它企微 100MB 场景就死结）
+
+### 三个新工具
+
+| 工具 | 参数 | 用途 |
+|---|---|---|
+| `enhance_upload_link` | `label?`, `expireHours?` | 创建 token + 返回上传 URL |
+| `enhance_upload_check` | `token` | 列该 token 已收到文件 + 路径（用户说"传完了"后调） |
+| `enhance_upload_revoke` | `token` | 立刻删除整个 token 目录 + manifest 条目（处理完不需要时） |
+
+## 6.5.1 — 2026-05-11（蓝火智能体关键词触发器：完全绕开 LLM 决策）
+
+### 触发
+
+v6.4.x 用 hook 拦工具 + 注 prompt 让 LLM 改用 `cc-media-task`——治不住"@贾维斯 帮我 X"这种用户没说"蓝火"的 case。LLM 决策路径太宽，hook 拦不住所有岔路。
+
+用户决断：**"不行，这样不行。你应该把 cc 封装一个智能体。让我用关键词触发这个智能体。让它去干活。"**
+
+### 改动
+
+新建 `src/modules/cc-bridge-keyword-dispatch.ts`（~220 行）：
+
+- 触发正则 `/^[\s　]*@?(?:蓝火|Lanhuo)[\s　:：,，、]+([^\s].{2,1500})$/is`
+- 仅匹配消息开头的"蓝火 X"/"@蓝火 X"，X 至少 3 字
+- 命中即 hook 直接 HTTP POST `cc-media-bridge:18790/dispatch`，桥 `spawn cc-media-task` 秒返 `task_id`
+- hook 注 `prependContext` 让 LLM 只 echo 结果
+- **完全绕开 LLM 决策**：蓝火 = 独立可触发的派活服务，关键词命中即真派活
+
+### 配套（remote 三连击）
+
+- `feat: large-file-bridge`（>100MB 错误检测 + 上传链接引导，commit `ad488719`）
+- `fix: dist/index.js path`（编译产物 `../package.json` 兜底，commit `023dcf13`）
+- `fix: channel 检测从 ctx 获取`（不依赖缓存，commit `57ae93c3`）
+
 ## 6.4.2 — 2026-05-10（session-bridge 修群聊场景失忆：chat_id null fallback + 多字段）
 
 ### 触发

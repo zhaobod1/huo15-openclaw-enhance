@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.5.1",
+  "version": "6.5.2",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.4.2 — session-bridge 修群聊场景失忆：(1) readChatId 多字段 fallback（chat_id/chatid/chatId）+ cwd 兜底；(2) chat_id null 时 fallback 到 mtime 最新策略（agent 目录已 per-agent 隔离，wecom-default-group-XXX 等动态派生 agent 天然属于同一会话伙伴，chat_id 严格匹配反而成为失败点）。修 5/10 用户实测群聊 8 小时跨夜失忆事故——OpenClaw 4.29+ 群聊 jsonl 头里没写 chat_id，session-bridge readChatId 返 null 直接 return undefined，从未注入 prependContext。继承 v6.4.1 + v6.2.1 token 优化 + v6.2.0 PRIOR_SESSION_CHECKPOINT banner + v6.1.9 三层守卫扩容。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.5.2 — BOT 文件上传桥（用户 → AI 反向兜底，token 化基建）。新建 bot-upload-link.ts（~580 行，镜像 bot-share-link 设计）：解决企微 100MB 直传上限——群里转发 200MB 视频，企微只发系统通知文本『视频/文件超过 100M，无法下载』给 bot，没附件没 hook 错误，LLM 一脸懵。LLM 调 enhance_upload_link 生成 token URL，用户浏览器拖拽上传任意大小（默认 ≤2GB），LLM 调 enhance_upload_check 拉清单。零新 npm 依赖（fetch+octet-stream，故意不用 multipart 避 busboy/formidable native binding 风险）。共享 ~/.openclaw/share/config.json 的 baseUrl（用户配过一次同时给 share+upload 用）。继承 v6.5.1 蓝火关键词派活 + v6.4.2 群聊 chat_id 失忆修复 + v6.4.1 dist build + v6.2.x 三层失忆守卫。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
