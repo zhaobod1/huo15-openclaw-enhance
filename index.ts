@@ -15,7 +15,7 @@
  */
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createRequire } from "node:module";
-const pkg = createRequire(import.meta.url)("./package.json") as { version: string };
+const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 import { registerStructuredMemory } from "./src/modules/structured-memory.js";
 import { registerTaskPlanner } from "./src/modules/task-planner.js";
 import { registerToolSafety } from "./src/modules/tool-safety.js";
