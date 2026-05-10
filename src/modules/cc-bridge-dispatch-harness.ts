@@ -35,10 +35,15 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 const BRIDGE_STATE_DIR = ".openclaw-media-bridge";
 
-// 触发"蓝火 + 动词"派活意图的正则——必须命中 trigger 词 + dispatch 动词
+// 触发派活意图的正则 —— 三种命中路径任一即触发：
+//   1. EXPLICIT: 显式"蓝火/虾任务/龙任务/..." + 派活动词
+//   2. AT_BOT: 群聊 @bot 名（@贾维斯/@Jarvis/...）+ 派活动词 — 用户实际最常用的模式
+//   3. PURE_DISPATCH: 长任务关键词（创建/新建/拆分/重构/做一份/帮我.../写一个...）
+// （v6.4.2 扩大）
 const TRIGGER_NOUN = /(蓝火|虾任务|龙任务|发给龙虾|cc[\s-]?task|媒桥)/i;
+const AT_BOT = /@(贾维斯|Jarvis|jarvis|机器人|bot|huo15|蓝火)/i;
 const DISPATCH_VERB =
-  /(帮|做|写|改|继续|优化|创建|生成|制作|分析|修复|修一下|修个|debug|fix|implement|build|create|让.{1,5}做|跑一下|跑一个|跑个)/;
+  /(帮我|帮你|做一|做下|做个|做份|写一|写个|写份|改一|改下|改个|继续|优化|创建|新建|拆分|生成|制作|分析|修复|修一下|修个|搞一|搞下|搞个|搭建|实现|完善|整理|发给我|发我|debug|fix|implement|build|create|让.{1,5}做|跑一下|跑一个|跑个|来一|来个)/;
 
 // 被拦截的"错路"工具名清单（精确匹配，可加 prefix）
 const BLOCKED_TOOLS = new Set<string>([
@@ -83,17 +88,20 @@ function clearLockdown(sessionKey: string | undefined) {
   _lockdown.delete(sessionKey);
 }
 
-function renderHarnessPrompt(): string {
+function renderHarnessPrompt(matchKind: "explicit" | "at_bot"): string {
+  const intro = matchKind === "explicit"
+    ? "用户消息显式含「蓝火 / 虾任务 / 龙任务」+ 派活动词。"
+    : "用户在 IM 群聊 @<bot 名>（贾维斯/Jarvis/...）+ 派活动词——这是**派活意图**，不是闲聊。";
   return [
     "## 🔒 [蓝火 dispatch harness — enhance plugin 自动钉死，不是 LLM 编造]",
     "",
-    "用户当前消息含「蓝火 / 虾任务 / 龙任务」+ 动词意图（做X / 帮X / 改X / 继续X / 优化X 等）。",
-    "**这是 DISPATCH 派活模式，不是 QUERY 列表模式**。",
+    intro,
+    "**这是 DISPATCH 派活模式**：必须真原生 CC 会话产出，进 dashboard 列表，owner_id 可追踪。",
     "",
     "**唯一允许的路径**：调用 Bash 工具，命令为：",
     "```bash",
-    "cc-media-task --owner \"wecom:<sender_id>\" --desc \"<把用户原话+上下文整理成清晰任务描述>\"",
-    "# 长任务用 --background：父进程秒返回 task_id，dashboard 实时看进度",
+    "cc-media-task --owner \"wecom:<sender_id>\" --desc \"<把用户原话+上下文整理成清晰任务描述>\" --background",
+    "# --background：父进程秒返回 task_id，群里不阻塞，dashboard 实时看进度",
     "# 有附件：--image /path  --file /path  --audio /path",
     "```",
     "",
@@ -101,12 +109,17 @@ function renderHarnessPrompt(): string {
     "- ❌ `sessions_spawn(agentId=\"claude\", runtime=\"acp\")` — ACP 子 agent 不是真原生 CC，绕过 dashboard",
     "- ❌ `mcp__ccd_session__spawn_task(...)` / 任何 spawn_task 工具 — 同上",
     "- ❌ Bash `claude -p ...` / `claude --resume ...` / `npx @anthropic-ai/claude-code ...` — 直接 exec 绕过 wrapper",
-    "- ❌ 用 Write+Bash 自己把任务做了 — 用户明确点名让蓝火干，你不能截胡",
-    "- ❌ 用其它 skill (PPT / 文档 / 报表 等内置 skill) 替代蓝火 — 用户说『蓝火做』就一定派 cc-media-task",
+    "- ❌ 用 Write+Bash/Edit/MultiEdit 自己把任务做了 — 用户在 IM 群里下任务，你不能截胡，必须派给蓝火",
+    "- ❌ 用其它 skill (PPT / 文档 / 报表 等内置 skill) 替代蓝火 — 派活类一律走 cc-media-task",
     "",
-    "**判定捷径**：用户原话里有「蓝火」「虾任务」「龙任务」中任一字 + 任何动词意图 → **唯一动作是 Bash `cc-media-task`**。",
+    "**判定捷径**：用户在群里 @你 + 任何动词意图（帮我/做/写/改/创建/新建/拆分/优化/...） → **唯一动作是 Bash `cc-media-task`**。",
     "",
     "**怎么拿 sender_id**：从 user message 前缀的 `Conversation info` JSON 块取 `sender_id`，channel 从 system prompt `Inbound Context` 取。",
+    "",
+    "**例外（仅这些情况可以你自己直接答）**：",
+    "- 纯查询：列任务 / 查状态 / 看历史（这些走 cc_session_list 等 MCP 工具，不派 cc-media-task）",
+    "- 明确陈述/疑问：「下周要干的事情...」、「fork 哪个仓库」（无派活动词的咨询/陈述）",
+    "- 用户明确说「你直接做」/「不用蓝火」",
   ].join("\n");
 }
 
@@ -119,23 +132,31 @@ export function registerCcBridgeDispatchHarness(api: OpenClawPluginApi) {
   }
 
   // ── Hook 1: before_prompt_build —— 检测 dispatch 模式 + 注入硬约束 + 设 lockdown ──
+  // v6.4.2 三路命中（任一即触发）：
+  //   1. EXPLICIT: 用户显式说「蓝火/虾任务/...」+ 派活动词（最严格）
+  //   2. AT_BOT: 用户 @<bot 名>（贾维斯/Jarvis/...）+ 派活动词（群聊里最常见）
+  //   3. （未来）按 chattype 区分群/单独
   api.on("before_prompt_build", (event: any, ctx: any) => {
     const userMessage: string = (event as any)?.prompt ?? "";
     if (!userMessage || userMessage.length > 2000) return {};
-    if (!TRIGGER_NOUN.test(userMessage)) return {};
-    if (!DISPATCH_VERB.test(userMessage)) return {};
+
+    if (!DISPATCH_VERB.test(userMessage)) return {}; // 没动词意图 = 闲聊/陈述/查询，不触发
+    const explicit = TRIGGER_NOUN.test(userMessage);
+    const atBot = AT_BOT.test(userMessage);
+    if (!explicit && !atBot) return {};
 
     // 命中：标记本 session 进入 dispatch lockdown 窗口
     const sessionKey: string | undefined =
       ctx?.sessionKey ?? ctx?.sessionId ?? ctx?.agentId ?? undefined;
     setLockdown(sessionKey);
 
+    const matchKind: "explicit" | "at_bot" = explicit ? "explicit" : "at_bot";
     api.logger.info?.(
-      `[enhance-cc-dispatch-harness] 命中 dispatch 模式（session=${(sessionKey || "?").slice(-12)}）："${userMessage.slice(0, 50)}..."；注入硬约束 + 90s lockdown`,
+      `[enhance-cc-dispatch-harness] 命中 dispatch 模式 [${matchKind}]（session=${(sessionKey || "?").slice(-12)}）："${userMessage.slice(0, 60)}..."；注入硬约束 + 90s lockdown`,
     );
 
     return {
-      prependContext: renderHarnessPrompt(),
+      prependContext: renderHarnessPrompt(matchKind),
     };
   });
 
