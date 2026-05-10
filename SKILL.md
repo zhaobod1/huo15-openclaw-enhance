@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.5.7 — 上下文守护『subagent 累加 + 预测式提醒』：(1) subagent_spawned 记 child→parent，subagent_ended 把 child.totalTokens 累加回 parent，修多 agent 协作 ctx 盲区；(2) tokensPerTurnHistory 5 轮速率预测 ~N 轮内撞 warnAt，提早提醒；(3) sidus hardcoded 清理。继承 v6.5.6 sqlite 持久化 + revert 原模型 + v6.5.5 真实切换闭环 + v6.5.4 三阶预警。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.5.7
+description: "火一五·克劳德·龙虾增强插件 v6.6.0 — 上下文守护『cost-aware + 多模态精算 + channel 差异化』：(1) P1-4 18 个 model 单价表，llm_output 累加 estimatedCostUSD，monthlyBudgetUSD ≥80% 预算告警 + escalate 偏好低成本 long-ctx；(2) P1-6 每张图按 model 800-1500 token（gemini 800 / gpt 1200 / claude 1500）；(3) P2-8 channel-aware 阈值 群聊 60/75/90 + 单聊 65/80/92 + terminal 70/85/95，wecom 自动拆 group/direct。继承 v6.5.7 subagent 累加 + 预测式提醒 + v6.5.6 sqlite 持久化 + v6.5.5 真实切换。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.6.0
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

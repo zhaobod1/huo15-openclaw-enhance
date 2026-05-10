@@ -31,13 +31,14 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { Type } from "@sinclair/typebox";
 import { DEFAULT_AGENT_ID } from "../types.js";
-import type { ContextWatchdogConfig } from "../types.js";
+import type { ContextWatchdogConfig, ChannelThresholds } from "../types.js";
 import { isModelBanned } from "../utils/latency-tracker.js";
 import { getDb } from "../utils/sqlite-store.js";
 import {
   loadCtxUsage,
   batchSaveCtxUsage,
   getAgentCtxProfile,
+  getMonthlyCostEstimate,
   purgeOldCtxUsage,
   type CtxUsageRow,
 } from "../utils/ctx-usage-db.js";
@@ -111,6 +112,95 @@ const TOKENS_PER_IMAGE = 1500;
 const TOKENS_PER_VIDEO_FRAME = 1500;
 const TOKENS_PER_AUDIO_SECOND = 100;
 
+/**
+ * v6.6.0 P1-6：按 model 细分图片 token 成本（默认 1500 兜底）。
+ * 数据来源：各 provider 官方文档实测平均。
+ */
+const KNOWN_MODEL_IMAGE_TOKEN_COST: Record<string, number> = {
+  // Anthropic — Claude vision 文档：单图大致 ~1568 token
+  "claude-opus-4.7-1m": 1500,
+  "claude-opus-4.7": 1500,
+  "claude-sonnet-4.5": 1500,
+  "claude-haiku-4.5": 1500,
+  // OpenAI — GPT-5 vision low ~85，high ~1500，default high
+  "gpt-5.4": 1200,
+  "gpt-5.4-codex": 1200,
+  "gpt-5.4-mini": 1200,
+  // Google Gemini — 按 tile（768×768）每 tile ~258 token，单图通常 1-3 tile
+  "gemini-2.5-pro": 800,
+  "gemini-2.5-flash": 800,
+  // 智谱 GLM-4V
+  "glm-4.6": 1500,
+  // Moonshot Kimi-VL
+  "kimi-k2": 1500,
+  // DeepSeek 大部分 model 不支持图片，给保守默认
+};
+
+/**
+ * v6.6.0 P1-4：按 model 单价（USD per 1M token；input / output）。
+ * 数据来源：各 provider 2026 官方定价（仅热门 model；未列表用 openclaw.json 注册值兜底）。
+ */
+const KNOWN_MODEL_COST: Record<string, { in: number; out: number }> = {
+  "claude-opus-4.7-1m": { in: 15, out: 75 }, // 1M ctx 单独定价
+  "claude-opus-4.7": { in: 15, out: 75 },
+  "claude-sonnet-4.5": { in: 3, out: 15 },
+  "claude-haiku-4.5": { in: 1, out: 5 },
+  "gpt-5.4": { in: 5, out: 15 },
+  "gpt-5.4-codex": { in: 5, out: 15 },
+  "gpt-5.4-mini": { in: 0.15, out: 0.6 },
+  "o1": { in: 15, out: 60 },
+  "gemini-2.5-pro": { in: 1.25, out: 5 },
+  "gemini-2.5-flash": { in: 0.1, out: 0.4 },
+  "glm-4.6": { in: 1, out: 2 },
+  "glm-4-flash": { in: 0, out: 0 },
+  "deepseek-v3.2": { in: 0.14, out: 0.28 },
+  "deepseek-r1": { in: 0.55, out: 2.19 },
+  "deepseek-coder": { in: 0.14, out: 0.28 },
+  "kimi-k2": { in: 0.6, out: 2.5 },
+  "kimi-k2-200k": { in: 0.6, out: 2.5 },
+  "kimi-k2-128k": { in: 0.6, out: 2.5 },
+  "minimax-m2": { in: 1, out: 3 },
+  "abab7-chat-preview": { in: 0.8, out: 0.8 },
+};
+
+/**
+ * v6.6.0 P2-8：按 channel 内置阈值（用户可通过 ContextWatchdogConfig.thresholdsByChannel 覆盖）。
+ * 群聊每条消息进上下文涨得快 → 更激进；单聊/服务号居中；terminal 用户能 /compact → 宽松。
+ *
+ * channel 来源：ctx.channelId / ctx.originatingChannel；wecom 进一步按 agentId 含 "group" 拆分。
+ */
+const CHANNEL_THRESHOLDS_DEFAULT: Record<string, ChannelThresholds> = {
+  "wecom-group": {
+    hintAt: 0.60,
+    warnAt: 0.75,
+    criticalAt: 0.90,
+    escalateToLongCtxAt: 0.65,
+    forceEscalateAt: 0.90,
+  },
+  "wecom-direct": {
+    hintAt: 0.65,
+    warnAt: 0.80,
+    criticalAt: 0.92,
+    escalateToLongCtxAt: 0.70,
+    forceEscalateAt: 0.92,
+  },
+  "wechat-service": {
+    hintAt: 0.65,
+    warnAt: 0.80,
+    criticalAt: 0.92,
+    escalateToLongCtxAt: 0.70,
+    forceEscalateAt: 0.92,
+  },
+  "dingtalk": {
+    hintAt: 0.65,
+    warnAt: 0.80,
+    criticalAt: 0.92,
+    escalateToLongCtxAt: 0.70,
+    forceEscalateAt: 0.92,
+  },
+  // terminal / default：不指定 → 沿用全局配置（默认 0.70/0.85/0.95/0.80/0.95）
+};
+
 interface SessionUsage {
   sessionKey: string;
   agentId: string;
@@ -134,6 +224,13 @@ interface SessionUsage {
   tokensPerTurnHistory: number[];
   /** v6.5.7 P2-9：是否已发出过预测式提醒（一次性，防抖；until threshold 真到了再重置）*/
   predictionEmittedFor?: number;
+  /**
+   * v6.6.0 P1-4：会话级累计估算成本（USD）。
+   * llm_output 时按 KNOWN_MODEL_COST 累加：cost = (input × in + output × out) / 1_000_000
+   */
+  estimatedCostUSD: number;
+  /** v6.6.0 P1-4：是否已发出过预算警告 banner（防抖；月度预算 ≥80% 时一次性） */
+  budgetWarnedAt?: number;
   lastUpdatedAt: number;
 }
 
@@ -175,6 +272,54 @@ function sumUsage(usage: { input?: number; output?: number; cacheRead?: number; 
   if (!usage) return 0;
   if (typeof usage.total === "number" && usage.total > 0) return usage.total;
   return (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0);
+}
+
+/** v6.6.0 P1-6：按 model 返单张图片 token 成本（默认 TOKENS_PER_IMAGE） */
+function resolveImageTokens(modelId: string | undefined): number {
+  if (!modelId) return TOKENS_PER_IMAGE;
+  const bare = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
+  if (KNOWN_MODEL_IMAGE_TOKEN_COST[bare] !== undefined) return KNOWN_MODEL_IMAGE_TOKEN_COST[bare];
+  for (const known of Object.keys(KNOWN_MODEL_IMAGE_TOKEN_COST)) {
+    if (bare.startsWith(known)) return KNOWN_MODEL_IMAGE_TOKEN_COST[known];
+  }
+  return TOKENS_PER_IMAGE;
+}
+
+/** v6.6.0 P1-4：按 model 算单轮 cost (USD)；返 0 表示未知 model */
+function estimateTurnCostUSD(modelId: string | undefined, usage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined): number {
+  if (!modelId || !usage) return 0;
+  const bare = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
+  let prices = KNOWN_MODEL_COST[bare];
+  if (!prices) {
+    for (const known of Object.keys(KNOWN_MODEL_COST)) {
+      if (bare.startsWith(known)) {
+        prices = KNOWN_MODEL_COST[known];
+        break;
+      }
+    }
+  }
+  if (!prices) return 0;
+  // cacheRead 通常按 input × 0.1（90% 折扣，Anthropic/OpenAI 定价）；cacheWrite 按 input × 1.25
+  const inputTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) * 0.1 + (usage.cacheWrite ?? 0) * 1.25;
+  const outputTokens = usage.output ?? 0;
+  return (inputTokens * prices.in + outputTokens * prices.out) / 1_000_000;
+}
+
+/**
+ * v6.6.0 P2-8：从 hook ctx 解析 channel 标识。
+ * wecom 渠道再按 agentId 含 'group' 拆分成 wecom-group / wecom-direct。
+ */
+function resolveChannel(ctx: any): string {
+  const raw = (ctx?.channelId ?? ctx?.originatingChannel ?? (ctx as any)?.channel ?? "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  if (!raw || raw === "terminal") return "default";
+  if (raw === "wecom") {
+    const agentId = String(ctx?.agentId ?? "").toLowerCase();
+    return agentId.includes("group") ? "wecom-group" : "wecom-direct";
+  }
+  return raw;
 }
 
 function buildHintBanner(percent: number, used: number, max: number, modelId: string): string {
@@ -227,21 +372,24 @@ function buildEscalateHint(currentModel: string, currentMax: number, used: numbe
  *   - 视频帧：每帧 1500 token（按 attachments[].frames 估）
  *   - 音频秒：每秒 100 token
  */
-function estimatePromptTokens(event: any): number {
+function estimatePromptTokens(event: any, modelHint?: string): number {
   const prompt = String(event?.prompt ?? "");
   const sys = String(event?.systemPrompt ?? "");
   const textChars = prompt.length + sys.length;
   let tokens = Math.ceil(textChars / 4);
 
-  // 多模态：先用 imagesCount（llm_input 有），再 fallback 到 attachments[]
+  // v6.6.0 P1-6: 按 model 取图片 token 成本（gemini 800 / claude 1500 / gpt 1200）
+  const modelId = modelHint ?? (event as any)?.model ?? (event as any)?.resolvedRef;
+  const imagePerToken = resolveImageTokens(modelId);
+
   const imagesCount = Number(event?.imagesCount ?? 0);
-  if (imagesCount > 0) tokens += imagesCount * TOKENS_PER_IMAGE;
+  if (imagesCount > 0) tokens += imagesCount * imagePerToken;
 
   const attachments: Array<{ kind?: string; frames?: number; durationSec?: number }> =
     Array.isArray(event?.attachments) ? event.attachments : [];
   for (const att of attachments) {
     const kind = String(att?.kind ?? "").toLowerCase();
-    if (kind.includes("image")) tokens += TOKENS_PER_IMAGE;
+    if (kind.includes("image")) tokens += imagePerToken;
     else if (kind.includes("video")) {
       const frames = Number(att?.frames ?? 1);
       tokens += frames * TOKENS_PER_VIDEO_FRAME;
@@ -265,23 +413,37 @@ function estimatePromptTokens(event: any): number {
 function pickLongCtxModel(
   candidates: string[],
   currentModel: string | undefined,
+  options?: { preferCheap?: boolean },
 ): string | null {
   const exclude = currentModel?.includes("/") ? currentModel.split("/").pop() : currentModel;
-  for (const candidate of candidates) {
-    if (candidate === exclude) continue;
-    const ctxMax = KNOWN_MODEL_CTX_MAX[candidate] ?? 0;
-    if (ctxMax < 256_000) continue; // 不算"long ctx"
-    // 检查 banned（latency-tracker 用 "<provider>/<model>" key；用 endsWith 模糊匹配）
-    if (isModelBanned(candidate)) continue;
-    // 也尝试 sidus / minimax 等常见 provider 前缀
-    if (isModelBanned(`sidus/${candidate}`)) continue;
-    if (isModelBanned(`minimax/${candidate}`)) continue;
-    if (isModelBanned(`anthropic/${candidate}`)) continue;
-    if (isModelBanned(`openai/${candidate}`)) continue;
-    if (isModelBanned(`google/${candidate}`)) continue;
-    return candidate;
+
+  // 过滤可用候选
+  const available = candidates.filter((c) => {
+    if (c === exclude) return false;
+    const ctxMax = KNOWN_MODEL_CTX_MAX[c] ?? 0;
+    if (ctxMax < 256_000) return false;
+    if (isModelBanned(c)) return false;
+    if (isModelBanned(`sidus/${c}`)) return false;
+    if (isModelBanned(`minimax/${c}`)) return false;
+    if (isModelBanned(`anthropic/${c}`)) return false;
+    if (isModelBanned(`openai/${c}`)) return false;
+    if (isModelBanned(`google/${c}`)) return false;
+    return true;
+  });
+
+  if (available.length === 0) return null;
+
+  // v6.6.0 P1-4: preferCheap=true 时按 cost.in 升序（月度预算紧时省钱）
+  if (options?.preferCheap) {
+    const sorted = [...available].sort((a, b) => {
+      const costA = KNOWN_MODEL_COST[a]?.in ?? 999;
+      const costB = KNOWN_MODEL_COST[b]?.in ?? 999;
+      return costA - costB;
+    });
+    return sorted[0];
   }
-  return null;
+  // 默认：按 longCtxCandidates 顺序（用户/默认按 quality 排）
+  return available[0];
 }
 
 export function registerContextWatchdog(
@@ -299,7 +461,31 @@ export function registerContextWatchdog(
     config?.longCtxCandidates && config.longCtxCandidates.length > 0
       ? config.longCtxCandidates
       : LONG_CTX_CANDIDATES_DEFAULT;
+  const monthlyBudgetUSD = config?.monthlyBudgetUSD;
   const debug = config?.debug === true;
+
+  /**
+   * v6.6.0 P2-8: 按 channel 取阈值（覆盖全局；未覆盖的字段 fallback 全局）
+   * 优先级：用户配置 thresholdsByChannel[ch] > 内置 CHANNEL_THRESHOLDS_DEFAULT[ch] > 全局
+   */
+  function resolveThresholds(channel: string): {
+    hintAt: number;
+    warnAt: number;
+    criticalAt: number;
+    escalateAt: number;
+    forceEscalateAt: number;
+  } {
+    const userOverride = config?.thresholdsByChannel?.[channel];
+    const builtin = CHANNEL_THRESHOLDS_DEFAULT[channel];
+    const specific: ChannelThresholds = { ...builtin, ...userOverride };
+    return {
+      hintAt: specific.hintAt ?? hintAt,
+      warnAt: specific.warnAt ?? warnAt,
+      criticalAt: specific.criticalAt ?? criticalAt,
+      escalateAt: specific.escalateToLongCtxAt ?? escalateAt,
+      forceEscalateAt: specific.forceEscalateAt ?? forceEscalateAt,
+    };
+  }
 
   // v6.5.6: 会话级累加器（in-memory）+ dirty 集合（节流 flush 到 sqlite）+ peak 画像
   const sessions = new Map<string, SessionUsage>();
@@ -343,6 +529,7 @@ export function registerContextWatchdog(
         original_model: s.originalModel ?? null,
         last_warned_threshold: s.lastWarnedThreshold,
         peak_percent: peak,
+        estimated_cost_usd: s.estimatedCostUSD,
         last_updated_at: s.lastUpdatedAt,
         created_at: s.lastUpdatedAt,
       });
@@ -376,6 +563,7 @@ export function registerContextWatchdog(
             originalModel: row.original_model ?? undefined,
             lastWarnedThreshold: row.last_warned_threshold,
             tokensPerTurnHistory: [], // hydrate 后从 0 重建（不持久化轮次历史避免 schema 复杂化）
+            estimatedCostUSD: row.estimated_cost_usd ?? 0,
             lastUpdatedAt: row.last_updated_at,
           };
           sessionPeakPercent.set(sessionKey, row.peak_percent);
@@ -406,6 +594,7 @@ export function registerContextWatchdog(
         lastModelCtxMax: resolveCtxMax(modelId),
         lastWarnedThreshold: 0,
         tokensPerTurnHistory: [],
+        estimatedCostUSD: 0,
         lastUpdatedAt: Date.now(),
       };
       sessions.set(sessionKey, s);
@@ -452,6 +641,11 @@ export function registerContextWatchdog(
     s.tokensPerTurnHistory.push(usageDelta);
     if (s.tokensPerTurnHistory.length > PREDICTION_HISTORY_LEN) {
       s.tokensPerTurnHistory.shift();
+    }
+    // v6.6.0 P1-4: 按 model 估算单轮 cost (USD) 并累加到会话级
+    const turnCost = estimateTurnCostUSD(modelId, (event as any)?.usage);
+    if (turnCost > 0) {
+      s.estimatedCostUSD += turnCost;
     }
     markDirty(sessionKey); // v6.5.6: 标记 dirty，等 10s 节流批量 flush 到 sqlite
 
@@ -580,60 +774,65 @@ export function registerContextWatchdog(
    * 当用量未到 warnAt 但按当前速率 PREDICTION_LOOKAHEAD_TURNS 轮内会撞 warnAt → 提早注 banner
    * 防抖：同一 session 同一目标阈值只警告一次（predictionEmittedFor）
    */
-  function evalPredictionBanner(s: SessionUsage, event: any): string | null {
-    if (s.tokensPerTurnHistory.length < 2) return null; // 至少 2 轮才能算趋势
+  function evalPredictionBanner(s: SessionUsage, event: any, ctx: any): string | null {
+    if (s.tokensPerTurnHistory.length < 2) return null;
     const liveEstimate = s.pendingTokens > 0
       ? s.pendingTokens
-      : estimatePromptTokens(event);
+      : estimatePromptTokens(event, s.lastModel);
     const used = s.totalTokens + liveEstimate;
     const percent = used / s.lastModelCtxMax;
-    // 已经超过 warnAt：阈值 banner 接管，不重复
-    if (percent >= warnAt) return null;
+
+    // v6.6.0 P2-8: channel-aware warnAt
+    const channel = resolveChannel(ctx);
+    const T = resolveThresholds(channel);
+    if (percent >= T.warnAt) return null;
 
     const avgPerTurn = s.tokensPerTurnHistory.reduce((a, b) => a + b, 0) / s.tokensPerTurnHistory.length;
     if (avgPerTurn <= 0) return null;
 
-    // 算"按当前速率多少轮内到 warnAt"
-    const warnTarget = warnAt * s.lastModelCtxMax;
+    const warnTarget = T.warnAt * s.lastModelCtxMax;
     const turnsToWarn = Math.ceil((warnTarget - used) / avgPerTurn);
     if (turnsToWarn > PREDICTION_LOOKAHEAD_TURNS) return null;
     if (turnsToWarn <= 0) return null;
 
-    // 防抖：同 session 该 lookahead 阈值只警告一次（直到真到 warnAt 重置）
-    if (s.predictionEmittedFor === Math.round(warnAt * 100)) return null;
-    s.predictionEmittedFor = Math.round(warnAt * 100);
+    if (s.predictionEmittedFor === Math.round(T.warnAt * 100)) return null;
+    s.predictionEmittedFor = Math.round(T.warnAt * 100);
     markDirty(s.sessionKey);
 
     const pctNow = Math.round(percent * 100);
-    const pctWarn = Math.round(warnAt * 100);
+    const pctWarn = Math.round(T.warnAt * 100);
     const avgK = Math.round(avgPerTurn / 1000);
     api.logger.info(
-      `[ctx-watchdog] prediction triggered | session=${s.sessionKey.slice(0, 12)} | now=${pctNow}% → ${pctWarn}% in ~${turnsToWarn} turns (avgPerTurn=${avgK}k)`,
+      `[ctx-watchdog] prediction (channel=${channel}) | session=${s.sessionKey.slice(0, 12)} | now=${pctNow}% → ${pctWarn}% in ~${turnsToWarn} turns (avgPerTurn=${avgK}k)`,
     );
-    return `【上下文用量趋势预警】当前 ${pctNow}%，按最近 ${s.tokensPerTurnHistory.length} 轮平均每轮 +${avgK}k token 速率，预计 **~${turnsToWarn} 轮内**撞 ${pctWarn}%（warn 阈值）。建议：现在就在合适节点收尾或主动 /compact，避免后面被动告警。`;
+    return `【上下文用量趋势预警 - channel=${channel}】当前 ${pctNow}%，按最近 ${s.tokensPerTurnHistory.length} 轮平均每轮 +${avgK}k token 速率，预计 **~${turnsToWarn} 轮内**撞 ${pctWarn}%（${channel} 阈值）。建议：现在就在合适节点收尾或主动 /compact。`;
   }
 
-  /** v6.5.6: 抽出来的阈值评估 + banner 构造（被 before_prompt_build 调用，可叠加 revert hint） */
-  function evalThresholdBanner(s: SessionUsage, event: any): string | null {
+  /** v6.5.6+v6.6.0: 阈值评估 + banner 构造（按 channel 取差异化阈值） */
+  function evalThresholdBanner(s: SessionUsage, event: any, ctx: any): string | null {
     const liveEstimate = s.pendingTokens > 0
       ? s.pendingTokens
-      : estimatePromptTokens(event);
+      : estimatePromptTokens(event, s.lastModel);
     const used = s.totalTokens + liveEstimate;
     if (used === 0) return null;
 
     const percent = used / s.lastModelCtxMax;
     const modelId = s.lastModel ?? "<unknown>";
 
+    // v6.6.0 P2-8: 按 channel 取阈值
+    const channel = resolveChannel(ctx);
+    const T = resolveThresholds(channel);
+
     let triggeredThreshold = 0;
     let banner = "";
-    if (percent >= criticalAt) {
-      triggeredThreshold = criticalAt;
+    if (percent >= T.criticalAt) {
+      triggeredThreshold = T.criticalAt;
       banner = buildCriticalBanner(percent, used, s.lastModelCtxMax, modelId);
-    } else if (percent >= warnAt) {
-      triggeredThreshold = warnAt;
+    } else if (percent >= T.warnAt) {
+      triggeredThreshold = T.warnAt;
       banner = buildWarnBanner(percent, used, s.lastModelCtxMax, modelId);
-    } else if (percent >= hintAt) {
-      triggeredThreshold = hintAt;
+    } else if (percent >= T.hintAt) {
+      triggeredThreshold = T.hintAt;
       banner = buildHintBanner(percent, used, s.lastModelCtxMax, modelId);
     } else {
       return null;
@@ -641,16 +840,25 @@ export function registerContextWatchdog(
 
     if (s.lastWarnedThreshold >= triggeredThreshold) return null;
     s.lastWarnedThreshold = triggeredThreshold;
-    // v6.5.7：阈值真到了 → 重置预测防抖，让下一档预测可以再发
     s.predictionEmittedFor = undefined;
     markDirty(s.sessionKey);
 
     let final = banner;
-    if (percent >= escalateAt && s.lastModelCtxMax < 256_000) {
+    if (percent >= T.escalateAt && s.lastModelCtxMax < 256_000) {
       final = banner + "\n\n" + buildEscalateHint(modelId, s.lastModelCtxMax, used, percent);
     }
+
+    // v6.6.0 P1-4: 预算告警附加
+    if (monthlyBudgetUSD && monthlyBudgetUSD > 0 && s.estimatedCostUSD > 0) {
+      const budgetUsage = s.estimatedCostUSD / monthlyBudgetUSD;
+      if (budgetUsage >= 0.8 && s.budgetWarnedAt !== Math.round(budgetUsage * 100)) {
+        s.budgetWarnedAt = Math.round(budgetUsage * 100);
+        final += `\n\n【💰 预算告警】本会话已消耗 $${s.estimatedCostUSD.toFixed(3)}（月度预算 $${monthlyBudgetUSD.toFixed(2)} 的 ${Math.round(budgetUsage * 100)}%）。escalate 时优先选低成本 long-ctx 候选。`;
+      }
+    }
+
     api.logger.info(
-      `[ctx-watchdog] threshold=${Math.round(triggeredThreshold * 100)}% triggered | session=${s.sessionKey.slice(0, 12)} | usage=${used}/${s.lastModelCtxMax}`,
+      `[ctx-watchdog] threshold=${Math.round(triggeredThreshold * 100)}% (channel=${channel}) triggered | session=${s.sessionKey.slice(0, 12)} | usage=${used}/${s.lastModelCtxMax}`,
     );
     return final;
   }
@@ -671,16 +879,16 @@ export function registerContextWatchdog(
       api.logger.info(
         `[ctx-watchdog] revert hint emitted | session=${sessionKey.slice(0, 12)} | suggest=${revertTarget}`,
       );
-      const thresholdBanner = evalThresholdBanner(s, event);
+      const thresholdBanner = evalThresholdBanner(s, event, ctx);
       const final = thresholdBanner ? revertBanner + "\n\n" + thresholdBanner : revertBanner;
       return { prependContext: final };
     }
 
-    const thresholdBanner = evalThresholdBanner(s, event);
+    const thresholdBanner = evalThresholdBanner(s, event, ctx);
     if (thresholdBanner) return { prependContext: thresholdBanner };
 
     // v6.5.7 P2-9: 阈值未到 → 跑预测式提醒（按速率预估几轮后撞 warnAt）
-    const predictionBanner = evalPredictionBanner(s, event);
+    const predictionBanner = evalPredictionBanner(s, event, ctx);
     if (predictionBanner) return { prependContext: predictionBanner };
 
     return undefined;
@@ -699,16 +907,24 @@ export function registerContextWatchdog(
       if (!s) return undefined;
 
       // 事前估算本轮 prompt（before_model_resolve 早于 llm_input，pendingTokens 还是 0）
-      const liveEstimate = estimatePromptTokens(event);
+      const liveEstimate = estimatePromptTokens(event, s.lastModel);
       const projected = s.totalTokens + liveEstimate;
       const percent = projected / s.lastModelCtxMax;
 
+      // v6.6.0 P2-8: channel-aware forceEscalateAt（群聊 90% 就强切，单聊 92%，terminal 95%）
+      const channel = resolveChannel(ctx);
+      const T = resolveThresholds(channel);
+
       // 强切条件：(1) 命中 forceEscalateAt 阈值；(2) 当前 model ctx < 256K（已经是 long ctx 没必要切）
-      if (percent < forceEscalateAt) return undefined;
+      if (percent < T.forceEscalateAt) return undefined;
       if (s.lastModelCtxMax >= 256_000) return undefined;
 
-      // 选 long-ctx 候选（跳过 banned + 当前 model）
-      const target = pickLongCtxModel(longCtxCandidates, s.lastModel);
+      // v6.6.0 P1-4: cost-aware long-ctx 选型 — 月度预算 ≥80% 时偏便宜的（kimi-k2 vs opus-1m）
+      const budgetTight =
+        monthlyBudgetUSD !== undefined &&
+        monthlyBudgetUSD > 0 &&
+        s.estimatedCostUSD > monthlyBudgetUSD * 0.8;
+      const target = pickLongCtxModel(longCtxCandidates, s.lastModel, { preferCheap: budgetTight });
       if (!target) {
         // 所有 long-ctx 候选不可用 —— 不强切，让 model-router 自己决定，banner 已经在 prompt build 那边出过了
         api.logger.warn(
@@ -723,7 +939,7 @@ export function registerContextWatchdog(
       // 不立即修改 sessions 里 lastModel/lastModelCtxMax —— 等 llm_output 来时拿到真实 modelId 自然会更新
       // （避免被 model-router 覆盖再切回的颠簸）
       api.logger.warn(
-        `[ctx-watchdog] FORCE-escalate to long-ctx: ${fromModel} → ${target} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | projected=${projected}/${s.lastModelCtxMax}`,
+        `[ctx-watchdog] FORCE-escalate to long-ctx: ${fromModel} → ${target} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | projected=${projected}/${s.lastModelCtxMax} | channel=${channel} | budgetTight=${budgetTight}`,
       );
       return { modelOverride: target };
     },
@@ -778,6 +994,8 @@ export function registerContextWatchdog(
           severity = "ok";
           recommendation = "上下文用量健康，继续即可";
         }
+        const channel = resolveChannel(ctx);
+        const T = resolveThresholds(channel);
         const availableLongCtx = pickLongCtxModel(longCtxCandidates, s.lastModel);
         return {
           ok: true,
@@ -791,10 +1009,21 @@ export function registerContextWatchdog(
           percent: pctRound,
           severity,
           recommendation,
-          shouldEscalate: percent >= escalateAt && s.lastModelCtxMax < 256_000,
+          shouldEscalate: percent >= T.escalateAt && s.lastModelCtxMax < 256_000,
           availableLongCtxModel: availableLongCtx,
-          longCtxCandidates: percent >= escalateAt
+          longCtxCandidates: percent >= T.escalateAt
             ? longCtxCandidates.filter((c) => (KNOWN_MODEL_CTX_MAX[c] ?? 0) >= 256_000)
+            : undefined,
+          // v6.6.0 新字段
+          channel,
+          channelThresholds: { hint: T.hintAt, warn: T.warnAt, critical: T.criticalAt, escalate: T.escalateAt, force: T.forceEscalateAt },
+          estimatedCostUSD: Math.round(s.estimatedCostUSD * 10000) / 10000,
+          monthlyBudgetUSD: monthlyBudgetUSD,
+          budgetUsedPercent: monthlyBudgetUSD
+            ? Math.round((s.estimatedCostUSD / monthlyBudgetUSD) * 100)
+            : undefined,
+          avgTokensPerTurn: s.tokensPerTurnHistory.length > 0
+            ? Math.round(s.tokensPerTurnHistory.reduce((a, b) => a + b, 0) / s.tokensPerTurnHistory.length)
             : undefined,
         };
       },
@@ -945,12 +1174,21 @@ export function registerContextWatchdog(
         try {
           const db = getDb();
           const profile = getAgentCtxProfile(db, targetAgentId);
+          const monthly = getMonthlyCostEstimate(db, targetAgentId);
           return {
             ok: true,
             agentId: targetAgentId,
             sessions: profile.sessions,
             avgPeakPercent: Math.round(profile.avgPeak * 100),
             maxPeakPercent: Math.round(profile.maxPeak * 100),
+            // v6.6.0 P1-4: 成本画像
+            totalCostUSD: Math.round(profile.totalCostUSD * 10000) / 10000,
+            monthly30dSessions: monthly.sessions,
+            monthly30dCostUSD: Math.round(monthly.totalCostUSD * 10000) / 10000,
+            monthlyBudgetUSD: monthlyBudgetUSD,
+            monthlyBudgetUsedPercent: monthlyBudgetUSD && monthly.totalCostUSD > 0
+              ? Math.round((monthly.totalCostUSD / monthlyBudgetUSD) * 100)
+              : undefined,
             note: profile.maxPeak > 0.95
               ? "⚠️ 历史峰值 > 95%，建议设置更激进的 hintAt/warnAt 阈值或主动用 enhance_route_to_long_ctx"
               : profile.maxPeak > 0.8
@@ -992,6 +1230,6 @@ export function registerContextWatchdog(
   }
 
   api.logger.info(
-    `[enhance] context-watchdog v6.5.7 已加载（hint=${Math.round(hintAt * 100)}% warn=${Math.round(warnAt * 100)}% critical=${Math.round(criticalAt * 100)}% escalate=${Math.round(escalateAt * 100)}% force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | sqlite + subagent rollup + prediction）`,
+    `[enhance] context-watchdog v6.6.0 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | cost+image+subagent+prediction+sqlite all on）`,
   );
 }

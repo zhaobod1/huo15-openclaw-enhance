@@ -571,8 +571,32 @@ export interface ContextWatchdogConfig {
    * 不填用默认（claude-opus-4.7-1m → gemini-2.5-pro → kimi-k2 → ...）。
    */
   longCtxCandidates?: string[];
+  /**
+   * v6.6.0 P2-8: 按 channel 差异化阈值（覆盖全局 hintAt/warnAt 等）。
+   * 内置默认：群聊更激进（60/75/90），单聊/服务号居中（65/80/92），terminal 宽松（沿用全局）。
+   * 不填的渠道 fallback 到全局配置。
+   */
+  thresholdsByChannel?: Record<string, ChannelThresholds>;
+  /**
+   * v6.6.0 P1-4: 月度预算 USD（仅观察 + 软提示，不强制阻止切换）。
+   * llm_output 时按 model.costInPerM/costOutPerM 累加 sessionUsage.estimatedCostUSD；
+   * sqlite ctx_usage 表持久化 + getMonthlyCostEstimate 跨 session 求和。
+   * 当 ≥80% 预算时 banner 附"预算告警"，escalate 时优先选低成本 long-ctx 候选。
+   */
+  monthlyBudgetUSD?: number;
   /** debug 日志，默认 false */
   debug?: boolean;
+}
+
+/**
+ * v6.6.0 P2-8: 按 channel 差异化的阈值（每个字段可独立覆盖；未填的 fallback 全局）
+ */
+export interface ChannelThresholds {
+  hintAt?: number;
+  warnAt?: number;
+  criticalAt?: number;
+  escalateToLongCtxAt?: number;
+  forceEscalateAt?: number;
 }
 
 // ── BOT 文件上传桥（v6.5.2，token 化基建，类比 bot-share-link 镜像对称） ──

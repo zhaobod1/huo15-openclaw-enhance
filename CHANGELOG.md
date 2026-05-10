@@ -2,6 +2,125 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.0 — 2026-05-11（上下文守护『cost-aware + 多模态精算 + channel 差异化』收尾）
+
+### 触发
+
+v6.5.7 后路线图剩 3 个 P1/P2 完善点，本期收尾：
+
+1. **P1-4 cost-aware 切换**：long-ctx 模型贵（opus-1m vs sonnet 5x），不分场景一刀切；需要月度预算感知
+2. **P1-6 多模态 token 估算**：固定 1500 token/image 不准——gemini 800 / gpt 1200 / claude 1500，差异 2x
+3. **P2-8 channel-aware 阈值差异化**：群聊每条进上下文涨得快，应该比 terminal 更激进；现在所有渠道用 70/85/95% 不合理
+
+### 改动
+
+#### A. P1-4 cost-aware 切换
+
+新增数据：
+
+```ts
+const KNOWN_MODEL_COST: Record<string, { in: number; out: number }> = {
+  "claude-opus-4.7-1m": { in: 15, out: 75 },  // $/M token
+  "claude-sonnet-4.5":  { in: 3,  out: 15 },
+  "claude-haiku-4.5":   { in: 1,  out: 5 },
+  "gpt-5.4":            { in: 5,  out: 15 },
+  "gpt-5.4-mini":       { in: 0.15, out: 0.6 },
+  "gemini-2.5-pro":     { in: 1.25, out: 5 },
+  "gemini-2.5-flash":   { in: 0.1, out: 0.4 },
+  "kimi-k2":            { in: 0.6, out: 2.5 },
+  "deepseek-v3.2":      { in: 0.14, out: 0.28 },
+  // ... 18 个常见 model
+};
+```
+
+`SessionUsage.estimatedCostUSD` 字段：
+
+- `llm_output` 时累加 `(input × in + output × out + cacheRead × 0.1 + cacheWrite × 1.25) / 1_000_000`
+- sqlite schema v7→v8 ALTER 加 `estimated_cost_usd REAL DEFAULT 0`
+- 持久化跨 session（hydrate 时恢复）
+- `getMonthlyCostEstimate(agentId?)` 跨 session 月度求和
+
+`monthlyBudgetUSD` 配置（默认 undefined = 不启用）：
+
+- ≥80% 预算 → `evalThresholdBanner` 附加『💰 预算告警』段
+- `before_model_resolve` force-escalate 时 `budgetTight = sessionCost > monthlyBudgetUSD × 0.8`
+- `pickLongCtxModel({ preferCheap: budgetTight })` → 按 cost.in 升序选最便宜的 long-ctx（kimi-k2 $0.6 vs opus-1m $15）
+
+#### B. P1-6 多模态精算
+
+新增 `KNOWN_MODEL_IMAGE_TOKEN_COST`（按 model 单图 token）：
+
+| Model | Token/Image | 来源 |
+|---|---|---|
+| Claude-* | 1500 | Anthropic vision 文档实测 |
+| GPT-5.4 / Codex / Mini | 1200 | OpenAI high detail |
+| Gemini-2.5-pro/flash | 800 | 单图通常 1-3 tile × 258 token |
+| GLM-4.6 / Kimi-K2 | 1500 | 智谱/Moonshot 实测 |
+
+`estimatePromptTokens(event, modelId)` 新增 modelId 参数（不传则用 `event.model` / `event.resolvedRef`）；`resolveImageTokens(modelId)` 内部按 model 查表。
+
+`before_model_resolve` / `before_prompt_build` 都传 `s.lastModel` 进 `estimatePromptTokens` 拿精确估算。
+
+#### C. P2-8 channel-aware 阈值差异化
+
+新增内置 `CHANNEL_THRESHOLDS_DEFAULT`：
+
+| Channel | hint/warn/critical | escalate / force |
+|---|---|---|
+| wecom-group | 60% / 75% / 90% | 65% / 90% |
+| wecom-direct | 65% / 80% / 92% | 70% / 92% |
+| wechat-service | 65% / 80% / 92% | 70% / 92% |
+| dingtalk | 65% / 80% / 92% | 70% / 92% |
+| terminal / default | 70% / 85% / 95% | 80% / 95%（全局沿用） |
+
+`ContextWatchdogConfig.thresholdsByChannel`：用户可覆盖任一渠道任一字段（部分覆盖 fallback 全局）。
+
+`resolveChannel(ctx)`：
+- 读 `ctx.channelId / originatingChannel`
+- `wecom` 进一步按 `agentId` 含 `"group"` 拆 `wecom-group` / `wecom-direct`
+- 空/terminal → `default`
+
+`evalThresholdBanner` / `evalPredictionBanner` / `before_model_resolve` 都改用 `resolveThresholds(channel)` 取阈值，每个 session 按其实际 channel 走差异化。
+
+#### D. 工具暴露
+
+`enhance_ctx_status` 新增返回字段：
+
+- `channel`: 当前渠道（"wecom-group" / "terminal" / ...）
+- `channelThresholds`: 该渠道的 5 个阈值
+- `estimatedCostUSD`: 本会话累计估算成本
+- `monthlyBudgetUSD` / `budgetUsedPercent`: 预算占比
+- `avgTokensPerTurn`: P2-9 预测式提醒的速率指标
+
+`enhance_ctx_profile` 新增：
+- `totalCostUSD`: agent 历史累计
+- `monthly30dSessions` / `monthly30dCostUSD` / `monthlyBudgetUsedPercent`: 30 天画像
+
+### 数据库 migration v7→v8
+
+`migrateV7ToV8` 检测 `ctx_usage` 表已存在但缺 `estimated_cost_usd` 列 → ALTER 加上。新装 v6.6.0 用户 CREATE TABLE 时已包含该列。
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError
+- ✅ 不抢龙虾 model-fallback
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ KNOWN_MODEL_COST 是 fallback；openclaw.json 注册的 model 真实价格由 model-router 的 capability 表覆盖（互补）
+- ✅ monthlyBudget 仅观察 + 软提示，不强制阻止切换（红线 #5"诊断不修复"）
+
+### 路线图收尾
+
+`v6.5.4` 起的 16 个完善点已落地 11 个核心 P0+P1+部分 P2，ctx-watchdog 从『纸上谈兵』→『真实切换』→『状态持久化』→『subagent + 预测』→『cost-aware + 多模态 + channel 差异化』五个阶段闭环。
+
+剩余 P2/P3（按需启动）：
+- P2-10 mute/silence 工具（用户烦提醒时静音 N 分钟）
+- P2-11 dashboard 可视化（sessions overview）
+- P2-12 跨 session 历史画像（已有数据底子，缺 dashboard 入口）
+- P3-13 龙虾 model-fallback 协调（runId 去重，避免 retry 重算）
+- P3-15 ctx_growth_rate 指标（latency-tracker schema 扩展）
+- P3-16 龙虾 provider-usage 联动（真实 quota snapshot）
+
 ## 6.5.7 — 2026-05-11（上下文守护『subagent 累加 + 预测式提醒』+ sidus 清理）
 
 ### 触发
