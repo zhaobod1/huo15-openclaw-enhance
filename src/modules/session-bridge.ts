@@ -100,13 +100,36 @@ function extractText(content: unknown): string {
   return "";
 }
 
-/** 从 session jsonl 头部 64KB 内抽 chat_id（custom_message 元数据块里）。case-insensitive。 */
+/**
+ * 从 session jsonl 头部 64KB 内抽 chat_id 标识（用于跨 .jsonl.reset.* 找同会话伙伴）。
+ *
+ * v6.4.2: 多字段 fallback——OpenClaw runtime 不同版本 + 不同 channel 的 chat_id 命名不一：
+ *   - `chat_id`（v5.x wecom direct，snake_case）
+ *   - `chatid`（4.29+ wecom 群聊去掉下划线）
+ *   - `chatId`（钉钉/微信服务号 camelCase）
+ *   - cwd 兜底（最稳：cwd 里包含 wecom-default-group-XXX / wecom-direct-XXX 等动态 agent
+ *     workspace 标识，跨版本/跨渠道都稳定；从 `"cwd":"..."` 字段抽末段路径名）
+ *
+ * 全 lowercase 归一化，匹配时大小写不敏感。
+ */
 function readChatId(filePath: string): string | null {
   try {
     const buf = readFileSync(filePath);
     const head = buf.slice(0, Math.min(buf.length, 64 * 1024)).toString("utf-8");
-    const m = head.match(/"chat_id"\s*:\s*"([^"]+)"/);
-    return m?.[1] ? m[1].toLowerCase() : null;
+    // 优先 chat_id / chatid / chatId
+    const m =
+      head.match(/"chat_id"\s*:\s*"([^"]+)"/) ||
+      head.match(/"chatid"\s*:\s*"([^"]+)"/) ||
+      head.match(/"chatId"\s*:\s*"([^"]+)"/);
+    if (m?.[1]) return m[1].toLowerCase();
+    // fallback: cwd 里的 workspace 标识（wecom-default-group-XXX / wecom-direct-XXX 等）
+    const cwdMatch = head.match(/"cwd"\s*:\s*"([^"]+)"/);
+    if (cwdMatch?.[1]) {
+      // 取 cwd 末段作为 key（如 ~/.openclaw/workspace-wecom-default-group-XXX → workspace-...）
+      const tail = cwdMatch[1].split("/").filter(Boolean).pop();
+      if (tail && tail.length > 0) return `cwd:${tail.toLowerCase()}`;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -121,7 +144,7 @@ interface PriorCandidate {
 
 function findPriorBridgeSource(
   sessionsDir: string,
-  currentChatId: string,
+  currentChatId: string | null,
   currentSessionId: string,
   maxAgeMs: number,
 ): PriorCandidate | null {
@@ -151,17 +174,33 @@ function findPriorBridgeSource(
   }
   cands.sort((a, b) => b.mtime - a.mtime);
 
-  for (const c of cands) {
-    const chatId = readChatId(c.path);
-    if (!chatId) continue;
-    if (chatId === currentChatId) {
-      return {
-        filePath: c.path,
-        sessionId: c.sessionId,
-        mtimeMs: c.mtime,
-        matchedChatId: chatId,
-      };
+  // v6.4.2: chat_id 严格匹配 → 命中优先（保留 v5.7.26 wecom direct 行为）
+  if (currentChatId) {
+    for (const c of cands) {
+      const chatId = readChatId(c.path);
+      if (!chatId) continue;
+      if (chatId === currentChatId) {
+        return {
+          filePath: c.path,
+          sessionId: c.sessionId,
+          mtimeMs: c.mtime,
+          matchedChatId: chatId,
+        };
+      }
     }
+  }
+  // v6.4.2: fallback 到 mtime 最新策略——agent 目录已 per-agent 隔离（动态派生
+  // wecom-* / wechat-service-* / dingtalk-*）天然属于同一会话伙伴；chat_id 仅在
+  // 多渠道 main agent 共用 sessions 时才有区分意义。当 chat_id null（OpenClaw 4.29+
+  // 群聊场景常见）→ 直接选最新的 .jsonl.reset.*。
+  if (cands.length > 0) {
+    const c = cands[0];
+    return {
+      filePath: c.path,
+      sessionId: c.sessionId,
+      mtimeMs: c.mtime,
+      matchedChatId: currentChatId ?? "(per-agent fallback)",
+    };
   }
   return null;
 }
@@ -311,9 +350,10 @@ export function registerSessionBridge(
       }
       if (currentSize > freshMaxBytes) return undefined;
 
-      // 抽当前 chat_id（如果不是 wecom 渠道，没有 chat_id 就放行不桥接）
+      // v6.4.2: chat_id 允许 null。当前 jsonl 头扫到 chat_id（wecom direct 等）→ 严格匹配；
+      // 没扫到（OpenClaw 4.29+ 群聊场景，chat_id 不在 jsonl 头里）→ findPriorBridgeSource
+      // 走 mtime 最新策略（agent 目录已 per-agent 隔离，足够稳）。
       const currentChatId = readChatId(currentJsonl);
-      if (!currentChatId) return undefined;
 
       const prior = findPriorBridgeSource(sessionsDir, currentChatId, sessionId, priorMaxAgeMs);
       if (!prior) return undefined;

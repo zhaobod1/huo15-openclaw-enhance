@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.4.1",
+  "version": "6.4.2",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.2.1 — memory supplement token 优化：v6.2.0 把 supplement 从 1 行扩到 12 行（~500 token/call）成本太高，按用户反馈精简到 3 行（~150 token/call）保留核心 5 类枚举 + 判据，去掉详情/反例/具体例子（这些 LLM 训练时本就有常识）。月度成本从 ~$52 → ~$16（按 100K 调用、deepseek-v4-pro $1.74/M 估）。继承 v6.2.0 第二天失忆三层守卫：(A) memory-integrator prompt supplement 强化引导 LLM 主动调 enhance_memory_store，列 5 类应 store 场景（decision/project/user/feedback/reference）+ 判据 + anti-pattern（解决用户 5 月以来 memories 表仅 8 条记录的低写入痛点）；(B) session-bridge prependContext 注入升级——加 PRIOR_SESSION_CHECKPOINT 明确 banner + 完整 jsonl 文件路径，让 LLM 知道这是历史延续而非新请求，需要中段/决策可主动 Read 完整文件。继承 v6.1.9 session-bridge 3x 扩容 + native-memory-surfacer 松绑、v6.1.8 bot-share、v6.1.7 capability 验证、v6.1.6 quota-aware、v6.1.5 cc-bridge prompt、v6.1.4 智能路由。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.4.2 — session-bridge 修群聊场景失忆：(1) readChatId 多字段 fallback（chat_id/chatid/chatId）+ cwd 兜底；(2) chat_id null 时 fallback 到 mtime 最新策略（agent 目录已 per-agent 隔离，wecom-default-group-XXX 等动态派生 agent 天然属于同一会话伙伴，chat_id 严格匹配反而成为失败点）。修 5/10 用户实测群聊 8 小时跨夜失忆事故——OpenClaw 4.29+ 群聊 jsonl 头里没写 chat_id，session-bridge readChatId 返 null 直接 return undefined，从未注入 prependContext。继承 v6.4.1 + v6.2.1 token 优化 + v6.2.0 PRIOR_SESSION_CHECKPOINT banner + v6.1.9 三层守卫扩容。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

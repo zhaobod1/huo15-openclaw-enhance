@@ -2,6 +2,62 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.4.2 — 2026-05-10（session-bridge 修群聊场景失忆：chat_id null fallback + 多字段）
+
+### 触发
+
+5/10 用户实测群聊 `agent:wecom-default-group-wrgzumeqaaqxngzbthjuexh20e57vhew:wecom:default:group:wrgzumeqaaqxngzbthjuexh20e57vhew` 跨夜 8 小时还是失忆——LLM 说"没有上下文啊——你要我发哪个 HTML 给我？"，但用户昨天明明做了 HTML。
+
+数据驱动诊断：
+
+| 检查项 | 结果 |
+|---|---|
+| enhance 装版 | ✓ v6.4.1（已是 6.x 版本） |
+| prior reset 文件 | ✓ `42f0676b-...jsonl.reset.2026-05-09T23-46-18.634Z`（199KB） |
+| 当前活跃 session | ✓ 10KB（远 < 200KB freshSessionMaxBytes） |
+| idle 阈值 | ✓ 8 小时 ≥ 75min |
+| session-bridge 模块加载 | ✓ "已加载 fresh<200KB & idle≥75min..." |
+| **当前 jsonl 头部 `chat_id` 字段** | **❌ 不存在** |
+| **prior reset jsonl 头部 `chat_id`** | **❌ 不存在** |
+
+→ session-bridge.ts 行 108 严格匹配 `"chat_id"` 字段，OpenClaw 4.29+ wecom 群聊 jsonl 头里**根本没写这字段** → `readChatId() → null` → 行 316 `if (!currentChatId) return undefined` → 直接放弃桥接，**从未注入 prependContext**。
+
+### 改动（纯 enhance 内修复，零 OpenClaw / wecom 侵入）
+
+`src/modules/session-bridge.ts`：
+
+1. **`readChatId` 多字段 fallback**：`chat_id` / `chatid` / `chatId` 三种命名都试；都没有 → 从 `cwd` 字段抽末段路径（`workspace-wecom-default-group-XXX` 等动态 agent workspace 标识跨版本/跨渠道都稳定）作 `cwd:<tail>` 形式 key
+
+2. **`findPriorBridgeSource` 加 mtime 最新 fallback**：`currentChatId === null`（OpenClaw 4.29+ 群聊场景）→ 选最新的 `.jsonl.reset.*`。**这是安全的**因为：
+   - sessionsDir 已经 per-agent 隔离（`agents/<agentId>/sessions/`）
+   - wecom-default-group-XXX / wecom-direct-XXX / wechat-service-XXX 等动态派生 agent 天然属于同一会话伙伴
+   - chat_id 严格匹配仅在 main agent 多渠道共用 sessions 时有意义（这场景没有 .jsonl.reset.* 跨渠道混淆）
+
+3. **主流程**：行 316 `if (!currentChatId) return undefined` 删除——允许 null 进 findPriorBridgeSource，由后者的 fallback 接管
+
+### 设计哲学
+
+**严格匹配条件不该成为唯一失败点**——v5.7.26 加 chat_id 严格匹配是为了"鲁棒性"（怕 sessionKey 大小写归一不一致），但当 chat_id 字段本身在 jsonl 头里**不写出来**时，整个桥接流程跪掉。修法：**降级保底**——chat_id 命中优先（保 v5.7.26 wecom direct 行为），命中失败 fallback 到 per-agent + mtime 最新（足够稳）。
+
+### 红线自查
+
+- ✅ 不修 openclaw 核心 / 不动 wecom 插件 / 不复制龙虾原生
+- ✅ 无 `child_process`、零额外 IO
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ chat_id 命中场景行为不变（保留 v5.7.26 优先匹配）
+- ✅ 仅 fallback 路径变化，对已工作的 wecom direct 场景零影响
+
+### 验证
+
+用户重启后让 ZhaoBo 在群里发消息：
+
+```bash
+# 看 enhance log 里是否有"桥接"实际触发记录（debug 模式开了的话）
+grep "session-bridge\|桥接\|prior=" ~/.openclaw/logs/gateway.log | tail -10
+```
+
+预期：群聊场景下桥接器现在能命中 mtime 最新的 .jsonl.reset.* → 注入 12KB prependContext + PRIOR_SESSION_CHECKPOINT banner → LLM 能续上昨天对话。
+
 ## 6.2.1 — 2026-05-06（memory supplement token 优化：12 行 → 3 行，省 350 token/call）
 
 ### 触发
