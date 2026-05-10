@@ -157,7 +157,7 @@ export function registerLargeFileBridge(
         };
       },
     }) as any,
-    { tier: "tools" },
+    { tier: "tools" } as any,
   );
 
   api.logger.info("[enhance] 大文件上传桥接模块已加载 (large-file-bridge)");

@@ -416,6 +416,13 @@ export interface EnhancePluginConfig {
    * "读+写"两侧 harness 闭环。
    */
   ccBridgeDispatchHarness?: { enabled?: boolean };
+  /**
+   * v6.5.1: 蓝火智能体关键词触发器 — 用户消息以"蓝火 X"或"@蓝火 X"开头时
+   * hook 直接 HTTP POST cc-media-bridge:18790/dispatch，桥 spawn cc-media-task
+   * 真派活，立即返 task_id；hook 让 LLM 只 echo 结果。
+   * **完全绕开 LLM 决策**：蓝火 = 独立 HTTP 服务，关键词命中即真派活。
+   */
+  ccBridgeKeywordDispatch?: { enabled?: boolean };
   /** v6.x: 大文件上传桥接（检测企微 >100MB 错误 + 用户意图 + 上传表单） */
   largeFileBridge?: LargeFileBridgeConfig;
 }

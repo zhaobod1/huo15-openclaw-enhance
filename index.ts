@@ -48,6 +48,7 @@ import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
 import { registerCcBridgePreFetch } from "./src/modules/cc-bridge-pre-fetch.js";
 import { registerCcBridgeDispatchHarness } from "./src/modules/cc-bridge-dispatch-harness.js";
+import { registerCcBridgeKeywordDispatch } from "./src/modules/cc-bridge-keyword-dispatch.js";
 import { registerModelRouter } from "./src/modules/model-router.js";
 import { registerLargeFileBridge } from "./src/modules/large-file-bridge.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
@@ -349,6 +350,16 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.ccBridgeDispatchHarness?.enabled !== false,
         load: () => registerCcBridgeDispatchHarness(api),
+      },
+      {
+        // v6.5.1: 蓝火智能体关键词触发器（"封装 cc 为智能体" 用户决断版）
+        // 用户发"蓝火 X" / "@蓝火 X" → hook 直接 HTTP POST cc-media-bridge:18790/dispatch
+        // 桥 spawn cc-media-task 真派活 → 立即返 task_id → hook 让 LLM 只 echo 结果
+        // **完全绕开 LLM 决策**：蓝火 = 独立 HTTP 服务，关键词命中即真派活
+        name: "蓝火智能体关键词触发器",
+        tier: 1,
+        enabled: config.ccBridgeKeywordDispatch?.enabled !== false,
+        load: () => registerCcBridgeKeywordDispatch(api),
       },
       {
         // v6.x: 大文件上传桥接（企微 >100MB 文件错误检测 + 上传链接引导 + 上传表单）
