@@ -49,6 +49,7 @@ import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
 import { registerCcBridgePreFetch } from "./src/modules/cc-bridge-pre-fetch.js";
 import { registerCcBridgeDispatchHarness } from "./src/modules/cc-bridge-dispatch-harness.js";
 import { registerModelRouter } from "./src/modules/model-router.js";
+import { registerLargeFileBridge } from "./src/modules/large-file-bridge.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
@@ -348,6 +349,15 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.ccBridgeDispatchHarness?.enabled !== false,
         load: () => registerCcBridgeDispatchHarness(api),
+      },
+      {
+        // v6.x: 大文件上传桥接（企微 >100MB 文件错误检测 + 上传链接引导 + 上传表单）
+        // tier=2 balanced 默认启用——纯 before_prompt_build hook + 按需工具 enhance_upload_large_file
+        // 与 bot-share-link 互补（后者负责文件→链接转换，本模块负责检测+上传入口）
+        name: "大文件上传桥接",
+        tier: 2,
+        enabled: config.largeFileBridge?.enabled !== false,
+        load: () => registerLargeFileBridge(api, config.largeFileBridge),
       },
       // 智能贴士已合并到小火苗模块（before_prompt_build 统一输出）
       // {

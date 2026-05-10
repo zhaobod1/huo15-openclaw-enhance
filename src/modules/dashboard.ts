@@ -24,7 +24,8 @@ import {
   searchMemories,
 } from "../utils/sqlite-store.js";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow, type NotificationQueue } from "../types.js";
 import { buildSnapshot } from "./statusline.js";
@@ -456,6 +457,133 @@ loadPet();
 </body>
 </html>`;
 
+function getUploadDir(): string {
+  const dir = join(homedir(), ".openclaw", "plugin-configs", "enhance", "uploads");
+  try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  return dir;
+}
+
+function sanitizeUploadFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_").slice(0, 128) || "upload.bin";
+}
+
+function parseMultipart(buffer: Buffer, boundary: string): { filename: string; data: Buffer; contentType: string } | null {
+  const boundaryDelim = Buffer.from(`--${boundary}`);
+  const endDelim = Buffer.from(`--${boundary}--`);
+  const crlf = Buffer.from("\r\n\r\n");
+  const startIdx = buffer.indexOf(boundaryDelim);
+  if (startIdx < 0) return null;
+  let pos = startIdx + boundaryDelim.length;
+  const headersEnd = buffer.indexOf(crlf, pos);
+  if (headersEnd < 0) return null;
+  const headersSection = buffer.subarray(pos, headersEnd).toString("utf8");
+  const filenameMatch = headersSection.match(/filename="([^"]+)"/i);
+  const contentTypeMatch = headersSection.match(/Content-Type:\s*(.+)/i);
+  const filename = filenameMatch ? filenameMatch[1]!.trim() : "upload.bin";
+  const contentType = contentTypeMatch ? contentTypeMatch[1]!.trim() : "application/octet-stream";
+  const dataStart = headersEnd + crlf.length;
+  const endIdx = buffer.indexOf(endDelim, dataStart);
+  if (endIdx < 0) return null;
+  let dataEnd = endIdx;
+  if (buffer[dataEnd - 1] === 0x0a) dataEnd--;
+  if (buffer[dataEnd - 1] === 0x0d) dataEnd--;
+  const data = buffer.subarray(dataStart, dataEnd);
+  return { filename, data, contentType };
+}
+
+async function handleUpload(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  if (req.method !== "POST") return false;
+  const contentType = String(req.headers["content-type"] ?? "");
+  const boundaryMatch = contentType.match(/boundary=(.+)/i);
+  if (!boundaryMatch) {
+    const body = JSON.stringify({ error: "需要 multipart/form-data" });
+    res.writeHead(400, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return true;
+  }
+  const boundary = boundaryMatch[1]!.trim().replace(/^["']|["']$/g, "");
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  const parsed = parseMultipart(Buffer.concat(chunks), boundary);
+  if (!parsed) {
+    const body = JSON.stringify({ error: "无法解析上传文件" });
+    res.writeHead(400, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return true;
+  }
+  const safeName = sanitizeUploadFilename(parsed.filename);
+  const destPath = join(getUploadDir(), `${Date.now()}-${safeName}`);
+  try {
+    writeFileSync(destPath, parsed.data);
+  } catch (err) {
+    const body = JSON.stringify({ error: `写入文件失败: ${String(err)}` });
+    res.writeHead(500, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return true;
+  }
+  sendJson(res, { ok: true, filename: safeName, size: parsed.data.length, path: destPath });
+  return true;
+}
+
+const UPLOAD_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大文件上传 — 龙虾增强包</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f1117;color:#e0e0e0;padding:24px;max-width:500px;margin:0 auto;text-align:center}
+  h1{font-size:1.6em;margin-bottom:8px;color:#ff6b35}
+  .subtitle{color:#888;margin-bottom:24px;font-size:0.9em}
+  .dropzone{border:2px dashed #2a2d37;border-radius:12px;padding:40px 20px;margin-bottom:16px;transition:border-color .3s;cursor:pointer}
+  .dropzone:hover,.dropzone.dragover{border-color:#ff6b35}
+  .dropzone p{color:#888;font-size:0.9em}
+  .dropzone .icon{font-size:2.5em;margin-bottom:8px}
+  #fileInput{display:none}
+  #progress{display:none;margin-bottom:16px}
+  #progress .bar{width:100%;height:8px;background:#2a2d37;border-radius:4px;overflow:hidden;margin-top:8px}
+  #progress .fill{height:100%;background:linear-gradient(90deg,#ff6b35,#ffd700);border-radius:4px;width:0;transition:width .3s}
+  #result{display:none;background:#1a1d27;border-radius:12px;padding:16px;border:1px solid #2a2d37;margin-bottom:16px;text-align:left}
+  #result h3{color:#ff6b35;font-size:0.9em;margin-bottom:8px}
+  #result .info{font-size:0.8em;color:#888;margin-bottom:4px}
+  #result a{color:#ff6b35;word-break:break-all}
+  #result .copy-btn{background:#ff6b35;color:#0f1117;border:none;border-radius:6px;padding:6px 12px;margin-top:8px;cursor:pointer;font-size:0.8em}
+  #error{display:none;background:#3a1a1a;border-radius:8px;padding:12px;border:1px solid #5a2a2a;color:#ff6666;font-size:0.85em;margin-bottom:16px}
+  a.back{color:#888;font-size:0.8em}
+</style>
+</head>
+<body>
+<h1>&#x1F4E4; 大文件上传</h1>
+<p class="subtitle">企微聊天文件上限 100MB，需要传大文件时通过此页面提交</p>
+<div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+  <div class="icon">&#x1F4C1;</div>
+  <p>点击选择文件或拖拽文件到此处</p>
+  <p style="font-size:0.75em;color:#555">支持任意格式，无大小限制</p>
+</div>
+<input type="file" id="fileInput" onchange="handleFile(this.files[0])">
+<div id="progress"><p id="progressText" style="font-size:0.85em">上传中...</p><div class="bar"><div class="fill" id="progressFill"></div></div></div>
+<div id="error"></div>
+<div id="result">
+  <h3>&#x2705; 上传成功</h3>
+  <p class="info">文件名: <span id="resultName"></span></p>
+  <p class="info">文件大小: <span id="resultSize"></span></p>
+  <p class="info">文件路径: <span id="resultPath" style="color:#888"></span></p>
+</div>
+<p><a class="back" href="/plugins/enhance">&larr; 返回仪表盘</a></p>
+<script>
+var dz=document.getElementById('dropzone');
+['dragenter','dragover','dragleave','drop'].forEach(function(e){dz.addEventListener(e,function(ev){ev.preventDefault();ev.stopPropagation();});});
+['dragenter','dragover'].forEach(function(e){dz.addEventListener(e,function(){dz.classList.add('dragover');});});
+['dragleave','drop'].forEach(function(e){dz.addEventListener(e,function(){dz.classList.remove('dragover');});});
+dz.addEventListener('drop',function(ev){var dt=ev.dataTransfer;if(dt.files.length)handleFile(dt.files[0]);});
+function formatSize(b){if(!b)return'0 B';var u=['B','KB','MB','GB'],i=0,v=b;while(v>=1024&&i<u.length-1){v/=1024;i++;}return v.toFixed(i>0?1:0)+' '+u[i];}
+function handleFile(file){if(!file)return;document.getElementById('result').style.display='none';document.getElementById('error').style.display='none';document.getElementById('progress').style.display='block';document.getElementById('progressText').textContent='正在上传 '+file.name+'...';document.getElementById('progressFill').style.width='20%';var fd=new FormData();fd.append('file',file);var xhr=new XMLHttpRequest();xhr.open('POST','/plugins/enhance/upload',true);xhr.upload.onprogress=function(ev){if(ev.lengthComputable)document.getElementById('progressFill').style.width=(20+60*(ev.loaded/ev.total))+'%';};xhr.onload=function(){document.getElementById('progressFill').style.width='100%';setTimeout(function(){document.getElementById('progress').style.display='none';if(xhr.status===200){try{var d=JSON.parse(xhr.responseText);document.getElementById('resultName').textContent=d.filename;document.getElementById('resultSize').textContent=formatSize(d.size);document.getElementById('resultPath').textContent=d.path;document.getElementById('result').style.display='block';}catch(e){showError('响应解析失败: '+xhr.responseText.slice(0,100));}}else{try{var e=JSON.parse(xhr.responseText);showError(e.error||'HTTP '+xhr.status);}catch(e2){showError('HTTP '+xhr.status+': '+xhr.responseText.slice(0,100));}}},300);};xhr.onerror=function(){document.getElementById('progress').style.display='none';showError('网络错误，请重试');};xhr.send(fd);}
+function showError(msg){document.getElementById('error').textContent=msg;document.getElementById('error').style.display='block';}
+</script>
+</body>
+</html>`;
+
 export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardConfig, notifyQueue?: NotificationQueue, sharedDb?: Database.Database) {
   const openclawDir = resolveOpenClawHome(api);
 
@@ -603,6 +731,15 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
       // 宠物独立页面
       if (pathname === "/plugins/enhance/pet") {
         sendHtml(res, PET_PAGE_HTML);
+        return true;
+      }
+
+      // 大文件上传页面
+      if (pathname === "/plugins/enhance/upload") {
+        if (req.method === "POST") {
+          return handleUpload(req, res);
+        }
+        sendHtml(res, UPLOAD_HTML);
         return true;
       }
 
