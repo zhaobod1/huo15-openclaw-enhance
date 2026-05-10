@@ -426,6 +426,16 @@ export interface EnhancePluginConfig {
   /** v6.x: 大文件上传桥接（检测企微 >100MB 错误 + 用户意图 + 上传表单） */
   largeFileBridge?: LargeFileBridgeConfig;
   /**
+   * v6.5.3: 上下文守护 (Context Watchdog)
+   * 会话级 token 累加 + 三阶预警（70%/85%/95%）+ ≥80% 时建议切大 ctx 模型。
+   * hook llm_output 拿真实 usage 累加，hook before_prompt_build 注入 banner，
+   * hook after_compaction 自动归零。enhance_ctx_status 工具让 LLM 主动查。
+   *
+   * 与龙虾原生互补：龙虾原生 isContextOverflowError 在 overflow **错误后**
+   * 才走 model-fallback；本模块在 overflow **之前** 预警，让 LLM 主动收尾。
+   */
+  contextWatchdog?: ContextWatchdogConfig;
+  /**
    * v6.5.2: BOT 文件上传桥（用户 → AI 反向兜底，token 化基建）
    * 与 bot-share-link 镜像对称：bot-share-link = AI → 用户（出站下载链接）
    * bot-upload-link = 用户 → AI（入站上传链接）。
@@ -530,6 +540,26 @@ export interface LargeFileBridgeConfig {
   detectWecomError?: boolean;
   /** 用户提大文件/上传相关关键词时主动提供链接，默认 true */
   proactiveOffer?: boolean;
+}
+
+// ── 上下文守护 (v6.5.3) ──
+/**
+ * 三阶预警 + 自动建议切大 ctx 模型。
+ * 默认阈值：hintAt=0.70 / warnAt=0.85 / criticalAt=0.95 / escalateToLongCtxAt=0.80。
+ * 同 session 同阈值只警告一次（防抖）。after_compaction 自动归零（保留 30%）。
+ */
+export interface ContextWatchdogConfig {
+  enabled?: boolean;
+  /** hint 阈值，默认 0.70（70%）— 友好提示"建议告一段落" */
+  hintAt?: number;
+  /** warn 阈值，默认 0.85（85%）— 强烈建议 /compact 或切模型 */
+  warnAt?: number;
+  /** critical 阈值，默认 0.95（95%）— 命令停手 */
+  criticalAt?: number;
+  /** escalate 阈值，默认 0.80（80%）— 当前 model ctx<256K 时附带切大 ctx 建议 */
+  escalateToLongCtxAt?: number;
+  /** debug 日志，默认 false */
+  debug?: boolean;
 }
 
 // ── BOT 文件上传桥（v6.5.2，token 化基建，类比 bot-share-link 镜像对称） ──

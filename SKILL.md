@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.5.2 — BOT 文件上传桥（用户 → AI 反向兜底）+ v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复。bot-upload-link 新模块解企微 100MB 上限：LLM 调 enhance_upload_link 给 token URL，用户浏览器拖拽上传任意大小（≤2GB），LLM 调 enhance_upload_check 拉清单——零新 npm 依赖（fetch+octet-stream），跟 bot-share-link 共享 baseUrl 配置。v6.5.1 蓝火智能体关键词触发器：用户发『蓝火 X』/『@蓝火 X』hook 直接 HTTP POST cc-media-bridge:18790/dispatch 真派活，完全绕开 LLM 决策。v6.4.2 session-bridge 修群聊场景跨夜失忆（chat_id null fallback + 多字段）。继承 v6.2.1 token 优化 + v6.2.0 三层守卫 + v6.1.x 智能路由 + v5.8.x 25+ 模块。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.5.2
+description: "火一五·克劳德·龙虾增强插件 v6.5.4 — 上下文守护（Context Watchdog）：会话级 token 累加 + 三阶预警（70%/85%/95%）+ ≥80% 建议切大 ctx 模型。hook llm_output 拿 usage 累加，before_prompt_build 注 banner，after_compaction 自动归零。enhance_ctx_status 工具让 LLM 主动查。与龙虾原生 isContextOverflowError 错误后 fallback 互补：本模块在 overflow 错误前预警，让 LLM 主动 /compact 或切大 ctx 模型。继承 v6.5.3 manifest contracts.tools 契约 + v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复 + v6.2.x 三层守卫。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.5.4
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

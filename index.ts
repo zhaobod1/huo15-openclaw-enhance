@@ -44,6 +44,7 @@ import { registerSessionLifecycle } from "./src/modules/session-lifecycle.js";
 import { registerNativeMemorySurfacer } from "./src/modules/native-memory-surfacer.js";
 import { registerBotShareLink } from "./src/modules/bot-share-link.js";
 import { registerBotUploadLink } from "./src/modules/bot-upload-link.js";
+import { registerContextWatchdog } from "./src/modules/context-watchdog.js";
 import { registerSessionBridge } from "./src/modules/session-bridge.js";
 import { registerHookProfiler } from "./src/modules/hook-profiler.js";
 import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
@@ -304,6 +305,18 @@ export default definePluginEntry({
         tier: 1,
         enabled: config.botShare?.enabled !== false,
         load: () => registerBotShareLink(api, config.botShare),
+      },
+      {
+        // v6.5.3: 上下文守护（Context Watchdog）
+        // hook llm_output 累加 token usage，70%/85%/95% 三阶预警 banner，
+        // ≥80% 且当前 model ctx<256K 时附带"切大 ctx 模型"建议。
+        // hook after_compaction 自动归零。enhance_ctx_status 工具让 LLM 主动查。
+        // 龙虾原生在 overflow 错误后才走 model-fallback；本模块在错误前预警让 LLM 主动收尾。
+        // tier=1 minimal 也启用——纯观察 + prompt supplement，零 child_process / 零工具开销
+        name: "上下文守护",
+        tier: 1,
+        enabled: config.contextWatchdog?.enabled !== false,
+        load: () => registerContextWatchdog(api, config.contextWatchdog),
       },
       {
         // v6.5.2: BOT 文件上传桥（用户 → AI 反向兜底，token 化基建）

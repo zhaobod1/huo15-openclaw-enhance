@@ -2,6 +2,69 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.4 — 2026-05-11（上下文守护：三阶预警 + ≥80% 建议切大 ctx 模型）
+
+### 触发
+
+用户：『上下文快超过了，要及时处理、或者切换模型』。
+
+实测痛点：长会话 + 跨日续接 + 多轮工具调用，token 累计到 180K+ 还没主动 `/compact`，突然撞 200K 上限报错。龙虾原生 `isContextOverflowError` 在 overflow **错误发生后**才走 model-fallback；用户体感是"突然报错"或"突然丢上下文"，没有预警。
+
+### 龙虾原生已有（红线 #2 不复制）
+
+- `isContextOverflowError` / `isLikelyContextOverflowError` 错误检测
+- `model-fallback.ts:1011` ctx overflow 触发后做 model fallback
+- `/compact` 命令 + `before_compaction` / `after_compaction` hook
+
+### 龙虾原生没有的（本模块补）
+
+新建 `src/modules/context-watchdog.ts`（~280 行）：
+
+| 阶段 | 阈值 | 动作 |
+|---|---|---|
+| HINT | ≥70% | 友好提示『建议告一段落或主动 /compact』|
+| WARN | ≥85% | ⚠️ 强烈建议立即 /compact 或切大 ctx 模型 |
+| CRITICAL | ≥95% | 🚨 命令式『立即停止新任务，先总结 + memory_store + /compact』|
+| ESCALATE | ≥80% 且当前 model ctx<256K | 附带『切大 ctx 模型』候选清单（claude-opus-4.7-1m / gemini-2.5-pro / kimi-k2）|
+
+**hook 路径**：
+
+1. `llm_output` 拿真实 `usage = { input, output, cacheRead, cacheWrite, total }` 累加到 `Map<sessionKey, SessionUsage>`
+2. `before_prompt_build` 评估当前 percent，命中阈值注入 prependContext banner（同 session 同阈值只警告一次防抖）
+3. `after_compaction` 自动归零（保留 30% 估计；龙虾不 emit 真实 compact 后 size，保守估）
+4. `enhance_ctx_status` tool 让 LLM 主动查（返 `tokensUsed/ctxMax/percent/severity/recommendation/shouldEscalate/longCtxCandidates`）
+
+### 已知 model ctx 上限表
+
+内置 18 个常见 model（Anthropic / OpenAI / Google / 智谱 / DeepSeek / Moonshot / Minimax）；启发式 fallback（`-1m` / `-256k` / `-200k` / `-128k` / `-32k` 后缀解析）；未知 model 默认 128K 保守值。
+
+### 配置
+
+```jsonc
+{
+  "contextWatchdog": {
+    "enabled": true,           // tier=1 minimal 也启用
+    "hintAt": 0.70,
+    "warnAt": 0.85,
+    "criticalAt": 0.95,
+    "escalateToLongCtxAt": 0.80,
+    "debug": false
+  }
+}
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError 错误检测（我们做"预防"，龙虾做"善后"）
+- ✅ 不抢龙虾的 model-fallback 决策（仅"建议"，由 LLM 或 model-router 自行切）
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ tier=1 minimal 也启用——纯观察 + 1 prompt supplement + 3 hook + 1 tool，零侵入
+
+### 与现有 model-router 的关系
+
+不冲突。model-router 处理"任务复杂度 → tier 选择 → quota-aware ban"；ctx-watchdog 处理"用量观察 → 阈值预警 → 切模型建议"。两者都在 hook 链里，互不抢决策——ctx-watchdog 仅提示，最终切模型决策仍由 model-router 或 LLM 主动调用 `enhance_route_set` 完成。
+
 ## 6.5.3 — 2026-05-11（manifest contracts.tools — 适配 OpenClaw 2026.5.x loader 契约）
 
 ### 触发
