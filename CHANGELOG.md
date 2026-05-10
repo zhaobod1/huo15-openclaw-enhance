@@ -2,6 +2,49 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.3 — 2026-05-11（manifest contracts.tools — 适配 OpenClaw 2026.5.x loader 契约）
+
+### 触发
+
+5/11 凌晨 OpenClaw 2026.5.x gateway 启动 log 大量 warning：
+
+```
+[gateway] [plugins] plugin must declare contracts.tools before registering agent tools
+  (plugin=enhance, source=...dist/index.js)
+```
+
+每次 register 一个工具就报一条,enhance 48 个工具刷出 48 条 warning。
+
+### 根因
+
+OpenClaw 2026.5.x `dist/loader-B-GXgDrk.js` 在 `registerTool` 加了契约校验：插件必须在 manifest 根级 `contracts.tools[]` 显式声明所有要 register 的 tool 名,否则 register 调用被拒。`dist/tool-contracts-DxWKDI1k.js` 的 `normalizePluginToolContractNames(record.contracts)` 读 `manifest.contracts.tools`。
+
+### 改动
+
+`openclaw.plugin.json` 加根级 `contracts.tools` 数组,从 src/modules/*.ts 实际 register 的 48 个工具自动扫出（按字母序排）：
+
+- bot-share-link (4): enhance_share_file/list/revoke/set_baseurl
+- bot-upload-link (3): enhance_upload_check/link/revoke
+- chapter-marks (2): enhance_chapter_list / enhance_mark_chapter
+- config-doctor (1): enhance_config_doctor
+- hook-profiler (1): enhance_hook_doctor
+- large-file-bridge (1): enhance_upload_large_file
+- memory-integrator (1): enhance_memory_export
+- mode-gate (3): enhance_set_mode/current_mode/exit_plan_mode
+- model-router (7): enhance_model_route_set/status/disable/mode/ban_status/unban/history
+- scheduled-tasks-bridge (3): enhance_loop_register/list/disable
+- session-doctor / session-recap / skill-doctor / skill-recommender / skill-installer / spawn-task / statusline / transcript-search / trajectory-archiver (各 1)
+- structured-memory (4): enhance_memory_store/search/review/purge
+- task-planner / todo-tracker (3): enhance_plan_task / enhance_todo_write/list/update
+- tool-safety (3): enhance_safety_rules/log + enhance_retry_status
+- workflow-hooks (2): enhance_workflow / enhance_task
+
+### 不影响
+
+- 没改任何代码逻辑,只动 manifest
+- 工具注册行为不变,SDK 调用方式不变
+- 兼容旧 OpenClaw（2026.4.x 不读 contracts.tools 字段,无副作用）
+
 ## 6.5.2 — 2026-05-11（BOT 文件上传桥：用户 → AI 反向兜底，修企微 100MB 上限）
 
 ### 触发
