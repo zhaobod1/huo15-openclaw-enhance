@@ -84,7 +84,8 @@ export function registerLargeFileBridge(
     const sessionId = pickSessionId(ctx);
     const key = `${agentId}::${sessionId}`;
 
-    const channel = getChannel(sessionId || "");
+    // 直接从 ctx 获取 channel，不依赖缓存
+    const channel = ((ctx as any)?.channel ?? (ctx as any)?.originatingChannel ?? "").toLowerCase().trim();
     if (channel !== "wecom") return;
 
     const promptText = (() => {
