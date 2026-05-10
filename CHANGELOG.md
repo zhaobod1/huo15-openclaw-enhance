@@ -2,6 +2,122 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.5 — 2026-05-11（上下文守护『真实切换』闭环：≥95% 强切 + ≥80% 工具 + 事前估算）
+
+### 触发
+
+v6.5.4 上线后梳理出三个 P0 薄弱点：
+1. **预警仅"建议"，没真切**：banner 让 LLM 看到，但 LLM 大概率回复用户『建议你新开会话』把活推回去——没有主动切大 ctx 模型的工具
+2. **prompt size 入场预估缺失**：只有 `llm_output` 事后累加，预警永远迟一拍——本轮 prompt 已发出去
+3. **long-ctx 推荐没排除 banned**：v6.5.4 推荐 `claude-opus-4.7-1m` 但如果它刚被 latency-tracker ban 了 → LLM 切过去秒报错（P3-14 顺手修）
+
+### 改动
+
+`src/modules/context-watchdog.ts`（v6.5.4 280 行 → v6.5.5 ~480 行）：
+
+#### A. P0-1 真实切换（before_model_resolve + 工具双闸）
+
+新增 `before_model_resolve` hook，**priority=100**（OpenClaw mergeBeforeModelResolve 用 firstDefined：高 priority 先跑，第一个返 modelOverride 的赢）：
+
+```ts
+api.on("before_model_resolve", (event, ctx) => {
+  // 事前估算本轮 prompt：totalTokens + estimatePromptTokens(event)
+  const projected = s.totalTokens + estimatePromptTokens(event);
+  const percent = projected / s.lastModelCtxMax;
+
+  // 强切条件：percent ≥ forceEscalateAt (默认 0.95) 且当前 ctx<256K
+  if (percent < forceEscalateAt) return undefined;
+  if (s.lastModelCtxMax >= 256_000) return undefined;
+
+  const target = pickLongCtxModel(longCtxCandidates, s.lastModel);
+  if (!target) return undefined; // 全 banned 时降级到 banner
+
+  if (!s.originalModel) s.originalModel = s.lastModel; // 记原始 model 备切回
+  return { modelOverride: target };
+}, { priority: 100 });
+```
+
+新增 LLM 工具 `enhance_route_to_long_ctx({reason?, target?})`：
+- 让 LLM 在看到 ≥80% banner 后主动调（明确入口，不靠 LLM 自己想）
+- target 可选；不填按 `longCtxCandidates` 顺序自动选第一个非 banned 且 ctx≥256K 的
+- 调完只更新 sessions 状态，**实际切**等下一轮 LLM 调用 hook 接管（避免改本轮）
+
+#### B. P0-2 事前 prompt 估算
+
+新增 `estimatePromptTokens(event)` 函数：
+- 文本：4 chars/token（保守=高估，宁可早预警）
+- 图片：每张 1500 token
+- 视频：每帧 1500 token
+- 音频：每秒 100 token
+
+新增 `pendingTokens` 字段到 `SessionUsage`：
+- `llm_input` hook 来时设为 estimate（覆盖，因为一轮一次）
+- `llm_output` hook 拿到真实 usage 时清零（被真值替代）
+- `before_prompt_build` / `before_model_resolve` 用 `totalTokens + pendingTokens` 做阈值评估
+
+效果：v6.5.4 是『**这轮发完才知道炸了**』，v6.5.5 是『**这轮还没发就拦下来切模型**』。
+
+#### C. P3-14 顺手修：long-ctx 选型跳过 banned
+
+新增 `pickLongCtxModel(candidates, currentModel)` 函数：
+- 按 `longCtxCandidates` 顺序遍历（默认 8 个：opus-1m / gemini-pro / gemini-flash / kimi-k2 / ...）
+- 跳过当前 model（避免切到自己）
+- 跳过 `KNOWN_MODEL_CTX_MAX[c] < 256_000` 的（不算 long ctx）
+- 跳过 `isModelBanned()` 命中的（含 sidus/minimax/anthropic/openai/google 五个常见 prefix 模糊匹配）
+
+#### D. 配置扩展
+
+```ts
+ContextWatchdogConfig {
+  // 原 v6.5.4 字段保留
+  hintAt?: number;            // 0.70
+  warnAt?: number;            // 0.85
+  criticalAt?: number;        // 0.95
+  escalateToLongCtxAt?: number; // 0.80（仅"建议"阈值）
+
+  // v6.5.5 新增
+  forceEscalateAt?: number;    // 0.95（强切阈值）
+  longCtxCandidates?: string[]; // 默认 8 个；用户可覆盖
+}
+```
+
+### Hook chain 协调（与 model-router 不冲突）
+
+| 优先级 | 模块 | 角色 | 决策 |
+|---|---|---|---|
+| 100 | ctx-watchdog | 事前估算 | percent≥95% & ctx<256K → modelOverride |
+| 0 (默认) | model-router | 任务/渠道/quota 路由 | 按 routeTask + selectProvider 返 modelOverride |
+
+OpenClaw `mergeBeforeModelResolve` 用 `firstDefined(prev, next)`：ctx-watchdog 先跑，返 modelOverride 后 model-router 还会跑但 modelOverride 已被高优先级占住。日志可见 `[hooks] before_model_resolve decided by ctx-watchdog (priority=100); skipping remaining handlers`（实际是 mergeBeforeModelResolve 不 skip，但 firstDefined 让结果固定）。
+
+### 用户使用流程对比
+
+```
+v6.5.4（纸上谈兵）
+  85% banner 注入 → LLM 看到 → LLM 回复用户『建议新开会话』← 推皮球
+  95% banner 注入 → LLM 看到 → LLM 调 /compact 或继续报错 ← 没主动切
+
+v6.5.5（真实切换）
+  85% banner 注入 → LLM 看到 → LLM 调 enhance_route_to_long_ctx ← 主动切
+  95% 系统强切 → ctx-watchdog hook 在 before_model_resolve 直接返 modelOverride ← 绕开 LLM
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError 错误检测
+- ✅ 不抢龙虾 model-fallback 决策（仅在错误**前**预防；错误后还是龙虾负责）
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 跟 model-router 通过 hook priority 协调，不破坏其 cache / circuit-breaker / quota-aware 逻辑
+
+### 后续路线（v6.5.6 / v6.6.0 candidates）
+
+- P0-3：sqlite 持久化 sessions（跨重启不丢）
+- P1-5：ctx 降下来后建议切回 `originalModel`（after_compaction 触发）
+- P1-4：cost-aware 切换（cost-budget mode 跟 ctx 联动，月度配额）
+- P1-7：subagent token 累加回 main agent
+- P2-8：channel-aware 阈值差异化（群聊更激进，terminal 宽松）
+
 ## 6.5.4 — 2026-05-11（上下文守护：三阶预警 + ≥80% 建议切大 ctx 模型）
 
 ### 触发

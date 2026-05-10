@@ -558,6 +558,19 @@ export interface ContextWatchdogConfig {
   criticalAt?: number;
   /** escalate 阈值，默认 0.80（80%）— 当前 model ctx<256K 时附带切大 ctx 建议 */
   escalateToLongCtxAt?: number;
+  /**
+   * v6.5.5: forceEscalate 阈值，默认 0.95（95%）。
+   * 达到该阈值且当前 model ctx<256K → ctx-watchdog 在 before_model_resolve 里
+   * **抢先**返 modelOverride 强切到 long-ctx model（priority=100，比 model-router 高）。
+   * 配合 enhance_route_to_long_ctx 工具让 LLM 主动调（≥80% 时）。
+   */
+  forceEscalateAt?: number;
+  /**
+   * v6.5.5: long-ctx 候选 model id 列表（按优先级降序）。
+   * ctx-watchdog 强切时按此顺序选第一个非 banned 且实际可用的；
+   * 不填用默认（claude-opus-4.7-1m → gemini-2.5-pro → kimi-k2 → ...）。
+   */
+  longCtxCandidates?: string[];
   /** debug 日志，默认 false */
   debug?: boolean;
 }

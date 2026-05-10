@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.5.4 — 上下文守护（Context Watchdog）：会话级 token 累加 + 三阶预警（70%/85%/95%）+ ≥80% 建议切大 ctx 模型。hook llm_output 拿 usage 累加，before_prompt_build 注 banner，after_compaction 自动归零。enhance_ctx_status 工具让 LLM 主动查。与龙虾原生 isContextOverflowError 错误后 fallback 互补：本模块在 overflow 错误前预警，让 LLM 主动 /compact 或切大 ctx 模型。继承 v6.5.3 manifest contracts.tools 契约 + v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复 + v6.2.x 三层守卫。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.5.4
+description: "火一五·克劳德·龙虾增强插件 v6.5.5 — 上下文守护『真实切换』闭环：before_model_resolve hook priority=100 在 ≥95% 时强切 long-ctx model（claude-opus-4.7-1m / gemini-2.5-pro / kimi-k2，跳过 banned）+ enhance_route_to_long_ctx 工具让 LLM ≥80% 主动调 + 事前 prompt 估算（4 chars/token + image×1500）pendingTokens 叠加做事前预警。从 v6.5.4『纸上谈兵』升级到 v6.5.5『真实接管』：LLM 看到 95% banner 时不只是建议，ctx-watchdog 直接绕开 LLM 改 modelOverride。继承 v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复 + v6.2.x 三层守卫。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.5.5
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
