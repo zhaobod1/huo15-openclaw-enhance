@@ -2,6 +2,80 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.6 — 2026-05-11（上下文守护『状态持久化 + 切回原模型』）
+
+### 触发
+
+v6.5.5 上线后路线图剩 11 个完善点，按优先级开干 P0-3 + P1-5：
+
+1. **P0-3 状态内存易丢**：sessions Map 内存 only，OpenClaw 重启清零——长会话跨日续接 (≥75min idle) 桥接进来后 ctx 计数从 0 起算，预警失灵
+2. **P1-5 没有"切回原模型"回归路径**：因 ctx 切到 long-ctx 后，/compact 成功 ctx 降下来，应该回原模型省钱（claude-opus-4.7-1m vs sonnet 价差 5x）
+
+### 改动
+
+#### A. P0-3 状态持久化（sqlite ctx_usage 表，schema v6→v7）
+
+新建 `src/utils/ctx-usage-db.ts`（~140 行）：
+
+```sql
+CREATE TABLE ctx_usage (
+  session_key TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL DEFAULT 'main',
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  last_model TEXT,
+  last_model_ctx_max INTEGER NOT NULL DEFAULT 128000,
+  original_model TEXT,
+  last_warned_threshold REAL NOT NULL DEFAULT 0,
+  peak_percent REAL NOT NULL DEFAULT 0,
+  last_updated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+```
+
+`ON CONFLICT(session_key) DO UPDATE` 时 `peak_percent = MAX(stored, new)` 单调递增（为 P2-12 agent 画像铺路）。
+
+`context-watchdog.ts` 集成持久化：
+
+- **Lazy hydrate**：首次 `getOrCreate(sessionKey)` 查 sqlite，hit 则恢复 totalTokens / lastModel / originalModel / lastWarnedThreshold / peakPercent
+- **节流 flush**：`markDirty(sk)` 标记 + `scheduleFlush()` 10s 后批量 `batchSaveCtxUsage`（事务化）
+- **LRU eviction**：内存满（500 session）evict 时**不删 sqlite 行**（保留作画像）
+- **process.beforeExit / SIGTERM**：`finalFlush` 兜底同步落盘
+- **30 天 TTL 清理**：启动期 `purgeOldCtxUsage(30)`
+
+#### B. P1-5 切回原模型回归路径
+
+`after_compaction` hook 升级：
+
+```ts
+if (s.originalModel && s.lastModel !== s.originalModel) {
+  const projectedInOriginal = s.totalTokens / resolveCtxMax(s.originalModel);
+  if (projectedInOriginal < 0.6) {
+    revertSuggestPending.set(sessionKey, s.originalModel);
+  }
+}
+```
+
+`before_prompt_build` 一次性消费 revert hint，抽出 `evalThresholdBanner` 复用 → revert hint 与三阶 banner 可叠加。
+
+#### C. 两个新工具
+
+| 工具 | 触发场景 | 行为 |
+|---|---|---|
+| `enhance_route_revert_to_original({reason?})` | LLM 看到 revert hint 后调 | 清掉 `originalModel`，让 model-router 接管重选 |
+| `enhance_ctx_profile({agentId?})` | 用户/LLM 想看历史画像 | 返 `sessions / avgPeakPercent / maxPeakPercent` |
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError
+- ✅ 不抢龙虾 model-fallback（仅在错误前预防）
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ sqlite 不可用时 graceful degrade
+
+### 后续路线（v6.6.0 candidates）
+
+P1-4 cost-aware / P1-6 多模态 token / P1-7 subagent 累加 / P2-8 channel-aware 阈值 / P2-9 预测式提醒。
+
 ## 6.5.5 — 2026-05-11（上下文守护『真实切换』闭环：≥95% 强切 + ≥80% 工具 + 事前估算）
 
 ### 触发

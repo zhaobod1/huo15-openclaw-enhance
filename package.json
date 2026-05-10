@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.5.5",
+  "version": "6.5.6",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.5.5 — 上下文守护『真实切换』闭环：(1) before_model_resolve hook (priority=100) ≥95% 时强切到 long-ctx model（claude-opus-4.7-1m / gemini-2.5-pro / kimi-k2，自动跳过 banned）；(2) enhance_route_to_long_ctx 工具让 LLM ≥80% 时主动调；(3) 事前 prompt 估算（4 chars/token + image×1500 + video frames + audio sec），pendingTokens 叠加 totalTokens 做事前预警，不再迟一拍。继承 v6.5.4 三阶预警 banner 70/85/95% + v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复 + v6.2.x 三层守卫。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.5.6 — 上下文守护『状态持久化 + 切回原模型』：(1) sqlite ctx_usage 表（schema v7）跨重启不丢，lazy hydrate + 10s 节流 flush + 30 天 TTL 清理 + beforeExit/SIGTERM finalFlush 兜底；(2) after_compaction 后 ctx 降到 < 60% 原 model 上限 → 自动推 revertSuggestPending banner，建议切回 originalModel 省成本；(3) enhance_route_revert_to_original / enhance_ctx_profile 两个新工具（agent 历史 peak/avg 画像）。继承 v6.5.5 真实切换闭环（≥95% 强切 + enhance_route_to_long_ctx + 事前 prompt 估算）+ v6.5.4 三阶预警 banner + v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活 + v6.4.2 群聊失忆修复。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

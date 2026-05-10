@@ -33,6 +33,14 @@ import { Type } from "@sinclair/typebox";
 import { DEFAULT_AGENT_ID } from "../types.js";
 import type { ContextWatchdogConfig } from "../types.js";
 import { isModelBanned } from "../utils/latency-tracker.js";
+import { getDb } from "../utils/sqlite-store.js";
+import {
+  loadCtxUsage,
+  batchSaveCtxUsage,
+  getAgentCtxProfile,
+  purgeOldCtxUsage,
+  type CtxUsageRow,
+} from "../utils/ctx-usage-db.js";
 
 // ── 已知 model contextWindow 表（fallback；优先用 openclaw.json 实际值） ──
 //
@@ -283,18 +291,103 @@ export function registerContextWatchdog(
       : LONG_CTX_CANDIDATES_DEFAULT;
   const debug = config?.debug === true;
 
-  // 会话级累加器（in-memory；reset 后清零，符合龙虾会话生命周期）
+  // v6.5.6: 会话级累加器（in-memory）+ dirty 集合（节流 flush 到 sqlite）+ peak 画像
   const sessions = new Map<string, SessionUsage>();
+  const dirtySessionKeys = new Set<string>();
+  const sessionPeakPercent = new Map<string, number>();
+  let flushTimer: NodeJS.Timeout | null = null;
+  const FLUSH_INTERVAL_MS = 10_000;
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushDirtySessions();
+    }, FLUSH_INTERVAL_MS);
+    flushTimer.unref?.();
+  }
+
+  function flushDirtySessions() {
+    if (dirtySessionKeys.size === 0) return;
+    let db;
+    try {
+      db = getDb();
+    } catch {
+      dirtySessionKeys.clear();
+      return;
+    }
+    const rows: CtxUsageRow[] = [];
+    for (const sk of dirtySessionKeys) {
+      const s = sessions.get(sk);
+      if (!s) continue;
+      const used = s.totalTokens + s.pendingTokens;
+      const percent = used / s.lastModelCtxMax;
+      const peak = Math.max(sessionPeakPercent.get(sk) ?? 0, percent);
+      sessionPeakPercent.set(sk, peak);
+      rows.push({
+        session_key: sk,
+        agent_id: s.agentId,
+        total_tokens: s.totalTokens,
+        last_model: s.lastModel ?? null,
+        last_model_ctx_max: s.lastModelCtxMax,
+        original_model: s.originalModel ?? null,
+        last_warned_threshold: s.lastWarnedThreshold,
+        peak_percent: peak,
+        last_updated_at: s.lastUpdatedAt,
+        created_at: s.lastUpdatedAt,
+      });
+    }
+    batchSaveCtxUsage(db, rows);
+    if (debug) api.logger.info(`[ctx-watchdog] flushed ${rows.length} sessions to sqlite`);
+    dirtySessionKeys.clear();
+  }
+
+  function markDirty(sessionKey: string) {
+    dirtySessionKeys.add(sessionKey);
+    scheduleFlush();
+  }
 
   function getOrCreate(sessionKey: string, agentId: string, modelId?: string): SessionUsage {
     let s = sessions.get(sessionKey);
     if (!s) {
-      // LRU eviction 防止内存涨爆
+      // v6.5.6: lazy hydrate from sqlite（首次见到此 sessionKey 才查一次）
+      let hydrated: SessionUsage | undefined;
+      try {
+        const db = getDb();
+        const row = loadCtxUsage(db, sessionKey);
+        if (row) {
+          hydrated = {
+            sessionKey,
+            agentId: row.agent_id || agentId,
+            totalTokens: row.total_tokens,
+            pendingTokens: 0,
+            lastModel: row.last_model ?? undefined,
+            lastModelCtxMax: row.last_model_ctx_max || resolveCtxMax(modelId),
+            originalModel: row.original_model ?? undefined,
+            lastWarnedThreshold: row.last_warned_threshold,
+            lastUpdatedAt: row.last_updated_at,
+          };
+          sessionPeakPercent.set(sessionKey, row.peak_percent);
+          if (debug) {
+            api.logger.info(
+              `[ctx-watchdog] hydrated from sqlite | session=${sessionKey.slice(0, 12)} | tokens=${row.total_tokens} | peak=${(row.peak_percent * 100).toFixed(1)}%`,
+            );
+          }
+        }
+      } catch {
+        /* sqlite 不可用，跳过 hydrate */
+      }
+
+      // LRU eviction（不删 sqlite 行，保留作画像）
       if (sessions.size >= MAX_TRACKED_SESSIONS) {
         const oldest = [...sessions.entries()].sort((a, b) => a[1].lastUpdatedAt - b[1].lastUpdatedAt)[0];
-        if (oldest) sessions.delete(oldest[0]);
+        if (oldest) {
+          dirtySessionKeys.add(oldest[0]);
+          flushDirtySessions();
+          sessions.delete(oldest[0]);
+        }
       }
-      s = {
+      s = hydrated ?? {
         sessionKey,
         agentId,
         totalTokens: 0,
@@ -316,6 +409,9 @@ export function registerContextWatchdog(
   function effectiveTokens(s: SessionUsage): number {
     return s.totalTokens + s.pendingTokens;
   }
+
+  // v6.5.6 P1-5: 会话级"建议切回原模型" 标记
+  const revertSuggestPending = new Map<string, string>();
 
   // ── hook 1: llm_output 累加 token usage（事后真实值）──
   api.on("llm_output", (event, ctx) => {
@@ -340,6 +436,7 @@ export function registerContextWatchdog(
 
     s.totalTokens += usageDelta;
     s.lastUpdatedAt = Date.now();
+    markDirty(sessionKey); // v6.5.6: 标记 dirty，等 10s 节流批量 flush 到 sqlite
 
     if (debug) {
       const pct = Math.round((s.totalTokens / s.lastModelCtxMax) * 100);
@@ -371,41 +468,51 @@ export function registerContextWatchdog(
   // ── hook 2: after_compaction 重置（龙虾刚 compact 完，token 大幅下降）──
   // openclaw 2026.4.x dist 实际 emit after_compaction 但 SDK 类型 union 可能落后；
   // 跟 model_call_ended 一样用 cast 绕过类型检查
+  // v6.5.6: 加 P1-5 切回原模型逻辑 + dirty 标记
   (api.on as any)("after_compaction", (_event: any, ctx: any) => {
     const sessionKey = pickSessionKey(ctx);
     if (!sessionKey) return;
     const s = sessions.get(sessionKey);
     if (!s) return;
     const before = s.totalTokens;
-    // 假设 compaction 后剩 30% 的 token（保守估计；真实值龙虾不告诉我们）
     s.totalTokens = Math.round(s.totalTokens * 0.3);
-    s.lastWarnedThreshold = 0; // 重置警告阈值
+    s.lastWarnedThreshold = 0;
     s.lastUpdatedAt = Date.now();
+    markDirty(sessionKey);
+
+    // v6.5.6 P1-5: 如果之前因 ctx 压力切过模型，现在 compact 后降下来 → 建议切回原模型
+    const afterPercent = s.totalTokens / s.lastModelCtxMax;
+    if (s.originalModel && s.lastModel !== s.originalModel) {
+      const originalCtxMax = resolveCtxMax(s.originalModel);
+      const projectedInOriginal = s.totalTokens / originalCtxMax;
+      if (projectedInOriginal < 0.6) {
+        revertSuggestPending.set(sessionKey, s.originalModel);
+        if (debug) {
+          api.logger.info(
+            `[ctx-watchdog] revert hint queued: ${s.lastModel} → ${s.originalModel} | session=${sessionKey.slice(0, 12)} | projectedInOriginal=${Math.round(projectedInOriginal * 100)}%`,
+          );
+        }
+      }
+    }
+
     if (debug) {
       api.logger.info(
-        `[ctx-watchdog] after_compaction: ${before.toLocaleString()} → ${s.totalTokens.toLocaleString()} | session=${sessionKey.slice(0, 12)}`,
+        `[ctx-watchdog] after_compaction: ${before.toLocaleString()} → ${s.totalTokens.toLocaleString()} (${Math.round(afterPercent * 100)}%) | session=${sessionKey.slice(0, 12)}`,
       );
     }
   });
 
-  // ── hook 3: before_prompt_build 注入预警 banner（v6.5.5 用 effectiveTokens 事前预警）──
-  api.on("before_prompt_build", (event, ctx) => {
-    const sessionKey = pickSessionKey(ctx);
-    if (!sessionKey) return undefined;
-    const s = sessions.get(sessionKey);
-    if (!s) return undefined;
-
-    // v6.5.5：阈值评估时也叠加本轮 prompt 的事前估算（如 llm_input 还没 fire 就用 event.prompt）
+  /** v6.5.6: 抽出来的阈值评估 + banner 构造（被 before_prompt_build 调用，可叠加 revert hint） */
+  function evalThresholdBanner(s: SessionUsage, event: any): string | null {
     const liveEstimate = s.pendingTokens > 0
       ? s.pendingTokens
       : estimatePromptTokens(event);
     const used = s.totalTokens + liveEstimate;
-    if (used === 0) return undefined;
+    if (used === 0) return null;
 
     const percent = used / s.lastModelCtxMax;
     const modelId = s.lastModel ?? "<unknown>";
 
-    // 取最高命中阈值
     let triggeredThreshold = 0;
     let banner = "";
     if (percent >= criticalAt) {
@@ -418,24 +525,47 @@ export function registerContextWatchdog(
       triggeredThreshold = hintAt;
       banner = buildHintBanner(percent, used, s.lastModelCtxMax, modelId);
     } else {
-      return undefined;
+      return null;
     }
 
-    // 防抖：同 session 同阈值只警告一次
-    if (s.lastWarnedThreshold >= triggeredThreshold) return undefined;
+    if (s.lastWarnedThreshold >= triggeredThreshold) return null;
     s.lastWarnedThreshold = triggeredThreshold;
+    markDirty(s.sessionKey);
 
-    // ≥ 80% 且 model 还在 < 256K，附加切模型建议
     let final = banner;
     if (percent >= escalateAt && s.lastModelCtxMax < 256_000) {
       final = banner + "\n\n" + buildEscalateHint(modelId, s.lastModelCtxMax, used, percent);
     }
-
     api.logger.info(
-      `[ctx-watchdog] threshold=${Math.round(triggeredThreshold * 100)}% triggered | session=${sessionKey.slice(0, 12)} | usage=${used}/${s.lastModelCtxMax}`,
+      `[ctx-watchdog] threshold=${Math.round(triggeredThreshold * 100)}% triggered | session=${s.sessionKey.slice(0, 12)} | usage=${used}/${s.lastModelCtxMax}`,
     );
+    return final;
+  }
 
-    return { prependContext: final };
+  // ── hook 3: before_prompt_build 注入预警 banner（v6.5.6 含 revert hint 消费）──
+  api.on("before_prompt_build", (event, ctx) => {
+    const sessionKey = pickSessionKey(ctx);
+    if (!sessionKey) return undefined;
+    const s = sessions.get(sessionKey);
+    if (!s) return undefined;
+
+    // v6.5.6 P1-5: 消费 pending revert 建议（compact 后 ctx 降下来 → 建议切回原 model）
+    const revertTarget = revertSuggestPending.get(sessionKey);
+    if (revertTarget) {
+      revertSuggestPending.delete(sessionKey);
+      const originalCtxMax = resolveCtxMax(revertTarget);
+      const revertBanner = `【建议切回原模型】会话已通过 /compact 降低用量，可调 \`enhance_route_revert_to_original\` 工具切回 ${revertTarget}（ctx ${originalCtxMax.toLocaleString()}）以节省成本。当前正用 ${s.lastModel ?? "<unknown>"}（ctx ${s.lastModelCtxMax.toLocaleString()}）。`;
+      api.logger.info(
+        `[ctx-watchdog] revert hint emitted | session=${sessionKey.slice(0, 12)} | suggest=${revertTarget}`,
+      );
+      const thresholdBanner = evalThresholdBanner(s, event);
+      const final = thresholdBanner ? revertBanner + "\n\n" + thresholdBanner : revertBanner;
+      return { prependContext: final };
+    }
+
+    const thresholdBanner = evalThresholdBanner(s, event);
+    if (!thresholdBanner) return undefined;
+    return { prependContext: thresholdBanner };
   });
 
   // ── hook 4: before_model_resolve 强切到 long-ctx model（v6.5.5 P0-1）──
@@ -633,7 +763,117 @@ export function registerContextWatchdog(
     { tier: "tools" } as any,
   );
 
+  // ── tool 3: enhance_route_revert_to_original（v6.5.6 P1-5）切回原模型，省成本 ──
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_route_revert_to_original",
+      description: "切回原模型（compact 后 ctx 降下来时省成本用）。本工具清掉 ctx-watchdog 的强切意愿，让 model-router 重新走任务路由自然回到原 tier。仅在 enhance_ctx_status 显示 originalModel 不等于 model 且 percent<60% 时调",
+      inputSchema: Type.Object({
+        reason: Type.Optional(Type.String({ description: "切回原因（如 'compact 后 ctx 降到 40%'）" })),
+      }),
+      async execute(params: any) {
+        const sessionKey = pickSessionKey(ctx);
+        if (!sessionKey) return { ok: false, reason: "no session key in ctx" };
+        const s = sessions.get(sessionKey);
+        if (!s) return { ok: false, reason: "session 没在追踪" };
+        if (!s.originalModel) {
+          return { ok: false, reason: "本会话没切过模型（originalModel 为空），无需 revert" };
+        }
+        if (s.lastModel === s.originalModel) {
+          return { ok: false, reason: `当前已是 originalModel=${s.originalModel}，无需 revert` };
+        }
+        const used = effectiveTokens(s);
+        const originalCtxMax = resolveCtxMax(s.originalModel);
+        const projectedPercent = used / originalCtxMax;
+        if (projectedPercent >= 0.7) {
+          return {
+            ok: false,
+            reason: `切回 ${s.originalModel} 后 percent=${Math.round(projectedPercent * 100)}% 仍超过 70%，不建议 revert`,
+            hint: "继续用 long-ctx 模型或先 /compact 再考虑",
+          };
+        }
+        const fromModel = s.lastModel;
+        const targetModel = s.originalModel;
+        s.originalModel = undefined;
+        s.lastWarnedThreshold = 0;
+        markDirty(sessionKey);
+        api.logger.warn(
+          `[ctx-watchdog] revert to original: ${fromModel} → ${targetModel} | reason="${params?.reason ?? '-'}" | session=${sessionKey.slice(0, 12)} | projectedPercent=${Math.round(projectedPercent * 100)}%`,
+        );
+        return {
+          ok: true,
+          from: fromModel,
+          to: targetModel,
+          newCtxMax: originalCtxMax,
+          projectedPercent: Math.round(projectedPercent * 100),
+          reason: params?.reason ?? "no reason given",
+          message: `已清掉 ctx-watchdog 的强切意愿，下一轮 model-router 会重新走任务路由——预期切回到 ${targetModel} 或同 tier 最优。`,
+        };
+      },
+    }) as any,
+    { tier: "tools" } as any,
+  );
+
+  // ── tool 4: enhance_ctx_profile（v6.5.6 P0-3）查 agent 历史 ctx 画像 ──
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => ({
+      name: "enhance_ctx_profile",
+      description: "查询当前 agent 的历史会话 ctx 用量画像（peak / avg / sessions count）。基于 sqlite 持久化的 peak_percent，可用于了解'我这个 agent 平均会涨多高'",
+      inputSchema: Type.Object({
+        agentId: Type.Optional(Type.String({ description: "可选；默认取当前 ctx 的 agentId" })),
+      }),
+      async execute(params: any) {
+        const targetAgentId = params?.agentId?.trim() || pickAgentId(ctx);
+        try {
+          const db = getDb();
+          const profile = getAgentCtxProfile(db, targetAgentId);
+          return {
+            ok: true,
+            agentId: targetAgentId,
+            sessions: profile.sessions,
+            avgPeakPercent: Math.round(profile.avgPeak * 100),
+            maxPeakPercent: Math.round(profile.maxPeak * 100),
+            note: profile.maxPeak > 0.95
+              ? "⚠️ 历史峰值 > 95%，建议设置更激进的 hintAt/warnAt 阈值或主动用 enhance_route_to_long_ctx"
+              : profile.maxPeak > 0.8
+              ? "💡 历史峰值 80-95%，处于上限敏感区"
+              : "上下文用量历史健康",
+          };
+        } catch (err) {
+          return { ok: false, reason: `sqlite 不可用: ${(err as Error).message}` };
+        }
+      },
+    }) as any,
+    { tier: "tools" } as any,
+  );
+
+  // ── v6.5.6: 启动期清理 30 天前的 ctx_usage 行（防止 sqlite 无限增长）──
+  try {
+    const db = getDb();
+    const purged = purgeOldCtxUsage(db, 30);
+    if (purged.deleted > 0) {
+      api.logger.info(`[ctx-watchdog] purged ${purged.deleted} stale ctx_usage rows (>30d)`);
+    }
+  } catch {
+    /* silent: sqlite 不可用 */
+  }
+
+  // ── v6.5.6: 进程退出前 finalFlush dirty sessions ──
+  const finalFlush = () => {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    flushDirtySessions();
+  };
+  try {
+    process.on("beforeExit", finalFlush);
+    process.on("SIGTERM", finalFlush);
+  } catch {
+    /* silent: 某些 runtime 限制 process.on */
+  }
+
   api.logger.info(
-    `[enhance] context-watchdog v6.5.5 已加载（hint=${Math.round(hintAt * 100)}% warn=${Math.round(warnAt * 100)}% critical=${Math.round(criticalAt * 100)}% escalate=${Math.round(escalateAt * 100)}% force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}…）`,
+    `[enhance] context-watchdog v6.5.6 已加载（hint=${Math.round(hintAt * 100)}% warn=${Math.round(warnAt * 100)}% critical=${Math.round(criticalAt * 100)}% escalate=${Math.round(escalateAt * 100)}% force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | sqlite persistence on）`,
   );
 }

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { ensureSqlite } from "./ensure-sqlite.js";
 import { migrateV5ToV6 } from "./hook-profile-db.js";
+import { migrateV6ToV7 } from "./ctx-usage-db.js";
 import type {
   MemoryEntry,
   MemoryCategory,
@@ -236,6 +237,8 @@ export function initDb(
   migrateV4ToV5(_db);
   // v5 → v6 (v5.8.0): hook-profiler 两张表 prep_stage_metrics / hook_profile
   migrateV5ToV6(_db);
+  // v6 → v7 (v6.5.6): context-watchdog ctx_usage 表（会话级 token 累加跨重启持久化）
+  migrateV6ToV7(_db);
 
   // v5.7.2: 启动期清理 safety_log / notifications 90 天前的旧记录，避免无限增长
   // 异步 fire-and-forget，不阻塞插件加载
