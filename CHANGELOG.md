@@ -2,6 +2,93 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.5.7 — 2026-05-11（上下文守护『subagent 累加 + 预测式提醒』+ sidus 清理）
+
+### 触发
+
+v6.5.6 路线图剩 5 个完善点，本期挑两个最痛的 + 顺手清掉另一会话遗留的 sidus 残留：
+
+1. **P1-7 subagent token 累加盲区**：子 agent 调 LLM 的 token 走 child sessionKey，main agent 看 ctx 用量永远是"自己的部分"，但实际后端 ctx 已经被 child 吃掉一截。蓝火派活 / spawn_task 场景下 ctx-watchdog 严重失真。
+2. **P2-9 反应式 → 预测式**：当前预警是"已经到 70%才提"，用户被提醒时只剩 30% 余量；应该按速率预测"未来 3 轮可能撞 85%"提前给空间。
+3. **sidus hardcoded 清理**（另一会话遗留 WIP）：`model-router.ts` 默认 fallback `"sidus/DeepSeek-V4-Flash"` 不存在（provider 未注册）→ 撞 "Model not allowed"。
+
+### 改动
+
+#### A. P1-7 subagent token 累加（context-watchdog.ts）
+
+新增 hooks `subagent_spawned` / `subagent_ended`：
+
+```ts
+const childToParent = new Map<string, string>();
+
+api.on("subagent_spawned", (event, ctx) => {
+  const childKey = event?.childSessionKey ?? ctx?.childSessionKey;
+  const parentKey = ctx?.requesterSessionKey;
+  if (childKey && parentKey) childToParent.set(childKey, parentKey);
+});
+
+api.on("subagent_ended", (event, ctx) => {
+  const childKey = event?.targetSessionKey ?? ctx?.childSessionKey;
+  const parentKey = childToParent.get(childKey) ?? ctx?.requesterSessionKey;
+  const child = sessions.get(childKey);
+  const parent = sessions.get(parentKey);
+  if (parent && child && child.totalTokens > 0) {
+    parent.totalTokens += child.totalTokens;
+    markDirty(parentKey);
+  }
+  childToParent.delete(childKey);
+});
+```
+
+LRU 限制 `MAX_SUBAGENT_LINKS=500` 防内存膨胀。child 的 sessions 行留在 sqlite 作画像（不立即 evict）。
+
+#### B. P2-9 预测式提醒（context-watchdog.ts）
+
+`SessionUsage` 新增 `tokensPerTurnHistory: number[]`（最近 5 轮 token 增量 FIFO）。`llm_output` push 当前 usageDelta。
+
+新增 `evalPredictionBanner(s, event)`：
+
+```ts
+const avgPerTurn = sum(history) / history.length;
+const turnsToWarn = ceil((warnAt × ctxMax - used) / avgPerTurn);
+if (turnsToWarn <= 3 && percent < warnAt && !s.predictionEmittedFor === Math.round(warnAt × 100))
+  → 注入"按速率 X 轮内撞 Y%"提示，防抖直到真到阈值
+```
+
+`before_prompt_build` 三层优先级：revert hint > threshold banner > prediction banner。
+
+#### C. sidus hardcoded 清理（model-router.ts / model-route-config.ts）
+
+- `routeTask` 默认 fallback：`"sidus/DeepSeek-V4-Flash"` → `"deepseek/deepseek-v4-flash"`（与 OpenClaw 默认对齐）
+- `enhance_route_set` tool description 示例从 sidus 改 minimax
+
+### Hook chain（v6.5.7 全景）
+
+| Priority | Module | Hook | Action |
+|---|---|---|---|
+| 100 | ctx-watchdog | `before_model_resolve` | 事前估算 → ≥95% 强切 long-ctx |
+| 默认 | ctx-watchdog | `llm_output` | 累加 usage + push history + markDirty |
+| 默认 | ctx-watchdog | `llm_input` | 估算 pendingTokens |
+| 默认 | ctx-watchdog | `subagent_spawned` | 记 child→parent 链路 |
+| 默认 | ctx-watchdog | `subagent_ended` | child.totalTokens 累加回 parent |
+| 默认 | ctx-watchdog | `before_prompt_build` | revert hint > threshold banner > prediction |
+| 默认 | ctx-watchdog | `after_compaction` | totalTokens×0.3 + revertSuggest + markDirty |
+| 默认 | model-router | `before_model_resolve` | 任务/渠道/quota 路由 |
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError
+- ✅ 不抢龙虾 model-fallback
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+
+### 后续路线（v6.6.0 candidates）
+
+剩 3 个 P1/P2 完善点：
+- **P1-4 cost-aware 切换**：cost-budget mode 加月度配额联动
+- **P1-6 多模态 token 估算**：scan 时记每 model 的 imageTokenCost
+- **P2-8 channel-aware 阈值差异化**：群聊 60/75/90 + terminal 70/85/95
+
 ## 6.5.6 — 2026-05-11（上下文守护『状态持久化 + 切回原模型』）
 
 ### 触发

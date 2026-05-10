@@ -73,26 +73,28 @@ export function getDefaultModelRouteConfig(): ModelRouteConfig {
     mode: "auto-task",
     schemaVersion: CURRENT_SCHEMA_VERSION,
     models: {
+      // v6.5.6: 默认从 sidus 改 deepseek + minimax —— 跟 OpenClaw 核心 cfg 默认对齐。
+      // sidus provider 已下线，改成 deepseek 官方避免 "Model not allowed" 误调。
       flash: {
         providers: [
-          { id: "sidus/DeepSeek-V4-Flash", priority: 1, weight: 70, enabled: true },
+          { id: "deepseek/deepseek-v4-flash", priority: 1, weight: 70, enabled: true },
           { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
         ],
       },
       pro: {
         providers: [
-          { id: "sidus/DeepSeek-V4-Pro", priority: 1, weight: 70, enabled: true },
+          { id: "deepseek/deepseek-v4-pro", priority: 1, weight: 70, enabled: true },
           { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
         ],
       },
       reasoner: {
         providers: [
-          { id: "sidus/DeepSeek-V4-Pro", priority: 1, weight: 100, enabled: true },
+          { id: "deepseek/deepseek-v4-pro", priority: 1, weight: 100, enabled: true },
         ],
       },
       fast: {
         providers: [
-          { id: "sidus/DeepSeek-V4-Flash", priority: 1, weight: 70, enabled: true },
+          { id: "deepseek/deepseek-v4-flash", priority: 1, weight: 70, enabled: true },
           { id: "minimax/MiniMax-M2.7", priority: 2, weight: 30, enabled: true },
         ],
       },

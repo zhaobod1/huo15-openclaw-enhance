@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.5.6 — 上下文守护『状态持久化 + 切回原模型』：sqlite ctx_usage 表（schema v7）跨重启不丢（lazy hydrate + 10s 节流 flush + 30 天 TTL 清理）；after_compaction 后 ctx<60% 原 model → 自动建议切回 originalModel 省成本；enhance_route_revert_to_original + enhance_ctx_profile 新工具。继承 v6.5.5 真实切换闭环（≥95% 强切 + enhance_route_to_long_ctx + 事前估算）+ v6.5.4 三阶预警 banner + v6.5.2 BOT 文件上传桥 + v6.5.1 蓝火关键词派活。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.5.6
+description: "火一五·克劳德·龙虾增强插件 v6.5.7 — 上下文守护『subagent 累加 + 预测式提醒』：(1) subagent_spawned 记 child→parent，subagent_ended 把 child.totalTokens 累加回 parent，修多 agent 协作 ctx 盲区；(2) tokensPerTurnHistory 5 轮速率预测 ~N 轮内撞 warnAt，提早提醒；(3) sidus hardcoded 清理。继承 v6.5.6 sqlite 持久化 + revert 原模型 + v6.5.5 真实切换闭环 + v6.5.4 三阶预警。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.5.7
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

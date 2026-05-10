@@ -705,11 +705,14 @@ function routeTask(prompt: string, mediaTypes: Set<string>): RouteDecision {
     };
   }
 
-  // ── 4. 默认：Sidus flash ──────────────────────────
-  const model = getBestModel("flash") || "sidus/DeepSeek-V4-Flash";
+  // ── 4. 默认：deepseek-v4-flash ──────────────────────────
+  // v6.5.6: 之前硬编码 "sidus/DeepSeek-V4-Flash" 兜底，但 sidus provider 不再注册
+  // → fallback 找不到 provider → 返回 model id 给 LLM → LLM 自己 session_status 调用
+  // 时复用旧 model id 撞 "Model not allowed"。改成 deepseek 与 OpenClaw 默认一致。
+  const model = getBestModel("flash") || "deepseek/deepseek-v4-flash";
   return {
-    provider: "sidus", model, taskTier: "flash",
-    reason: `默认 → Sidus flash（${len}字符）`,
+    provider: "deepseek", model, taskTier: "flash",
+    reason: `默认 → deepseek-v4-flash（${len}字符）`,
   };
 }
 
@@ -1058,7 +1061,7 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       name: "enhance_model_route_set",
       description:
         "改某个 tier 下某个 provider 的 priority / weight / enabled 字段。" +
-        "示例：tier='flash', providerId='custom-sidus-ai/deepseek-v4-flash', priority=10 把 sidus 降权到几乎不选。" +
+        "示例：tier='flash', providerId='minimax/MiniMax-M2.7', priority=10 把 minimax 降权到几乎不选。" +
         "weight 0-100，priority 越小越优先；任一字段可省略不改。",
       parameters: Type.Object({
         tier: Type.String({ description: "task tier 名（flash / pro / reasoner / fast / vl / hailuo）" }),
@@ -1144,10 +1147,10 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       name: "enhance_model_route_history",
       description:
         "查模型路由的历史延迟趋势（v5.8.6）。每次 latency tracker flush 同步 append 一条快照，" +
-        "可看 P50/errRate 随时间变化（用 ASCII spark line 展示，便于判断 sidus 是否在恢复 / deepseek 高峰是否变慢）。",
+        "可看 P50/errRate 随时间变化（用 ASCII spark line 展示，便于判断 deepseek 是否在恢复 / minimax 高峰是否变慢）。",
       parameters: Type.Object({
         windowHours: Type.Optional(Type.Number({ description: "查最近多少小时（默认 24）" })),
-        providerFilter: Type.Optional(Type.String({ description: "provider 子串过滤（如 'sidus' / 'deepseek'）" })),
+        providerFilter: Type.Optional(Type.String({ description: "provider 子串过滤（如 'deepseek' / 'minimax'）" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const windowHours = typeof params.windowHours === "number" ? params.windowHours : 24;
@@ -1207,9 +1210,9 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       name: "enhance_model_route_disable",
       description:
         "批量禁用某个 provider（在所有 tier 中），或恢复某个 provider。" +
-        "示例：providerPrefix='custom-sidus-ai' enabled=false 一刀禁掉所有 sidus。",
+        "示例：providerPrefix='minimax' enabled=false 一刀禁掉所有 minimax。",
       parameters: Type.Object({
-        providerPrefix: Type.String({ description: "provider 前缀（如 custom-sidus-ai）或完整 id" }),
+        providerPrefix: Type.String({ description: "provider 前缀（如 deepseek / minimax）或完整 id" }),
         enabled: Type.Boolean({ description: "true=启用 / false=禁用" }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {

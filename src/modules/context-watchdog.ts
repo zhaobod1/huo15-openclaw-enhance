@@ -127,8 +127,18 @@ interface SessionUsage {
   originalModel?: string;
   /** 已发出过的最高阈值（防抖：同 session 同阈值不重复警告）*/
   lastWarnedThreshold: number;
+  /**
+   * v6.5.7 P2-9：最近 N 轮 llm_output 的 token 增量（最多 PREDICTION_HISTORY_LEN 个，FIFO）。
+   * 用于算 avgTokensPerTurn → 预测 turnsToWarn / turnsToCritical。
+   */
+  tokensPerTurnHistory: number[];
+  /** v6.5.7 P2-9：是否已发出过预测式提醒（一次性，防抖；until threshold 真到了再重置）*/
+  predictionEmittedFor?: number;
   lastUpdatedAt: number;
 }
+
+const PREDICTION_HISTORY_LEN = 5;
+const PREDICTION_LOOKAHEAD_TURNS = 3;
 
 function pickAgentId(ctx: { agentId?: string } | undefined): string {
   return (ctx?.agentId ?? DEFAULT_AGENT_ID).trim() || DEFAULT_AGENT_ID;
@@ -365,6 +375,7 @@ export function registerContextWatchdog(
             lastModelCtxMax: row.last_model_ctx_max || resolveCtxMax(modelId),
             originalModel: row.original_model ?? undefined,
             lastWarnedThreshold: row.last_warned_threshold,
+            tokensPerTurnHistory: [], // hydrate 后从 0 重建（不持久化轮次历史避免 schema 复杂化）
             lastUpdatedAt: row.last_updated_at,
           };
           sessionPeakPercent.set(sessionKey, row.peak_percent);
@@ -394,6 +405,7 @@ export function registerContextWatchdog(
         pendingTokens: 0,
         lastModelCtxMax: resolveCtxMax(modelId),
         lastWarnedThreshold: 0,
+        tokensPerTurnHistory: [],
         lastUpdatedAt: Date.now(),
       };
       sessions.set(sessionKey, s);
@@ -436,6 +448,11 @@ export function registerContextWatchdog(
 
     s.totalTokens += usageDelta;
     s.lastUpdatedAt = Date.now();
+    // v6.5.7 P2-9: 记录本轮 token 增量到 history 队列（最近 N 轮 FIFO）
+    s.tokensPerTurnHistory.push(usageDelta);
+    if (s.tokensPerTurnHistory.length > PREDICTION_HISTORY_LEN) {
+      s.tokensPerTurnHistory.shift();
+    }
     markDirty(sessionKey); // v6.5.6: 标记 dirty，等 10s 节流批量 flush 到 sqlite
 
     if (debug) {
@@ -463,6 +480,62 @@ export function registerContextWatchdog(
         `[ctx-watchdog] llm_input estimate=${est.toLocaleString()} | session=${sessionKey.slice(0, 12)}`,
       );
     }
+  });
+
+  // ── hook 1c: subagent_spawned / subagent_ended（v6.5.7 P1-7）──
+  // 解决 subagent token 累加盲区：child agent 调 LLM 的 token 走 child sessionKey，
+  // main agent 看 ctx 用量永远是"自己的部分"，但实际后端 ctx 已经被 child 吃掉一截。
+  // 修法：spawn 时记 child→parent 映射，end 时把 child.totalTokens 加到 parent。
+  const childToParent = new Map<string, string>();
+  const MAX_SUBAGENT_LINKS = 500;
+
+  api.on("subagent_spawned", (event, ctx) => {
+    const childKey = (event as any)?.childSessionKey ?? (ctx as any)?.childSessionKey;
+    const parentKey = (ctx as any)?.requesterSessionKey;
+    if (!childKey || !parentKey || childKey === parentKey) return;
+    // LRU eviction
+    if (childToParent.size >= MAX_SUBAGENT_LINKS) {
+      const oldest = childToParent.keys().next().value;
+      if (oldest) childToParent.delete(oldest);
+    }
+    childToParent.set(childKey, parentKey);
+    if (debug) {
+      api.logger.info(
+        `[ctx-watchdog] subagent linked: child=${childKey.slice(0, 12)} → parent=${parentKey.slice(0, 12)}`,
+      );
+    }
+  });
+
+  api.on("subagent_ended", (event, ctx) => {
+    const childKey =
+      (event as any)?.targetSessionKey ??
+      (ctx as any)?.childSessionKey ??
+      "";
+    if (!childKey) return;
+    const parentKey = childToParent.get(childKey) ?? (ctx as any)?.requesterSessionKey;
+    if (!parentKey || parentKey === childKey) return;
+
+    const child = sessions.get(childKey);
+    if (!child || child.totalTokens <= 0) {
+      childToParent.delete(childKey);
+      return;
+    }
+    const parent = sessions.get(parentKey);
+    if (!parent) {
+      // 父 session 还没追踪到 — 不强建（等父自己的 llm_output 触发 getOrCreate）
+      // 但记下 child 已经吃了多少，等父出现时累加（暂存方案，简化版直接丢，避免内存膨胀）
+      childToParent.delete(childKey);
+      return;
+    }
+    parent.totalTokens += child.totalTokens;
+    parent.lastUpdatedAt = Date.now();
+    markDirty(parentKey);
+    api.logger.info(
+      `[ctx-watchdog] subagent rolled up: child=${childKey.slice(0, 12)} (+${child.totalTokens.toLocaleString()}) → parent=${parentKey.slice(0, 12)} | parent total=${parent.totalTokens.toLocaleString()}`,
+    );
+    childToParent.delete(childKey);
+    // child sessions 留在 sqlite 作画像，但内存里可以清掉（节省 RAM）
+    // 不立即 delete，让 flushDirtySessions 自然 LRU evict
   });
 
   // ── hook 2: after_compaction 重置（龙虾刚 compact 完，token 大幅下降）──
@@ -502,6 +575,44 @@ export function registerContextWatchdog(
     }
   });
 
+  /**
+   * v6.5.7 P2-9: 预测式提醒。
+   * 当用量未到 warnAt 但按当前速率 PREDICTION_LOOKAHEAD_TURNS 轮内会撞 warnAt → 提早注 banner
+   * 防抖：同一 session 同一目标阈值只警告一次（predictionEmittedFor）
+   */
+  function evalPredictionBanner(s: SessionUsage, event: any): string | null {
+    if (s.tokensPerTurnHistory.length < 2) return null; // 至少 2 轮才能算趋势
+    const liveEstimate = s.pendingTokens > 0
+      ? s.pendingTokens
+      : estimatePromptTokens(event);
+    const used = s.totalTokens + liveEstimate;
+    const percent = used / s.lastModelCtxMax;
+    // 已经超过 warnAt：阈值 banner 接管，不重复
+    if (percent >= warnAt) return null;
+
+    const avgPerTurn = s.tokensPerTurnHistory.reduce((a, b) => a + b, 0) / s.tokensPerTurnHistory.length;
+    if (avgPerTurn <= 0) return null;
+
+    // 算"按当前速率多少轮内到 warnAt"
+    const warnTarget = warnAt * s.lastModelCtxMax;
+    const turnsToWarn = Math.ceil((warnTarget - used) / avgPerTurn);
+    if (turnsToWarn > PREDICTION_LOOKAHEAD_TURNS) return null;
+    if (turnsToWarn <= 0) return null;
+
+    // 防抖：同 session 该 lookahead 阈值只警告一次（直到真到 warnAt 重置）
+    if (s.predictionEmittedFor === Math.round(warnAt * 100)) return null;
+    s.predictionEmittedFor = Math.round(warnAt * 100);
+    markDirty(s.sessionKey);
+
+    const pctNow = Math.round(percent * 100);
+    const pctWarn = Math.round(warnAt * 100);
+    const avgK = Math.round(avgPerTurn / 1000);
+    api.logger.info(
+      `[ctx-watchdog] prediction triggered | session=${s.sessionKey.slice(0, 12)} | now=${pctNow}% → ${pctWarn}% in ~${turnsToWarn} turns (avgPerTurn=${avgK}k)`,
+    );
+    return `【上下文用量趋势预警】当前 ${pctNow}%，按最近 ${s.tokensPerTurnHistory.length} 轮平均每轮 +${avgK}k token 速率，预计 **~${turnsToWarn} 轮内**撞 ${pctWarn}%（warn 阈值）。建议：现在就在合适节点收尾或主动 /compact，避免后面被动告警。`;
+  }
+
   /** v6.5.6: 抽出来的阈值评估 + banner 构造（被 before_prompt_build 调用，可叠加 revert hint） */
   function evalThresholdBanner(s: SessionUsage, event: any): string | null {
     const liveEstimate = s.pendingTokens > 0
@@ -530,6 +641,8 @@ export function registerContextWatchdog(
 
     if (s.lastWarnedThreshold >= triggeredThreshold) return null;
     s.lastWarnedThreshold = triggeredThreshold;
+    // v6.5.7：阈值真到了 → 重置预测防抖，让下一档预测可以再发
+    s.predictionEmittedFor = undefined;
     markDirty(s.sessionKey);
 
     let final = banner;
@@ -564,8 +677,13 @@ export function registerContextWatchdog(
     }
 
     const thresholdBanner = evalThresholdBanner(s, event);
-    if (!thresholdBanner) return undefined;
-    return { prependContext: thresholdBanner };
+    if (thresholdBanner) return { prependContext: thresholdBanner };
+
+    // v6.5.7 P2-9: 阈值未到 → 跑预测式提醒（按速率预估几轮后撞 warnAt）
+    const predictionBanner = evalPredictionBanner(s, event);
+    if (predictionBanner) return { prependContext: predictionBanner };
+
+    return undefined;
   });
 
   // ── hook 4: before_model_resolve 强切到 long-ctx model（v6.5.5 P0-1）──
@@ -874,6 +992,6 @@ export function registerContextWatchdog(
   }
 
   api.logger.info(
-    `[enhance] context-watchdog v6.5.6 已加载（hint=${Math.round(hintAt * 100)}% warn=${Math.round(warnAt * 100)}% critical=${Math.round(criticalAt * 100)}% escalate=${Math.round(escalateAt * 100)}% force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | sqlite persistence on）`,
+    `[enhance] context-watchdog v6.5.7 已加载（hint=${Math.round(hintAt * 100)}% warn=${Math.round(warnAt * 100)}% critical=${Math.round(criticalAt * 100)}% escalate=${Math.round(escalateAt * 100)}% force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | sqlite + subagent rollup + prediction）`,
   );
 }
