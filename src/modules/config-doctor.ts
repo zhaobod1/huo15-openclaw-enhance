@@ -145,6 +145,106 @@ function resolvePluginEntryFile(dir: string, pkg: any): string | null {
 }
 
 /**
+ * v6.6.9: 校验 agents.defaults.model.{primary,fallbacks} 中每个 model 是否在
+ * cfg.models.providers[<provider>].models[].id 里有完全匹配（**含大小写**）。
+ *
+ * 用户实测根因：primary="deepseek/DeepSeek-V4-Pro" 大写驼峰，但 deepseek 后端只认
+ * "deepseek-v4-pro" 全小写带连字符 → 第一次 LLM 调用就 400 → "Something went wrong"。
+ * 这个 bug **跟 fallback 链中其他 model 是否健康无关** —— 因为命名错的 model 走 model-fallback
+ * 链时每个都报相同错（model id 字面量不匹配 provider 端 → 全部 400 chain_exhausted）。
+ *
+ * 校验方式：
+ *   - 把 primary + fallbacks 全部 fullId 收集
+ *   - 每个 fullId split 成 provider + bareId
+ *   - 在 models.providers[provider].models 找 bareId 完全匹配
+ *   - 没找到 → 出错；建议查看其它已注册 model 列出近似 candidate
+ */
+function checkModelIdRegistration(cfg: Record<string, any>): CheckResult[] {
+  const results: CheckResult[] = [];
+  const modelSpec = cfg?.agents?.defaults?.model;
+  if (!modelSpec) return results;
+
+  const providers: Record<string, { models?: Array<{ id?: string }> }> =
+    cfg?.models?.providers ?? {};
+
+  const fullIds: string[] = [];
+  if (typeof modelSpec.primary === "string" && modelSpec.primary.trim()) {
+    fullIds.push(modelSpec.primary.trim());
+  }
+  if (Array.isArray(modelSpec.fallbacks)) {
+    for (const f of modelSpec.fallbacks) {
+      if (typeof f === "string" && f.trim()) fullIds.push(f.trim());
+    }
+  }
+
+  for (const fullId of fullIds) {
+    const slash = fullId.indexOf("/");
+    if (slash <= 0) {
+      results.push({
+        ok: false,
+        level: "error",
+        category: "model-id-format",
+        message: `agents.defaults.model 含非法 id "${fullId}" — 应为 "<provider>/<modelId>" 格式`,
+      });
+      continue;
+    }
+    const provider = fullId.slice(0, slash);
+    const bareId = fullId.slice(slash + 1);
+
+    const providerSpec = providers[provider];
+    if (!providerSpec) {
+      results.push({
+        ok: false,
+        level: "error",
+        category: "model-provider-missing",
+        message: `agents.defaults.model 中 "${fullId}" 的 provider "${provider}" 在 cfg.models.providers 没注册`,
+        fixCommand: `cfg.models.providers 当前注册的 providers: [${Object.keys(providers).join(", ")}]；可能 provider 名拼错`,
+      });
+      continue;
+    }
+    const registeredIds: string[] = Array.isArray(providerSpec.models)
+      ? providerSpec.models.map((m) => String(m?.id ?? "")).filter(Boolean)
+      : [];
+    if (registeredIds.includes(bareId)) {
+      continue; // 完全匹配 ✓
+    }
+    // 找近似匹配（大小写不敏感）
+    const caseInsensitiveMatch = registeredIds.find(
+      (r) => r.toLowerCase() === bareId.toLowerCase(),
+    );
+    if (caseInsensitiveMatch) {
+      results.push({
+        ok: false,
+        level: "error",
+        category: "model-id-case-mismatch",
+        message:
+          `agents.defaults.model 中 "${fullId}" 的 bare id "${bareId}" 在 ` +
+          `cfg.models.providers.${provider}.models 没找到完全匹配（大小写敏感）。` +
+          `实际注册的是 "${caseInsensitiveMatch}"——大小写不一致会导致 LLM 调用 400 chain_exhausted ("Something went wrong")`,
+        fixCommand:
+          `把 agents.defaults.model 里 "${fullId}" 改成 "${provider}/${caseInsensitiveMatch}"，或在 ` +
+          `cfg.models.providers.${provider}.models 里把 id 改成 "${bareId}"`,
+      });
+      continue;
+    }
+    // 完全找不到
+    results.push({
+      ok: false,
+      level: "error",
+      category: "model-id-not-registered",
+      message:
+        `agents.defaults.model 中 "${fullId}" 的 bare id "${bareId}" 在 ` +
+        `cfg.models.providers.${provider}.models 完全不存在（已注册：[${registeredIds.join(", ")}])`,
+      fixCommand:
+        `检查 model id 拼写；或者在 cfg.models.providers.${provider}.models 添加 ` +
+        `{id: "${bareId}", contextWindow: ..., maxTokens: ..., cost: ...}`,
+    });
+  }
+
+  return results;
+}
+
+/**
  * v5.7.4: 扫所有已装插件的 package.json 检测 bare pluginApi
  */
 function scanInstalledPluginsForBarePluginApi(openclawDir: string): CheckResult[] {
@@ -462,6 +562,13 @@ export function checkOpenClawConfig(
       }
     }
   }
+
+  // v6.6.9: 扫 agents.defaults.model.{primary,fallbacks} 中的 model id 是否在
+  // cfg.models.providers[<provider>].models[].id 里有完全匹配（含大小写）
+  // 触发：用户实测『新会话第一条"你好"也撞 Something went wrong』根因——
+  // primary "deepseek/DeepSeek-V4-Pro" 大写驼峰，但 deepseek 后端只认 "deepseek-v4-pro"
+  // 全小写带连字符 → 第一次 LLM 调用就 400 → 整条 fallback 链都因同名 bug 全 400
+  results.push(...checkModelIdRegistration(cfg));
 
   // v5.7.4: 扫所有已装插件的 bare pluginApi（违反 ">=X.Y.Z" 规则的会被 openclaw 拒绝）
   results.push(...scanInstalledPluginsForBarePluginApi(openclawDir));

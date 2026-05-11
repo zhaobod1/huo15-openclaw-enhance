@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.6.8 — **全模块 hook 系统性防御**：wrapApiForSafeHooks Proxy 拦截 api.on()，让全部 28 个 hook 跨 17 个模块的 handler **全部**自动包 try/catch（不只 ctx-watchdog 的 6 个）。修用户反复撞 'Something went wrong' 根因：v6.6.6 只包了 ctx-watchdog，剩 22 个 hook 裸奔（model-router/session-bridge/session-lifecycle/cc-bridge-*/large-file-bridge/tool-safety/mode-gate 等），任一抛即崩。包后所有 hook 异常 log + return undefined 不影响主流程。继承 v6.6.7 user-config 优先强切 + v6.6.4 providerOverride。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.6.8
+description: "火一五·克劳德·龙虾增强插件 v6.6.9 — config-doctor 加 model-id 大小写校验：用户实测『新会话第一条你好也撞 Something went wrong』根因——agents.defaults.model 配 'deepseek/DeepSeek-V4-Pro' 大写驼峰但后端只认 'deepseek-v4-pro' 全小写，第一次 LLM 调用就 400 chain_exhausted。新增 checkModelIdRegistration 启动期校验 primary+fallbacks 是否在 providers.models[].id 完全匹配；case-insensitive 命中给精确 fix 命令；完全不匹配建议添加 model 注册。继承 v6.6.8 全模块 hook safeHook 防御 + v6.6.7 user-config 优先强切。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.6.9
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

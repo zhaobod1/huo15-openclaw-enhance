@@ -2,6 +2,112 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.9 — 2026-05-11（config-doctor 加 model-id 大小写校验）
+
+### 触发
+
+用户 v6.6.8 升级后**仍撞**同问题。新截图关键：
+
+```
+/clear → ⚠ Something went wrong
+/new → ✅ New session started
+你好 → ⚠ Something went wrong   ← 新 session 第一条简短消息也撞！
+```
+
+**新会话第一条『你好』也撞**——完全跟 ctx 用量、跟 hook 都无关：
+- 不是 ctx 满（fresh session）
+- 不是 hook 抛（v6.6.8 已系统性 safeHook 包裹全部 28 hook）
+- **100% 是 OpenClaw → provider 端的 LLM 调用本身失败**
+
+### 根因（最大嫌疑）
+
+用户截图 cfg：
+```json
+"agents.defaults.model": {
+  "primary": "deepseek/DeepSeek-V4-Pro",        ← 大写驼峰
+  "fallbacks": [
+    "minimax/MiniMax-M2.7",                      ← 大写驼峰
+    "deepseek/DeepSeek-V4-Flash"                 ← 大写驼峰
+  ]
+}
+```
+
+但 **deepseek 后端 API 只认全小写带连字符**：`deepseek-v4-pro` / `deepseek-v4-flash`。v6.6.4 commit 实测就是这条：
+
+```
+ERROR: FailoverError: provider rejected the request schema
+WARN model_fallback_decision:
+  requestedProvider: deepseek
+  errPreview: "400 The supported API model names are
+    deepseek-v4-pro or deepseek-v4-flash, ..."
+```
+
+**整个 fallback 链都因为同样的命名错全部 400** → chain_exhausted → "Something went wrong"。
+
+每次新会话第一次调用都立刻撞 → 用户体感就是『发什么都不行』。
+
+### 改动
+
+`config-doctor.ts` 新增 `checkModelIdRegistration(cfg)`：
+
+```ts
+// 1. 收集 cfg.agents.defaults.model.{primary, fallbacks} 全部 fullId
+// 2. 每个 fullId split → provider + bareId
+// 3. 在 cfg.models.providers[provider].models 找 bareId 完全匹配
+// 4a. 找到 → ok
+// 4b. case-insensitive 命中 → 错（大小写不一致）+ 给精确 fix
+//      "把 'deepseek/DeepSeek-V4-Pro' 改成 'deepseek/deepseek-v4-pro'"
+// 4c. 完全不存在 → 错 + 列出已注册的近似 candidates
+// 4d. provider 不存在 → 错
+```
+
+启动期跑（fire-and-forget），结果走 `notifyQueue` 推到 dashboard + log warn。`enhance_config_doctor` 工具也会返回这些 issue。
+
+### 用户应该立刻看
+
+升级 v6.6.9 后调 `enhance_config_doctor` 工具（在能调通的会话/终端里），或者直接看 dashboard，会显示类似：
+
+```
+❌ [model-id-case-mismatch] agents.defaults.model 中 "deepseek/DeepSeek-V4-Pro"
+   的 bare id "DeepSeek-V4-Pro" 在 cfg.models.providers.deepseek.models 没找到
+   完全匹配（大小写敏感）。实际注册的是 "deepseek-v4-pro"——大小写不一致会导致
+   LLM 调用 400 chain_exhausted ("Something went wrong")
+   → 修复: 把 agents.defaults.model 里 "deepseek/DeepSeek-V4-Pro" 改成
+     "deepseek/deepseek-v4-pro"，或在 cfg.models.providers.deepseek.models
+     里把 id 改成 "DeepSeek-V4-Pro"
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 完全只读 ~/.openclaw/openclaw.json（红线 #1）
+- ✅ 不调 child_process（红线 #4） — 修复命令是文字描述给用户/cron-cli 执行
+- ✅ tier=1 minimal 也启用
+
+### 用户操作（紧急）
+
+```bash
+# 1. 升级
+openclaw plugins update @huo15/huo15-openclaw-enhance
+openclaw restart
+
+# 2. 查日志看真实错误（最直接）
+tail -500 ~/.openclaw/logs/gateway.err.log | grep -iE "ERROR|deepseek|minimax|400|401|chain_exhausted|provider rejected" | tail -30
+
+# 3. 手动看 openclaw.json model id 大小写
+python3 -c "import json; cfg=json.load(open('$HOME/.openclaw/openclaw.json')); m=cfg['agents']['defaults']['model']; print('primary:', m.get('primary')); print('fallbacks:', m.get('fallbacks')); print('---registered---'); [print(p+':', [m.get('id') for m in cfg['models']['providers'][p].get('models',[])]) for p in cfg['models']['providers']]"
+```
+
+最直接的修法（如果 ID 大小写不对）：
+
+```bash
+# 把 model 配置改成跟 providers 注册的完全一致
+# 通常 deepseek 应该是全小写：
+sed -i.bak 's|"deepseek/DeepSeek-V4-Pro"|"deepseek/deepseek-v4-pro"|g; s|"deepseek/DeepSeek-V4-Flash"|"deepseek/deepseek-v4-flash"|g' ~/.openclaw/openclaw.json
+# minimax 可能确实是大写驼峰，先看 providers.minimax.models 实际 id 再改
+openclaw restart
+```
+
 ## 6.6.8 — 2026-05-11（**全模块 hook 系统性防御** — 修反复『Something went wrong』根因）
 
 ### 触发

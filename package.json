@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.8",
+  "version": "6.6.9",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.8 — **全模块 hook 系统性防御**：新增 wrapApiForSafeHooks Proxy 拦截 api.on()，让 enhance 全部 28 个 hook 跨 17 个模块的 handler **全部**自动包 try/catch（不只是 ctx-watchdog 的 6 个）。修用户 v6.6.5/6/7 升级后仍**反复**撞 'Something went wrong' 的根因——v6.6.6 只包了 ctx-watchdog 6 个，剩 22 个 hook（model-router / session-bridge / session-lifecycle / cc-bridge-* / large-file-bridge / tool-safety / mode-gate / native-memory-surfacer / workflow-hooks / task-planner / scheduled-tasks-bridge / prompt-enhancer / session-recap / self-check 等）裸奔，任何一个抛 → OpenClaw fail-fast → 通用错误页。包后所有 hook 异常 log error + return undefined 不影响主流程。继承 v6.6.7 user-config 优先强切 + v6.6.4 providerOverride。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.6.9 — config-doctor 加 model-id 大小写校验：用户 v6.6.8 后新会话发『你好』也撞 Something went wrong，证明根因不在 hook（v6.6.8 已系统性 safeHook 包裹），而在 agents.defaults.model.{primary,fallbacks} 的 model id 字面量跟 models.providers[<p>].models[].id 不匹配（特别是大小写：用户配 'deepseek/DeepSeek-V4-Pro' 但 deepseek 后端只认 'deepseek-v4-pro' 全小写 → 400 chain_exhausted）。新增 checkModelIdRegistration() 启动期把 primary+fallbacks 跟 providers 注册列表 join，case-insensitive 命中时给精确 fix 命令（把哪个改成哪个）。继承 v6.6.8 全模块 hook safeHook + v6.6.7 user-config 优先强切。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
