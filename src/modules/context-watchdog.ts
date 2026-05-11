@@ -92,6 +92,10 @@ const HOOK_PRIORITY_FORCE_ESCALATE = 100; // 比 model-router 默认（无 prior
  * v6.5.5：long-ctx 候选 model id 列表（按优先级降序）。
  * ctx-watchdog 在 95% 强切时按此顺序选第一个非 banned 且 ctx≥256K 的。
  * 用户可通过 ContextWatchdogConfig.longCtxCandidates 覆盖。
+ *
+ * v6.6.4: 同时维护 MODEL_TO_PROVIDER_MAP，强切时返回 { modelOverride, providerOverride }
+ *   双字段（before）只返 modelOverride 不返 providerOverride，OpenClaw 核心拿到错配 provider+model
+ *   组合 → API 拒 400 mismatch → fallback chain_exhausted → 用户看到通用错误页。
  */
 const LONG_CTX_CANDIDATES_DEFAULT: string[] = [
   "claude-opus-4.7-1m",   // 1M ctx
@@ -103,6 +107,47 @@ const LONG_CTX_CANDIDATES_DEFAULT: string[] = [
   "claude-sonnet-4.5",     // 200K
   "minimax-m2",            // 200K
 ];
+
+/**
+ * v6.6.4: 裸 model id → provider 映射。
+ *
+ * Why：candidates 是裸 model id（无 provider prefix），但 OpenClaw 核心 hook 强切时需要
+ * 同时知道 provider 才能正确路由到对应 provider client，否则把 model id 整串塞给当前
+ * session 的 provider client → API 拒 400 "passed <wrong-model>"。
+ *
+ * 添加新 model 时同步加这里 + KNOWN_MODEL_CTX_MAX + KNOWN_MODEL_COST。
+ */
+const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
+  // Anthropic
+  "claude-opus-4.7-1m": "anthropic",
+  "claude-opus-4.7": "anthropic",
+  "claude-sonnet-4.5": "anthropic",
+  "claude-haiku-4.5": "anthropic",
+  // Google AI Studio
+  "gemini-2.5-pro": "google-ai-studio",
+  "gemini-2.5-flash": "google-ai-studio",
+  // Moonshot
+  "kimi-k2": "moonshot",
+  "kimi-k2-200k": "moonshot",
+  "kimi-k2-128k": "moonshot",
+  // Minimax
+  "minimax-m2": "minimax",
+  "abab7-chat-preview": "minimax",
+  // DeepSeek
+  "deepseek-v3.2": "deepseek",
+  "deepseek-r1": "deepseek",
+  "deepseek-coder": "deepseek",
+  // OpenAI
+  "gpt-5.4": "openai",
+  "gpt-5.4-codex": "openai",
+  "gpt-5.4-mini": "openai",
+  "o1": "openai",
+  // 智谱
+  "glm-4.6": "zhipu",
+  "glm-4.6-airx": "zhipu",
+  "glm-4-flash": "zhipu",
+  "glm-4-air": "zhipu",
+};
 
 /**
  * v6.5.5：每张图片估算 token（OpenAI/Anthropic 实测平均）。
@@ -423,9 +468,26 @@ function estimatePromptTokens(event: any, modelHint?: string): number {
  *
  * 如果所有候选都 banned 或 ctx 不够 → 返 null（调用方应降级到 banner 提示，让用户/compact）。
  */
+/**
+ * v6.6.4: 从 cfg 读已注册 providers（cfg.agents.defaults.models keys 取 split('/')[0]）。
+ * 强切候选必须命中已注册 provider，避免选了用户没装的 model（claude/gemini 等）。
+ */
+function readInstalledProviders(cfg: unknown): Set<string> {
+  const models = (cfg as { agents?: { defaults?: { models?: Record<string, unknown> } } })
+    ?.agents?.defaults?.models;
+  if (!models || typeof models !== "object") return new Set();
+  const providers = new Set<string>();
+  for (const key of Object.keys(models)) {
+    const slash = key.indexOf("/");
+    if (slash > 0) providers.add(key.slice(0, slash));
+  }
+  return providers;
+}
+
 function pickLongCtxModel(
   candidates: string[],
   currentModel: string | undefined,
+  installedProviders: Set<string>,
   options?: { preferCheap?: boolean },
 ): string | null {
   const exclude = currentModel?.includes("/") ? currentModel.split("/").pop() : currentModel;
@@ -435,12 +497,12 @@ function pickLongCtxModel(
     if (c === exclude) return false;
     const ctxMax = KNOWN_MODEL_CTX_MAX[c] ?? 0;
     if (ctxMax < 256_000) return false;
+    // v6.6.4: 必须是用户 cfg 已注册 provider（防止选了 claude/gemini 而用户没装该 provider）
+    const provider = MODEL_TO_PROVIDER_MAP[c];
+    if (!provider) return false; // 未知 provider 的 candidate 跳
+    if (installedProviders.size > 0 && !installedProviders.has(provider)) return false;
     if (isModelBanned(c)) return false;
-    if (isModelBanned(`sidus/${c}`)) return false;
-    if (isModelBanned(`minimax/${c}`)) return false;
-    if (isModelBanned(`anthropic/${c}`)) return false;
-    if (isModelBanned(`openai/${c}`)) return false;
-    if (isModelBanned(`google/${c}`)) return false;
+    if (isModelBanned(`${provider}/${c}`)) return false;
     return true;
   });
 
@@ -969,11 +1031,13 @@ export function registerContextWatchdog(
         monthlyBudgetUSD !== undefined &&
         monthlyBudgetUSD > 0 &&
         s.estimatedCostUSD > monthlyBudgetUSD * 0.8;
-      const target = pickLongCtxModel(longCtxCandidates, s.lastModel, { preferCheap: budgetTight });
+      // v6.6.4: 从 cfg 读已注册 providers 过滤候选,避免选了用户没装的 provider
+      const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+      const target = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders, { preferCheap: budgetTight });
       if (!target) {
         // 所有 long-ctx 候选不可用 —— 不强切，让 model-router 自己决定，banner 已经在 prompt build 那边出过了
         api.logger.warn(
-          `[ctx-watchdog] FORCE-escalate skipped: no long-ctx model available (all banned or none registered) | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}%`,
+          `[ctx-watchdog] FORCE-escalate skipped: no long-ctx model available (all banned or no installed provider matches) | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | installedProviders=[${[...installedProviders].join(',')}]`,
         );
         return undefined;
       }
@@ -981,12 +1045,18 @@ export function registerContextWatchdog(
       // 记录 originalModel（仅首次切才记，避免被多次强切覆盖）
       if (!s.originalModel) s.originalModel = s.lastModel;
       const fromModel = s.lastModel ?? "<unknown>";
+      // v6.6.4: 同时返 providerOverride,让 OpenClaw 核心切到正确 provider client
+      // (before) 只返 modelOverride 导致 provider mismatch 撞 400 chain_exhausted
+      const targetProvider = MODEL_TO_PROVIDER_MAP[target];
+      const targetFullId = targetProvider ? `${targetProvider}/${target}` : target;
       // 不立即修改 sessions 里 lastModel/lastModelCtxMax —— 等 llm_output 来时拿到真实 modelId 自然会更新
       // （避免被 model-router 覆盖再切回的颠簸）
       api.logger.warn(
-        `[ctx-watchdog] FORCE-escalate to long-ctx: ${fromModel} → ${target} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | projected=${projected}/${s.lastModelCtxMax} | channel=${channel} | budgetTight=${budgetTight}`,
+        `[ctx-watchdog] FORCE-escalate to long-ctx: ${fromModel} → ${targetFullId} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | projected=${projected}/${s.lastModelCtxMax} | channel=${channel} | budgetTight=${budgetTight}`,
       );
-      return { modelOverride: target };
+      return targetProvider
+        ? { modelOverride: targetFullId, providerOverride: targetProvider }
+        : { modelOverride: target };
     },
     { priority: HOOK_PRIORITY_FORCE_ESCALATE },
   );
@@ -1041,7 +1111,8 @@ export function registerContextWatchdog(
         }
         const channel = resolveChannel(ctx);
         const T = resolveThresholds(channel);
-        const availableLongCtx = pickLongCtxModel(longCtxCandidates, s.lastModel);
+        const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+        const availableLongCtx = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders);
         return {
           ok: true,
           sessionKey: sessionKey.slice(0, 16) + "…",
@@ -1105,6 +1176,7 @@ export function registerContextWatchdog(
         }
         // 用户指定 target → 验证后用；否则自动选
         let target: string | null = null;
+        const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
         if (params?.target && typeof params.target === "string") {
           const requested = params.target.trim();
           const ctxMax = KNOWN_MODEL_CTX_MAX[requested] ?? 0;
@@ -1118,9 +1190,18 @@ export function registerContextWatchdog(
           if (isModelBanned(requested)) {
             return { ok: false, reason: `${requested} 当前被 latency-tracker ban`, hint: "等解禁或选别的" };
           }
+          // v6.6.4: 验证 target 的 provider 用户已注册
+          const reqProvider = MODEL_TO_PROVIDER_MAP[requested];
+          if (reqProvider && installedProviders.size > 0 && !installedProviders.has(reqProvider)) {
+            return {
+              ok: false,
+              reason: `指定的 ${requested} provider=${reqProvider} 未在 cfg.agents.defaults.models 注册`,
+              hint: `已注册 providers: [${[...installedProviders].join(', ')}]，请选已装的 model 或先注册 ${reqProvider} provider`,
+            };
+          }
           target = requested;
         } else {
-          target = pickLongCtxModel(longCtxCandidates, s.lastModel);
+          target = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders);
         }
 
         if (!target) {

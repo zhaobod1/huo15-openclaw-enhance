@@ -2,6 +2,93 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.4 — 2026-05-11（修跨 provider 强切撞 400 mismatch — long-ctx 选型必带 providerOverride）
+
+### 触发
+
+赵博实测：cfg 改成 `primary=deepseek-v4-flash, fallbacks=[deepseek-v4-pro, minimax/MiniMax-M2.7, ...]` 后，让 BOT 写 word 撞：
+
+```
+ERROR: FailoverError: LLM request failed: provider rejected the request schema or tool payload
+WARN model_fallback_decision:
+  requestedProvider: deepseek
+  errPreview: "400 The supported API model names are deepseek-v4-pro or deepseek-v4-flash, 
+               but you passed minimax/MiniMax-M2.7."
+  finalOutcome: chain_exhausted
+```
+
+DeepSeek API 收到 `minimax/MiniMax-M2.7`——OpenClaw 把 fallback model id 整串塞给当前 session 的 provider client，跨 provider 时撞 400。
+
+### 双重根因（enhance 自己的 bug）
+
+| Bug | 位置 | 影响 |
+|---|---|---|
+| `LONG_CTX_CANDIDATES_DEFAULT` 只有裸 model id（无 provider prefix） | `context-watchdog.ts:96-104` | 强切返 `modelOverride` 时不知道对应 provider |
+| 强切 hook 只返 `modelOverride` 不返 `providerOverride` | `context-watchdog.ts:1051` 等 3 处 | OpenClaw 核心拿到 model id 但用旧 session provider 调 → API 拒 400 |
+| `pickLongCtxModel` 没过滤"用户已注册 provider" | `context-watchdog.ts:434-444` | 选了 claude/gemini/kimi 这种用户没装的 model → 必失败 |
+
+之前 `pickLongCtxModel` 逐个 prefix 试 ban check（`sidus/${c}` / `minimax/${c}` / `anthropic/${c}` ...）— 暴露了"裸 model id 不知道 provider"的设计 confusion。
+
+### 修法（不修 OpenClaw 核心）
+
+`PluginHookBeforeModelResolveResult` SDK 类型支持 `providerOverride` 字段（`hook-before-agent-start.types.d.ts`），enhance 一直**没用**。本版补上。
+
+1. **新增 `MODEL_TO_PROVIDER_MAP`**（裸 model id → provider）：
+   ```ts
+   const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
+     "claude-opus-4.7-1m": "anthropic",
+     "gemini-2.5-pro": "google-ai-studio",
+     "kimi-k2": "moonshot",
+     "minimax-m2": "minimax",
+     "deepseek-v3.2": "deepseek",
+     // ...约 20 个常见 long-ctx model
+   };
+   ```
+
+2. **新增 `readInstalledProviders(cfg)`** — 从 `cfg.agents.defaults.models` keys 推已注册 provider Set。
+
+3. **`pickLongCtxModel` 加 `installedProviders` 参数过滤**：
+   ```ts
+   const provider = MODEL_TO_PROVIDER_MAP[c];
+   if (!provider) return false;  // 未知 provider 的 candidate 跳
+   if (installedProviders.size > 0 && !installedProviders.has(provider)) return false;
+   ```
+
+4. **强切 hook + `enhance_route_to_long_ctx` tool 同时返 providerOverride**：
+   ```ts
+   const targetProvider = MODEL_TO_PROVIDER_MAP[target];
+   const targetFullId = targetProvider ? `${targetProvider}/${target}` : target;
+   return targetProvider
+     ? { modelOverride: targetFullId, providerOverride: targetProvider }
+     : { modelOverride: target };
+   ```
+
+5. **enhance_route_to_long_ctx 显式 target 也校验 provider 已注册**，给错时返 hint 列已装 providers。
+
+### 用户场景（赵博）效果
+
+cfg 当前装 `deepseek + minimax`：
+
+- candidates 过滤：`gemini/claude/kimi` 全去掉（provider 没装），剩 `minimax-m2` (200K) 不算 long-ctx → 返 null
+- **不强切**，banner 提示用户 /compact
+- 主路径走 cfg.fallbacks `[deepseek-v4-pro]`（同 provider 安全），不撞跨 provider 拼接 bug
+
+### 测试
+
+- `tsc --noEmit` 干净
+- 已有 vitest 全跑通
+
+### 不变
+
+- v6.6.3 cc-bridge-prompt 严格触发条件
+- v6.6.2 runId 去重 + 静音工具
+- v6.6.0 cost-aware + channel 差异化
+- v6.5.7 sidus 清理 + subagent 累加
+- v6.5.6 ctx-usage-db 持久化
+- v6.5.5 真实切换闭环（≥95% 强切）
+
+---
+
 ## 6.6.2 — 2026-05-11（上下文守护『runId 去重 + 静音工具』bug fix + UX）
 
 ### 触发

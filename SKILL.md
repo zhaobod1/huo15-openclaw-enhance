@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
 description: "火一五·克劳德·龙虾增强插件 v6.6.2 — 上下文守护『runId 去重 + 静音工具』：(1) P3-13 修 retry 重算 bug — seenRunIds Set 内存去重（bounded 20 FIFO），龙虾 model-fallback retry 时 llm_output 同 runId 二次 emit 跳过累加；(2) P2-10 enhance_ctx_silence({minutes 1-60, reason?}) 工具，期间所有 banner 跳过，过期自动解除。继承 v6.6.0 cost-aware + 多模态精算 + channel 差异化 + v6.5.7 subagent + 预测式 + v6.5.6 sqlite + v6.5.5 真实切换。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.6.2
+version: 6.6.4
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

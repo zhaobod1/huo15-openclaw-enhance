@@ -1,6 +1,6 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.3",
+  "version": "6.6.4",
   "publishConfig": {
     "access": "public"
   },
