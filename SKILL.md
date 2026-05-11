@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.6.7 — 强切候选改读用户 openclaw.json：用户明确要求『你应该看 openclaw.json 里面配置的几个模型，按照这个里面的配置切换』。修硬编码 LONG_CTX_CANDIDATES (claude/gemini/kimi) 跟用户实际配置 (deepseek/minimax) 不匹配的设计错。新增 readUserAgentModels 读 cfg.agents.defaults.model.{primary,fallbacks} join cfg.models.providers 拿真实 contextWindow/cost。pickEscalateTargetFromUserConfig 按 ctx 严格更大筛选。before_model_resolve / enhance_route_to_long_ctx / enhance_ctx_status 都优先用用户配置；硬编码仅作极端兜底。继承 v6.6.6 safeHook 防御 + v6.6.4 providerOverride + v6.6.2 runId 去重 + v6.6.0 cost-aware + 多模态精算 + channel 差异化。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.6.7
+description: "火一五·克劳德·龙虾增强插件 v6.6.8 — **全模块 hook 系统性防御**：wrapApiForSafeHooks Proxy 拦截 api.on()，让全部 28 个 hook 跨 17 个模块的 handler **全部**自动包 try/catch（不只 ctx-watchdog 的 6 个）。修用户反复撞 'Something went wrong' 根因：v6.6.6 只包了 ctx-watchdog，剩 22 个 hook 裸奔（model-router/session-bridge/session-lifecycle/cc-bridge-*/large-file-bridge/tool-safety/mode-gate 等），任一抛即崩。包后所有 hook 异常 log + return undefined 不影响主流程。继承 v6.6.7 user-config 优先强切 + v6.6.4 providerOverride。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.6.8
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

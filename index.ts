@@ -14,6 +14,7 @@
  * - 每个企微用户/群组的数据完全隔离
  */
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { wrapApiForSafeHooks } from "./src/utils/safe-api-wrapper.js";
 import { createRequire } from "node:module";
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 import { registerStructuredMemory } from "./src/modules/structured-memory.js";
@@ -80,7 +81,13 @@ export default definePluginEntry({
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
   description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
 
-  register(api) {
+  register(rawApi) {
+    // v6.6.8: 全模块 hook 防御性包裹 — 拦截 api.on()，让所有 enhance 模块（28 hook 跨 17 文件）
+    // 的 hook handler 自动包 try/catch。任何 hook 抛 → log + return undefined，不影响 OpenClaw 主流程。
+    // 修用户 v6.6.5-v6.6.7 升级后仍反复撞 "Something went wrong" 事故（根因不在 ctx-watchdog，
+    // 而在其他模块未受保护的 hook）。
+    const api = wrapApiForSafeHooks(rawApi);
+
     const config = (api.pluginConfig ?? {}) as EnhancePluginConfig;
     const toolTier: ToolTier = config.toolTier ?? "balanced";
     const maxTier: Tier = TIER_MAX[toolTier];

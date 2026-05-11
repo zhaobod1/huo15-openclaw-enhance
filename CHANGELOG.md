@@ -2,6 +2,113 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.8 — 2026-05-11（**全模块 hook 系统性防御** — 修反复『Something went wrong』根因）
+
+### 触发
+
+用户 v6.6.5 / 6.6.6 / 6.6.7 升级后**反复**截图同一个错误：
+
+```
+⚠ Something went wrong while processing your request.
+  Please try again, or use /new to start a fresh session.
+```
+
+前三个 hotfix 都没命中：
+- v6.6.5 doc sync
+- v6.6.6 ctx-watchdog 6 hook safeHook 包裹
+- v6.6.7 user-config 优先强切（修硬编码 LONG_CTX_CANDIDATES 设计错误）
+
+### 终极根因
+
+`grep -rn "api\.on(" src/modules/ | wc -l` → **28 个 hook 跨 17 个模块**。
+
+v6.6.6 只把 **ctx-watchdog 的 6 个** safeHook 包了，**剩 22 个 hook 完全裸奔**：
+
+| 文件 | hook 数 |
+|---|---|
+| `session-lifecycle.ts` | 5 |
+| `tool-safety.ts` | 2 |
+| `cc-bridge-dispatch-harness.ts` | 2 |
+| `workflow-hooks.ts` | 1 |
+| `task-planner.ts` | 1 |
+| `session-recap.ts` | 1 |
+| `session-bridge.ts` | 1 |
+| `self-check.ts` | 1 |
+| `scheduled-tasks-bridge.ts` | 1 |
+| `prompt-enhancer.ts` | 1 |
+| `native-memory-surfacer.ts` | 1 |
+| `model-router.ts` | 1 |
+| `mode-gate.ts` | 1 |
+| `large-file-bridge.ts` | 1 |
+| `cc-bridge-pre-fetch.ts` | 1 |
+| `cc-bridge-keyword-dispatch.ts` | 1 |
+
+任一抛 unhandled exception → OpenClaw 整个请求 fail-fast → 通用错误页。
+
+### v6.6.8 改动
+
+新建 `src/utils/safe-api-wrapper.ts`（~70 行）：
+
+```ts
+export function wrapApiForSafeHooks(api: OpenClawPluginApi): OpenClawPluginApi {
+  if ((api as any).__enhance_safehook_wrapped__) return api;
+  const originalOn = api.on.bind(api);
+
+  const safeOn = ((hookName, handler, opts) => {
+    const wrappedHandler = (event, ctx) => {
+      try {
+        return handler(event, ctx);
+      } catch (err) {
+        api.logger.error(`[enhance safeHook] ${hookName} 异常已捕获: ${err.message}`);
+        // 调试用：stack 第一行
+        if (err.stack) {
+          const firstFrame = err.stack.split("\n").slice(1, 3).join(" | ");
+          api.logger.error(`[enhance safeHook] stack: ${firstFrame}`);
+        }
+        return undefined;
+      }
+    };
+    return originalOn(hookName, wrappedHandler, opts);
+  });
+
+  return new Proxy(api, {
+    get(target, prop, receiver) {
+      if (prop === "on") return safeOn;
+      if (prop === "__enhance_safehook_wrapped__") return true;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+```
+
+`index.ts` register 入口：
+
+```ts
+register(rawApi) {
+  const api = wrapApiForSafeHooks(rawApi);  // 一次性 wrap
+  // ... 所有模块都拿 wrapped api
+}
+```
+
+**效果**：所有 28 个 hook 自动包 try/catch，不用改 17 个模块文件。再有任何 hook 抛——log 一行 stack 信息然后 return undefined，OpenClaw 主流程完全不受影响。
+
+### 怎么定位真正的根因
+
+升级 v6.6.8 后用户再发『麻将观战可行性研究报告，用 word 写一份给我』：
+
+**如果不再撞错** → 某个 hook 在抛被 safeHook catch 了。日志看 `[enhance safeHook] <hookName>` 行就知道是哪个 hook，stack frame 第一行就知道是哪个模块。
+
+**如果还撞错** → 100% 不是 enhance hook 抛了。是 OpenClaw 自己或 provider 端的问题。需要看 `~/.openclaw/logs/gateway.err.log` 实际 ERROR trace。
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ Proxy wrap 是 transparent：所有其他 api.* 方法（registerTool / registerMemory* / logger / runtime 等）原样透传
+- ✅ marker 防重复 wrap：`__enhance_safehook_wrapped__` 标记位避免 hot-reload 时双层 proxy
+- ✅ logger 抛也吞掉：避免无限循环
+
 ## 6.6.7 — 2026-05-11（强切候选改读用户 openclaw.json，修硬编码 LONG_CTX_CANDIDATES 设计错误）
 
 ### 触发

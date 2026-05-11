@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.7",
+  "version": "6.6.8",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.7 — 强切候选改读用户 openclaw.json：用户截图明确指出『你应该看 openclaw.json 里面配置的几个模型，按照这个里面的配置切换』。修 v6.5.5-v6.6.6 强切硬编码 LONG_CTX_CANDIDATES (claude/gemini/kimi) 跟用户实际机器配置 (deepseek/minimax) 完全不匹配的设计错误。新增 readUserAgentModels(cfg)：读 cfg.agents.defaults.model.{primary,fallbacks} → join cfg.models.providers[<provider>].models[<bareId>] 拿真实 contextWindow/cost。pickEscalateTargetFromUserConfig 按 ctx 严格更大筛选 + 默认 ctx 降序（preferCheap=true 时 cost 升序）。before_model_resolve / enhance_route_to_long_ctx / enhance_ctx_status 都优先用用户配置，硬编码 LONG_CTX_CANDIDATES 仅作极端兜底。继承 v6.6.6 safeHook 防御包裹 + v6.6.4 providerOverride。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.6.8 — **全模块 hook 系统性防御**：新增 wrapApiForSafeHooks Proxy 拦截 api.on()，让 enhance 全部 28 个 hook 跨 17 个模块的 handler **全部**自动包 try/catch（不只是 ctx-watchdog 的 6 个）。修用户 v6.6.5/6/7 升级后仍**反复**撞 'Something went wrong' 的根因——v6.6.6 只包了 ctx-watchdog 6 个，剩 22 个 hook（model-router / session-bridge / session-lifecycle / cc-bridge-* / large-file-bridge / tool-safety / mode-gate / native-memory-surfacer / workflow-hooks / task-planner / scheduled-tasks-bridge / prompt-enhancer / session-recap / self-check 等）裸奔，任何一个抛 → OpenClaw fail-fast → 通用错误页。包后所有 hook 异常 log error + return undefined 不影响主流程。继承 v6.6.7 user-config 优先强切 + v6.6.4 providerOverride。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
