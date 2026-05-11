@@ -691,8 +691,23 @@ export function registerContextWatchdog(
   // v6.5.6 P1-5: 会话级"建议切回原模型" 标记
   const revertSuggestPending = new Map<string, string>();
 
+  // v6.6.6 hotfix: 所有 hook 包 try/catch — 防御性「不影响主流程」
+  // 触发原因：用户实测 v6.6.5 升级后『麻将观战可行性报告』仍撞 "Something went wrong"，
+  // 说明某个 enhance hook 在 edge case 抛了 unhandled exception → OpenClaw 报通用错误页。
+  // 修法：每个 hook handler 顶层包 try/catch，错误 log + return undefined，不影响主流程。
+  const safeHook = <T>(hookName: string, body: () => T | undefined): T | undefined => {
+    try {
+      return body();
+    } catch (err) {
+      api.logger.error(
+        `[ctx-watchdog] ${hookName} hook 异常已捕获（不影响主流程）: ${(err as Error)?.message ?? err}`,
+      );
+      return undefined;
+    }
+  };
+
   // ── hook 1: llm_output 累加 token usage（事后真实值）──
-  api.on("llm_output", (event, ctx) => {
+  api.on("llm_output", (event, ctx) => safeHook("llm_output", () => {
     const sessionKey = pickSessionKey(ctx);
     if (!sessionKey) return;
     const agentId = pickAgentId(ctx);
@@ -703,8 +718,6 @@ export function registerContextWatchdog(
     const s = getOrCreate(sessionKey, agentId, modelId);
 
     // v6.6.1 P3-13: runId 去重防 retry 重复累加
-    // 龙虾 model-fallback 触发 retry 后 llm_output 会再次 emit（同 runId），
-    // 不去重的话 token/cost 会被算两次
     if (runId) {
       if (s.seenRunIds.has(runId)) {
         if (debug) {
@@ -716,16 +729,13 @@ export function registerContextWatchdog(
       }
       s.seenRunIds.add(runId);
       if (s.seenRunIds.size > SEEN_RUNIDS_LIMIT) {
-        // FIFO eviction（Set 保持插入顺序）
         const first = s.seenRunIds.values().next().value;
         if (first !== undefined) s.seenRunIds.delete(first);
       }
     }
 
-    // v6.5.5：本轮 LLM 调用结束 → 清 pendingTokens（事前估算已被真实值替代）
     s.pendingTokens = 0;
     if (usageDelta <= 0) {
-      // 部分 provider 不报 usage（比如本地模型）→ 用上一轮估算补偿，避免计数停滞
       if (debug) {
         api.logger.info(
           `[ctx-watchdog] llm_output 没拿到 usage（provider 没报）| session=${sessionKey.slice(0, 12)} | model=${modelId}`,
@@ -736,17 +746,15 @@ export function registerContextWatchdog(
 
     s.totalTokens += usageDelta;
     s.lastUpdatedAt = Date.now();
-    // v6.5.7 P2-9: 记录本轮 token 增量到 history 队列（最近 N 轮 FIFO）
     s.tokensPerTurnHistory.push(usageDelta);
     if (s.tokensPerTurnHistory.length > PREDICTION_HISTORY_LEN) {
       s.tokensPerTurnHistory.shift();
     }
-    // v6.6.0 P1-4: 按 model 估算单轮 cost (USD) 并累加到会话级
     const turnCost = estimateTurnCostUSD(modelId, (event as any)?.usage);
     if (turnCost > 0) {
       s.estimatedCostUSD += turnCost;
     }
-    markDirty(sessionKey); // v6.5.6: 标记 dirty，等 10s 节流批量 flush 到 sqlite
+    markDirty(sessionKey);
 
     if (debug) {
       const pct = Math.round((s.totalTokens / s.lastModelCtxMax) * 100);
@@ -754,26 +762,26 @@ export function registerContextWatchdog(
         `[ctx-watchdog] +${usageDelta.toLocaleString()} → ${s.totalTokens.toLocaleString()}/${s.lastModelCtxMax.toLocaleString()} (${pct}%) | session=${sessionKey.slice(0, 12)} | model=${modelId}`,
       );
     }
-  });
+  }));
 
   // ── hook 1b: llm_input 累加事前估算（v6.5.5 P0-2）──
   // 比 before_model_resolve / before_prompt_build 信息更全（含 systemPrompt + historyMessages + imagesCount），
   // 但顺序在 before_model_resolve 之后——所以 before_model_resolve 自己也要 estimate 一次（用 event.prompt）。
-  api.on("llm_input", (event, ctx) => {
+  api.on("llm_input", (event, ctx) => safeHook("llm_input", () => {
     const sessionKey = pickSessionKey(ctx);
     if (!sessionKey) return;
     const agentId = pickAgentId(ctx);
     const modelId = (event as any)?.model;
     const s = getOrCreate(sessionKey, agentId, modelId);
-    const est = estimatePromptTokens(event);
-    s.pendingTokens = est; // 覆盖（不累加，因为 llm_input 一轮一次）
+    const est = estimatePromptTokens(event, modelId);
+    s.pendingTokens = est;
     s.lastUpdatedAt = Date.now();
     if (debug) {
       api.logger.info(
         `[ctx-watchdog] llm_input estimate=${est.toLocaleString()} | session=${sessionKey.slice(0, 12)}`,
       );
     }
-  });
+  }));
 
   // ── hook 1c: subagent_spawned / subagent_ended（v6.5.7 P1-7）──
   // 解决 subagent token 累加盲区：child agent 调 LLM 的 token 走 child sessionKey，
@@ -782,11 +790,10 @@ export function registerContextWatchdog(
   const childToParent = new Map<string, string>();
   const MAX_SUBAGENT_LINKS = 500;
 
-  api.on("subagent_spawned", (event, ctx) => {
+  api.on("subagent_spawned", (event, ctx) => safeHook("subagent_spawned", () => {
     const childKey = (event as any)?.childSessionKey ?? (ctx as any)?.childSessionKey;
     const parentKey = (ctx as any)?.requesterSessionKey;
     if (!childKey || !parentKey || childKey === parentKey) return;
-    // LRU eviction
     if (childToParent.size >= MAX_SUBAGENT_LINKS) {
       const oldest = childToParent.keys().next().value;
       if (oldest) childToParent.delete(oldest);
@@ -797,9 +804,9 @@ export function registerContextWatchdog(
         `[ctx-watchdog] subagent linked: child=${childKey.slice(0, 12)} → parent=${parentKey.slice(0, 12)}`,
       );
     }
-  });
+  }));
 
-  api.on("subagent_ended", (event, ctx) => {
+  api.on("subagent_ended", (event, ctx) => safeHook("subagent_ended", () => {
     const childKey =
       (event as any)?.targetSessionKey ??
       (ctx as any)?.childSessionKey ??
@@ -815,8 +822,6 @@ export function registerContextWatchdog(
     }
     const parent = sessions.get(parentKey);
     if (!parent) {
-      // 父 session 还没追踪到 — 不强建（等父自己的 llm_output 触发 getOrCreate）
-      // 但记下 child 已经吃了多少，等父出现时累加（暂存方案，简化版直接丢，避免内存膨胀）
       childToParent.delete(childKey);
       return;
     }
@@ -827,15 +832,13 @@ export function registerContextWatchdog(
       `[ctx-watchdog] subagent rolled up: child=${childKey.slice(0, 12)} (+${child.totalTokens.toLocaleString()}) → parent=${parentKey.slice(0, 12)} | parent total=${parent.totalTokens.toLocaleString()}`,
     );
     childToParent.delete(childKey);
-    // child sessions 留在 sqlite 作画像，但内存里可以清掉（节省 RAM）
-    // 不立即 delete，让 flushDirtySessions 自然 LRU evict
-  });
+  }));
 
   // ── hook 2: after_compaction 重置（龙虾刚 compact 完，token 大幅下降）──
   // openclaw 2026.4.x dist 实际 emit after_compaction 但 SDK 类型 union 可能落后；
   // 跟 model_call_ended 一样用 cast 绕过类型检查
   // v6.5.6: 加 P1-5 切回原模型逻辑 + dirty 标记
-  (api.on as any)("after_compaction", (_event: any, ctx: any) => {
+  (api.on as any)("after_compaction", (_event: any, ctx: any) => safeHook("after_compaction", () => {
     const sessionKey = pickSessionKey(ctx);
     if (!sessionKey) return;
     const s = sessions.get(sessionKey);
@@ -846,7 +849,6 @@ export function registerContextWatchdog(
     s.lastUpdatedAt = Date.now();
     markDirty(sessionKey);
 
-    // v6.5.6 P1-5: 如果之前因 ctx 压力切过模型，现在 compact 后降下来 → 建议切回原模型
     const afterPercent = s.totalTokens / s.lastModelCtxMax;
     if (s.originalModel && s.lastModel !== s.originalModel) {
       const originalCtxMax = resolveCtxMax(s.originalModel);
@@ -866,7 +868,7 @@ export function registerContextWatchdog(
         `[ctx-watchdog] after_compaction: ${before.toLocaleString()} → ${s.totalTokens.toLocaleString()} (${Math.round(afterPercent * 100)}%) | session=${sessionKey.slice(0, 12)}`,
       );
     }
-  });
+  }));
 
   /**
    * v6.5.7 P2-9: 预测式提醒。
@@ -963,21 +965,19 @@ export function registerContextWatchdog(
   }
 
   // ── hook 3: before_prompt_build 注入预警 banner（v6.5.6 含 revert hint 消费）──
-  api.on("before_prompt_build", (event, ctx) => {
+  api.on("before_prompt_build", (event, ctx) => safeHook("before_prompt_build", () => {
     const sessionKey = pickSessionKey(ctx);
     if (!sessionKey) return undefined;
     const s = sessions.get(sessionKey);
     if (!s) return undefined;
 
-    // v6.6.1 P2-10: mute 期间跳过所有 banner
     if (s.mutedUntilMs && Date.now() < s.mutedUntilMs) {
       return undefined;
     }
     if (s.mutedUntilMs && Date.now() >= s.mutedUntilMs) {
-      s.mutedUntilMs = undefined; // 过期清掉，避免反复检查
+      s.mutedUntilMs = undefined;
     }
 
-    // v6.5.6 P1-5: 消费 pending revert 建议（compact 后 ctx 降下来 → 建议切回原 model）
     const revertTarget = revertSuggestPending.get(sessionKey);
     if (revertTarget) {
       revertSuggestPending.delete(sessionKey);
@@ -994,12 +994,11 @@ export function registerContextWatchdog(
     const thresholdBanner = evalThresholdBanner(s, event, ctx);
     if (thresholdBanner) return { prependContext: thresholdBanner };
 
-    // v6.5.7 P2-9: 阈值未到 → 跑预测式提醒（按速率预估几轮后撞 warnAt）
     const predictionBanner = evalPredictionBanner(s, event, ctx);
     if (predictionBanner) return { prependContext: predictionBanner };
 
     return undefined;
-  });
+  }));
 
   // ── hook 4: before_model_resolve 强切到 long-ctx model（v6.5.5 P0-1）──
   // priority=100 比 model-router（默认 0）高，让 ctx-watchdog 先跑。
@@ -1007,32 +1006,33 @@ export function registerContextWatchdog(
   // 即使 model-router 后跑也返 modelOverride，firstDefined 保留 ctx-watchdog 的。
   api.on(
     "before_model_resolve",
-    (event, ctx) => {
+    (event, ctx) => safeHook("before_model_resolve", () => {
       const sessionKey = pickSessionKey(ctx);
       if (!sessionKey) return undefined;
       const s = sessions.get(sessionKey);
       if (!s) return undefined;
 
-      // 事前估算本轮 prompt（before_model_resolve 早于 llm_input，pendingTokens 还是 0）
       const liveEstimate = estimatePromptTokens(event, s.lastModel);
       const projected = s.totalTokens + liveEstimate;
       const percent = projected / s.lastModelCtxMax;
 
-      // v6.6.0 P2-8: channel-aware forceEscalateAt（群聊 90% 就强切，单聊 92%，terminal 95%）
       const channel = resolveChannel(ctx);
       const T = resolveThresholds(channel);
 
-      // 强切条件：(1) 命中 forceEscalateAt 阈值；(2) 当前 model ctx < 256K（已经是 long ctx 没必要切）
       if (percent < T.forceEscalateAt) return undefined;
       if (s.lastModelCtxMax >= 256_000) return undefined;
 
-      // v6.6.0 P1-4: cost-aware long-ctx 选型 — 月度预算 ≥80% 时偏便宜的（kimi-k2 vs opus-1m）
       const budgetTight =
         monthlyBudgetUSD !== undefined &&
         monthlyBudgetUSD > 0 &&
         s.estimatedCostUSD > monthlyBudgetUSD * 0.8;
-      // v6.6.4: 从 cfg 读已注册 providers 过滤候选,避免选了用户没装的 provider
-      const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+      // v6.6.4: 从 cfg 读已注册 providers 过滤候选；v6.6.6 包 try/catch 防 api.runtime 不存在或 loadConfig 抛
+      let installedProviders: Set<string> = new Set();
+      try {
+        installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+      } catch (err) {
+        api.logger.warn(`[ctx-watchdog] readInstalledProviders 失败（忽略，退回默认）: ${(err as Error)?.message}`);
+      }
       const target = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders, { preferCheap: budgetTight });
       if (!target) {
         // 所有 long-ctx 候选不可用 —— 不强切，让 model-router 自己决定，banner 已经在 prompt build 那边出过了
@@ -1057,7 +1057,7 @@ export function registerContextWatchdog(
       return targetProvider
         ? { modelOverride: targetFullId, providerOverride: targetProvider }
         : { modelOverride: target };
-    },
+    }),
     { priority: HOOK_PRIORITY_FORCE_ESCALATE },
   );
 
@@ -1396,6 +1396,6 @@ export function registerContextWatchdog(
   }
 
   api.logger.info(
-    `[enhance] context-watchdog v6.6.2 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | runId-dedup + silence + cost+image+subagent+prediction+sqlite all on）`,
+    `[enhance] context-watchdog v6.6.6 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | all 6 hooks safeHook-wrapped + runId-dedup + silence + cost+image+subagent+prediction+sqlite）`,
   );
 }

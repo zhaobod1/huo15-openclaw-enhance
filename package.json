@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.5",
+  "version": "6.6.6",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.5 — 上下文守护 hotfix 闭环 (v6.6.3/4/5)：(1) v6.6.4 修跨 provider 强切撞 400 mismatch — 新增 MODEL_TO_PROVIDER_MAP + readInstalledProviders 扫 agents.defaults.models 拿真实 provider，filter 三重过滤（KNOWN × providerKnown × providerInstalled），before_model_resolve 同时返 modelOverride+providerOverride 让 OpenClaw 切到正确 client，修用户实测『麻将观战可行性报告』→ Something went wrong 事故；(2) v6.6.3 cc-bridge-prompt 严格触发，普通对话不附 dashboard 链接 + 杜绝 /dashboard 残留；(3) v6.6.5 SKILL.md / package.json description 跟版本号同步（之前 SKILL.md 描述还说 v6.6.2 但 version 6.6.4）。继承 v6.6.2 runId 去重 + 静音工具 + v6.6.0 cost-aware + 多模态精算 + channel 差异化。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.6.6 — ctx-watchdog 6 个 hook 全 safeHook 包裹（防御性 try/catch）：用户 v6.6.5 升级后仍撞『Something went wrong』，证明某个 enhance hook 在 edge case 抛 unhandled exception，OpenClaw 收到通用错误页。本期 safeHook helper 包 llm_output / llm_input / subagent_spawned / subagent_ended / after_compaction / before_prompt_build / before_model_resolve 全部 7 处 hook handler，错误 log + return undefined 不影响主流程。readInstalledProviders(api.runtime?.config?.loadConfig?.()) 单独再 try/catch（防 api.runtime 不存在或 loadConfig 抛）。继承 v6.6.4 跨 provider 强切修复 + v6.6.2 runId 去重 + v6.6.0 cost-aware + 多模态精算 + channel 差异化。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

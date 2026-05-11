@@ -2,6 +2,68 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.6 — 2026-05-11（ctx-watchdog 6 个 hook 全 safeHook 防御包裹）
+
+### 触发
+
+用户实测 v6.6.5 升级后**再次**截图同一个错误：
+
+```
+⚠ Something went wrong while processing your request.
+  Please try again, or use /new to start a fresh session.
+```
+
+请求是简短的『麻将观战系统可行性研究报告，用 word 写一份给我』——不像 ctx 满，也不像跨 provider 强切（v6.6.4 已经 fix 了那个）。
+
+唯一合理解释：**某个 enhance hook 在 edge case 抛 unhandled exception**。OpenClaw 接到 hook throw 后整个请求 fail-fast，UI 显示通用错误页。审计 `context-watchdog.ts` 发现 **7 个 hook handler 0 处 try/catch 包裹**——任何 hook 抛都会撞主流程。
+
+最高嫌疑 `before_model_resolve` (priority=100，最早跑)：
+- `api.runtime?.config?.loadConfig?.()` 在某些 OpenClaw runtime 版本可能 throw（SDK 版本差异）
+- `readInstalledProviders` 解析 cfg 时如果格式异常会 throw
+- `estimatePromptTokens(event)` 在 event 字段 unexpected shape 时 throw
+
+### 改动
+
+新增 `safeHook(hookName, body)` helper（在 registerContextWatchdog 内 closure 捕获 api.logger）：
+
+```ts
+const safeHook = <T>(hookName: string, body: () => T | undefined): T | undefined => {
+  try {
+    return body();
+  } catch (err) {
+    api.logger.error(
+      `[ctx-watchdog] ${hookName} hook 异常已捕获（不影响主流程）: ${(err as Error)?.message ?? err}`,
+    );
+    return undefined;
+  }
+};
+```
+
+包裹全部 7 处 hook handler：
+
+| Hook | 风险点 |
+|---|---|
+| `llm_output` | usage 字段 unexpected shape / runId 解析 |
+| `llm_input` | event.prompt 非 string / attachments 异常 |
+| `subagent_spawned` | event.childSessionKey undefined |
+| `subagent_ended` | event.targetSessionKey undefined |
+| `after_compaction` | resolveCtxMax/originalModel 解析 |
+| `before_prompt_build` | revertSuggestPending / evalThresholdBanner 链式 |
+| `before_model_resolve` (priority=100) | **最高风险** — api.runtime / loadConfig / readInstalledProviders / estimatePromptTokens |
+
+`readInstalledProviders(api.runtime?.config?.loadConfig?.())` 单独再 try/catch（防 `api.runtime` 字段不存在或 `loadConfig` 抛 — SDK 版本差异）。
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 任何 enhance hook 抛 → log + 返 undefined，不影响 OpenClaw 主流程（"扩展挂了不能拖累主功能"原则）
+
+### 后续
+
+如果 v6.6.6 升级后用户仍撞同样错误 → 一定不是 ctx-watchdog 而是 OpenClaw 内部或其他 enhance 模块。需要用户提供 `~/.openclaw/logs/gateway.err.log` 实际 trace。
+
 ## 6.6.5 — 2026-05-11（doc sync — SKILL.md / package.json description 跟版本号对齐）
 
 ### 触发
