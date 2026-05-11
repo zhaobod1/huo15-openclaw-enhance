@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.12 — large-file-bridge 自动生成 token URL（兜底零依赖弱模型）：用户原话『没有后缀 token 啊』。before_prompt_build 命中时自动 randomBytes(6).hex() 生成 12-hex token + 写 manifest.json（跟 bot-upload-link 共用 ~/.openclaw/upload/manifest.json,enhance_upload_check 工具能查到）,URL = /plugins/enhance-upload/<token>。injectedSessions Map 升级存 token,before_agent_reply 兜底用同一 token 拼 URL 前后一致。即使弱模型完全无视 prompt,兜底也保证 LLM 输出末尾被 appendText token URL,AI 调 enhance_upload_check 能查清单。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.12
+description: "火一五·克劳德·龙虾增强插件 v6.7.13 — large-file-bridge 兜底死循环修 + 用户上传后流程引导：实测用户『我已经上传好了』后 AI 没调 enhance_upload_check 反被兜底又塞了一份上传链接死循环。根因：before_agent_reply 每轮都触发,injectedSessions 有 entry + body 不含 URL → 强制 appendText 链接。修法：(1) entry 加 replyAppendUsed 标记,每次 inject 兜底只 fire 一次；(2) prompt 加『用户上传后处理流程』,明确 LLM 看到『传完了』必须 enhance_upload_check({token}) → Read → 处理任务,严禁再发链接 / 反问 / 全盘扫。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.13
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

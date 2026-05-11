@@ -2,6 +2,101 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.13 — 2026-05-11（large-file-bridge 兜底死循环修复 + 用户上传后流程引导）
+
+### 触发
+
+用户截图实测 v6.7.12（token URL 已生效）：
+
+```
+贾维斯 15:30
+上传好了，你试试转成会议纪要发给我
+👉 https://keepermac.huo15.com/plugins/enhance-upload/2eaffa5d5569
+
+黄宣榕 15:31
+我已经上传好了
+
+贾维斯 15:31
+我已经上传好了
+👉 https://keepermac.huo15.com/plugins/enhance-upload/2eaffa5d5569   ← 又塞了一遍！
+```
+
+用户已经上传完，AI 应该调 `enhance_upload_check({token: "2eaffa5d5569"})` 拿文件，处理"转会议纪要"任务。但 hook 把 LLM 输出**又**强制覆盖成上传链接 → 死循环。
+
+### 根因（两个）
+
+#### 根因 A: `before_agent_reply` 兜底每轮 reply 都 fire
+
+```ts
+// v6.7.12 兜底逻辑
+const entry = injectedSessions.get(key);
+if (!entry) return;       // 只要 inject 过就触发
+// body 不含 URL → appendText 上传链接
+```
+
+`injectedSessions` 在 session 整个生命周期都保留 entry → 每个后续 reply 都被兜底覆盖。用户的"传完了"那条 reply 也被覆盖 → 永远拿不到处理结果。
+
+#### 根因 B: prompt 没明确"用户上传后该干什么"
+
+LLM 看到 prompt 里说『token 已预备好』但没说『用户上传后必须调 enhance_upload_check 工具』，弱模型不会主动调。
+
+### v6.7.13 改动
+
+#### 1. injectedSessions entry 加 `replyAppendUsed` 标记
+
+```ts
+// v6.7.13
+Map<string, { token, createdAt, replyAppendUsed: boolean }>
+```
+
+`before_prompt_build` 注入时 `replyAppendUsed: false`，`before_agent_reply` fire 一次后**立即** `replyAppendUsed = true` → 后续 reply 不再被覆盖。
+
+```ts
+const entry = injectedSessions.get(key);
+if (!entry || entry.replyAppendUsed) return;  // ← 关键
+// ... appendText logic
+entry.replyAppendUsed = true;                  // ← 标记已用
+```
+
+#### 2. prompt 加『用户上传后处理流程』强引导
+
+```
+# 本次会话已预生成 token (AI 追踪用)
+
+**token = `2eaffa5d5569`** (已写入 ~/.openclaw/upload/manifest.json, 24h 有效)
+
+## 用户上传后的处理流程（关键！LLM 必须严格按此顺序执行）
+
+用户上传文件后会发"传完了" / "上传好了" / "已传完" / 类似确认消息。**此时你必须**：
+
+1. 立即调用 enhance_upload_check({token: "2eaffa5d5569"}) 工具
+2. 工具返 {files: [{path, size, name}, ...]} 数组
+3. 用 Read 工具读 files[i].path 拿到文件内容
+4. 按用户原始任务继续处理（如"转会议纪要" / "分析内容" / "提取信息"）
+
+**严禁的反模式**：
+❌ 再次发上传链接（用户已上传，再发链接 = 死循环！）
+❌ 反问"你确定上传了吗 / 请截图" / "我没收到"
+❌ 跳过 enhance_upload_check 直接 ls 或 grep ~/.openclaw/upload/ 全盘扫
+```
+
+### 用户场景验证
+
+| 步骤 | v6.7.12（死循环） | v6.7.13（正常）|
+|---|---|---|
+| 用户首次发"超过100M无法下载" | hook inject + 兜底给链接 ✓ | 同上 ✓ |
+| 用户回"传完了" | hook 又兜底给链接（死循环）❌ | replyAppendUsed=true → 不接管 ✓ |
+| LLM 看到"传完了" | （prompt 没教）瞎回 | （prompt 强引导）调 enhance_upload_check({token}) ✓ |
+| AI 拿到文件路径 | 拿不到 | files: [{path, size, name}] ✓ |
+| AI 处理"转会议纪要" | 永远不进入这步 | Read 路径 → 调 model → 输出纪要 ✓ |
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 兜底 hook 一次性消费,不影响后续 reply 自然流转
+
 ## 6.7.12 — 2026-05-11（large-file-bridge 自动生成 token URL — 兜底也给 token，AI 追踪零依赖弱模型）
 
 ### 触发

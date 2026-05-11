@@ -65,13 +65,27 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
 }
 
 function buildUploadContext(url: string, token: string | null): string {
-  const tokenInfo = token
-    ? `\n# 已为本次会话预生成 token（AI 可追踪）
+  const tokenChecklist = token
+    ? `
 
-token = \`${token}\`（已写入 manifest，24h 有效）。用户上传后,你**必须**调:
-  enhance_upload_check({token: "${token}"})
-拉清单 → 拿到 \`{path, size, name}\` 数组 → Read 路径分析文件。`
-    : `\n# 本次未生成 token（兜底共享 URL，AI 不能追踪是谁传了什么）`;
+# 本次会话已预生成 token（AI 追踪用）
+
+**token = \`${token}\`**（已写入 ~/.openclaw/upload/manifest.json，24h 有效）
+
+## 用户上传后的处理流程（关键！LLM 必须严格按此顺序执行）
+
+用户上传文件后会发"传完了" / "上传好了" / "已传完" / 类似确认消息。**此时你必须**：
+
+1. 立即调用 \`enhance_upload_check({token: "${token}"})\` 工具
+2. 工具返 \`{files: [{path, size, name}, ...]}\` 数组
+3. 用 Read 工具读 \`files[i].path\` 拿到文件内容
+4. 按用户原始任务继续处理（如"转会议纪要" / "分析内容" / "提取信息"）
+
+**严禁的反模式**（用户上传后你回复时不要做这些）：
+❌ 再次发上传链接（用户已上传，再发链接 = 死循环！）
+❌ 反问"你确定上传了吗 / 请截图" / "我没收到"（请你**先调 enhance_upload_check** 再说，绝大多数情况文件就在）
+❌ 跳过 enhance_upload_check 直接 ls 或 grep \`~/.openclaw/upload/\` 全盘扫（隐私 + 性能差，token 才是精确入口）`
+    : "\n\n# 本次未生成 token（兜底共享 URL，AI 不能精确追踪）";
 
   return `【大文件上传 — 强制规则，禁止违反】
 
@@ -84,7 +98,7 @@ token = \`${token}\`（已写入 manifest，24h 有效）。用户上传后,你*
 ${url}
 
 上传完成后告诉我，我来处理。
-${tokenInfo}
+${tokenChecklist}
 
 # 严禁的行为（违反 = 用户卡死）
 
@@ -109,7 +123,12 @@ export function registerLargeFileBridge(
 
   // v6.7.12: 每个 session 关联一个 token，让 prompt 引导 + 兜底 hook 都给同一个 token URL
   // → AI 之后能调 enhance_upload_check({token}) 拿清单（精确追踪谁传了什么）
-  const injectedSessions = new Map<string, { token: string; createdAt: number }>();
+  // v6.7.13: 加 replyAppendUsed 标记 — 每次 inject 只兜底一次，避免后续 reply（用户说
+  // "传完了" / "继续帮我处理" 等）都被 hook 强制覆盖回上传链接（用户卡死循环）
+  const injectedSessions = new Map<
+    string,
+    { token: string; createdAt: number; replyAppendUsed: boolean }
+  >();
 
   // v6.7.12: token 自动生成 + manifest 写入（跟 bot-upload-link 同一份 ~/.openclaw/upload/）
   // 这样 LLM 不调 enhance_upload_link 工具,我们 hook 兜底也能给 token URL,enhance_upload_check 仍能查清单
@@ -239,7 +258,11 @@ export function registerLargeFileBridge(
       const oldest = injectedSessions.keys().next().value;
       if (oldest !== undefined) injectedSessions.delete(oldest);
     }
-    injectedSessions.set(key, { token: token ?? "", createdAt: Date.now() });
+    injectedSessions.set(key, {
+      token: token ?? "",
+      createdAt: Date.now(),
+      replyAppendUsed: false,
+    });
 
     api.logger.info(
       `[enhance-large-file] ${reason} | token=${token ?? "<fallback-no-token>"} | url=${url} (agent=${agentId}, session=${sessionId.slice(0, 12)})`,
@@ -262,6 +285,9 @@ export function registerLargeFileBridge(
 
     const entry = injectedSessions.get(key);
     if (!entry) return;
+    // v6.7.13: 每次 inject 兜底只 fire 一次。后续 user 消息（如"传完了" / "继续处理"）
+    // LLM 应该正常调 enhance_upload_check 工具，hook 不再强行 appendText 上传链接覆盖。
+    if (entry.replyAppendUsed) return;
 
     try {
       const body: string = (event as any)?.cleanedBody ?? (event as any)?.body ?? "";
@@ -287,6 +313,8 @@ export function registerLargeFileBridge(
         body.includes("enhance_upload_link") ||                     // LLM 调过工具会留下 marker
         body.includes("enhance_upload_check");
       if (hasRealUrl) {
+        // LLM 已经按引导给链接（或调过工具）→ 标记本轮 inject 已完成，后续 reply 不再兜底
+        entry.replyAppendUsed = true;
         return;
       }
 
@@ -297,8 +325,11 @@ export function registerLargeFileBridge(
       const suffix = `\n\n---\n📎 **大文件上传**：文件超过 100MB 无法在企微直接传输，请通过以下链接上传：\n👉 ${url}\n上传完成后告诉我，我来处理文件。`;
 
       api.logger.info(
-        `[enhance-large-file] before_agent_reply 强制接管 reply 拼上传链接 (agent=${agentId})`,
+        `[enhance-large-file] before_agent_reply 强制接管 reply 拼上传链接 (agent=${agentId}, token=${entry.token || "<no-token>"})`,
       );
+
+      // v6.7.13: 标记本轮 inject 兜底已用，后续不再 fire
+      entry.replyAppendUsed = true;
 
       // v6.7.4: return PluginHookBeforeAgentReplyResult shape: {handled, reply, reason}
       return {
