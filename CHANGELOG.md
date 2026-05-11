@@ -2,6 +2,110 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.7 — 2026-05-11（强切候选改读用户 openclaw.json，修硬编码 LONG_CTX_CANDIDATES 设计错误）
+
+### 触发
+
+用户截图明确指出：
+
+```
+openclaw.json:
+  agents.defaults.model.primary = "deepseek/DeepSeek-V4-Pro"
+  agents.defaults.model.fallbacks = [
+    "minimax/MiniMax-M2.7",
+    "deepseek/DeepSeek-V4-Flash"
+  ]
+```
+
+**用户原话**："你应该看 openclaw.json 里面配置的几个模型，按照这个里面的配置切换"
+
+### 设计错误回溯
+
+v6.5.5 起 ctx-watchdog 强切用的是硬编码 `LONG_CTX_CANDIDATES_DEFAULT`：
+
+```ts
+const LONG_CTX_CANDIDATES_DEFAULT = [
+  "claude-opus-4.7-1m",   // ← 用户没装 anthropic provider
+  "gemini-2.5-pro",        // ← 用户没装 google-ai-studio provider
+  "kimi-k2",               // ← 用户没装 moonshot provider
+  // ... 全部跟用户实际配置不匹配
+];
+```
+
+用户实际机器装的是 **deepseek + minimax**，硬编码全部 miss → v6.6.4 的三重过滤把候选筛干净 → 强切静默失败（"FORCE-escalate skipped: no long-ctx model available"）。
+
+这是**根本性的设计错误**：v6.5.5 的"真实切换闭环"实际上**对国内用户从未真正工作过**——只有装了 anthropic/google/moonshot 国际 provider 的用户才会被强切。
+
+### v6.6.7 改动
+
+新增 `readUserAgentModels(cfg)`：
+
+```ts
+interface UserModelCandidate {
+  fullId: string;       // "deepseek/DeepSeek-V4-Pro"
+  bareId: string;       // "DeepSeek-V4-Pro"
+  provider: string;     // "deepseek"
+  contextWindow: number;
+  costInPerM?: number;
+  costOutPerM?: number;
+}
+
+function readUserAgentModels(cfg: unknown): UserModelCandidate[] {
+  // 1. 读 cfg.agents.defaults.model.{primary, fallbacks}（按顺序去重）
+  // 2. 每个 fullId split → provider + bareId
+  // 3. join cfg.models.providers[<provider>].models[<bareId>] 拿 contextWindow + cost
+  // 4. 返完整候选列表
+}
+```
+
+新增 `pickEscalateTargetFromUserConfig`：
+- 过滤：`ctx > current.ctxMax`（严格更大才有意义切）+ 非 banned + 非当前 model
+- 排序：默认 ctx 降序（最大优先），preferCheap 时 cost 升序
+
+`before_model_resolve` 优先级：
+1. **优先**：`readUserAgentModels(cfg)` → `pickEscalateTargetFromUserConfig` → 返 `{modelOverride, providerOverride}`
+2. **兜底**：用户配置完全没读到 → 退回 v6.6.4 硬编码 `LONG_CTX_CANDIDATES_DEFAULT` 路径
+
+`enhance_route_to_long_ctx` 工具同步：
+- target 参数支持完整 fullId（如 `"minimax/MiniMax-M2.7"`）
+- 自动选时优先用用户配置
+- 错误提示返用户配置候选清单
+
+`enhance_ctx_status` 工具新增 `userConfigCandidates` 字段：
+
+```jsonc
+{
+  "userConfigCandidates": [
+    { "fullId": "deepseek/DeepSeek-V4-Pro", "ctxMax": 131072, "costInPerM": 0.14 },
+    { "fullId": "minimax/MiniMax-M2.7", "ctxMax": 204800, "costInPerM": 1.0 },
+    { "fullId": "deepseek/DeepSeek-V4-Flash", "ctxMax": 131072, "costInPerM": 0.14 }
+  ],
+  "availableLongCtxModel": "minimax/MiniMax-M2.7",  // ctx 比当前大的首选
+  "shouldEscalate": true
+}
+```
+
+### 用户场景验证
+
+| Step | 之前（v6.6.6）| 现在（v6.6.7）|
+|---|---|---|
+| 用户 primary 用 deepseek-v4-pro 跑到 95% | 在 LONG_CTX_CANDIDATES 找 kimi-k2 → installedProviders 没 moonshot → 跳过 → 不强切 | 在 user config 找 → minimax-m2.7 ctx 200K > 当前 128K → 强切 `{modelOverride: "minimax/MiniMax-M2.7", providerOverride: "minimax"}` ✓ |
+| 当前已是 user config 最大 ctx | 同上不强切 | 同上不强切，banner 提示 /compact |
+| 用户没配 fallbacks 也无 model 字段 | 走硬编码 | 走硬编码兜底（兼容旧行为）|
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不复制 isContextOverflowError
+- ✅ 不抢龙虾 model-fallback
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 用户没读到配置时退回硬编码（兼容性 fallback）
+- ✅ readUserAgentModels 跟 model-router 的 scanAvailableModels 用相似 schema 但读不同字段（model-router 读 cfg.models.providers，我读 cfg.agents.defaults.model.{primary,fallbacks} + join providers）
+
+### 后续
+
+如果 v6.6.7 升级后用户『麻将观战可行性报告』仍撞错 → 一定不是 ctx-watchdog，看 `~/.openclaw/logs/gateway.err.log` ERROR 行确定根因。
+
 ## 6.6.6 — 2026-05-11（ctx-watchdog 6 个 hook 全 safeHook 防御包裹）
 
 ### 触发

@@ -484,6 +484,120 @@ function readInstalledProviders(cfg: unknown): Set<string> {
   return providers;
 }
 
+/**
+ * v6.6.7: 用户配置驱动的候选 model — 修 v6.6.x 强切硬编码 LONG_CTX_CANDIDATES 的设计错误。
+ *
+ * 用户截图明确指出："你应该看 openclaw.json 里面配置的几个模型，按照这个里面的配置切换"
+ *
+ * 之前问题：LONG_CTX_CANDIDATES_DEFAULT 硬编码 claude/gemini/kimi——用户机器上没装
+ * 这些 provider（实际是 deepseek + minimax），三重过滤后返 null 不强切（v6.6.4 已修
+ * 错切的 bug，但还是没真正切——浪费"P0-1 真实切换"的设计）。
+ *
+ * 新设计：从 cfg.agents.defaults.model.{primary, fallbacks} 读用户配置的 model 列表 →
+ * cfg.models.providers[<provider>].models[<bareId>] join 拿 contextWindow + cost →
+ * 按 ctx 降序（或 cost 升序）选第一个 ctx 比当前大的。
+ */
+export interface UserModelCandidate {
+  fullId: string;       // "deepseek/DeepSeek-V4-Pro"
+  bareId: string;       // "DeepSeek-V4-Pro"
+  provider: string;     // "deepseek"
+  contextWindow: number;
+  costInPerM?: number;
+  costOutPerM?: number;
+}
+
+function readUserAgentModels(cfg: unknown): UserModelCandidate[] {
+  if (!cfg || typeof cfg !== "object") return [];
+  const root = cfg as {
+    agents?: { defaults?: { model?: { primary?: string; fallbacks?: unknown[] } } };
+    models?: { providers?: Record<string, { models?: Array<{ id?: string; contextWindow?: number; cost?: { input?: number; output?: number } }> }> };
+  };
+
+  // 1. 拿用户配置的 model 列表（primary + fallbacks，按出现顺序去重）
+  const modelSpec = root?.agents?.defaults?.model;
+  if (!modelSpec) return [];
+  const seen = new Set<string>();
+  const fullIds: string[] = [];
+  if (typeof modelSpec.primary === "string" && modelSpec.primary.trim()) {
+    const id = modelSpec.primary.trim();
+    seen.add(id);
+    fullIds.push(id);
+  }
+  if (Array.isArray(modelSpec.fallbacks)) {
+    for (const f of modelSpec.fallbacks) {
+      if (typeof f === "string" && f.trim() && !seen.has(f.trim())) {
+        seen.add(f.trim());
+        fullIds.push(f.trim());
+      }
+    }
+  }
+  if (fullIds.length === 0) return [];
+
+  // 2. 拿 providers 表（看每个 model 的真实 contextWindow + cost）
+  const providers = root?.models?.providers ?? {};
+
+  const out: UserModelCandidate[] = [];
+  for (const fullId of fullIds) {
+    const slash = fullId.indexOf("/");
+    if (slash <= 0) continue;
+    const provider = fullId.slice(0, slash);
+    const bareId = fullId.slice(slash + 1);
+
+    const providerSpec = providers[provider];
+    if (!providerSpec || !Array.isArray(providerSpec.models)) {
+      // provider 未注册 — 跳过（用户配置自相矛盾）
+      continue;
+    }
+    const modelInfo = providerSpec.models.find((m) => m?.id === bareId);
+    if (!modelInfo) continue;
+
+    out.push({
+      fullId,
+      bareId,
+      provider,
+      contextWindow: typeof modelInfo.contextWindow === "number" ? modelInfo.contextWindow : 32_768,
+      costInPerM: typeof modelInfo.cost?.input === "number" ? modelInfo.cost.input : undefined,
+      costOutPerM: typeof modelInfo.cost?.output === "number" ? modelInfo.cost.output : undefined,
+    });
+  }
+  return out;
+}
+
+/**
+ * v6.6.7: 从用户配置中选 ctx 严格更大的 model 作强切 target。
+ * 跳过：当前 model / ctx ≤ current.ctxMax（切去更小没意义）/ isModelBanned 命中。
+ * 排序：默认 ctx 降序（最大优先），preferCheap=true 时改 costIn 升序。
+ *
+ * 返 null 时表示用户配置中没有比当前更大的 model — ctx-watchdog 不强切，
+ * banner 提示用户主动 /compact（已经在 user fallback chain 里走到了最优）。
+ */
+function pickEscalateTargetFromUserConfig(
+  current: { model?: string; ctxMax: number },
+  candidates: UserModelCandidate[],
+  preferCheap = false,
+): UserModelCandidate | null {
+  const excludeFullId = current.model;
+  const excludeBareId = current.model?.includes("/") ? current.model.split("/").pop() : current.model;
+
+  const available = candidates.filter((c) => {
+    if (c.fullId === excludeFullId) return false;
+    if (c.bareId === excludeBareId) return false;
+    // 必须严格 > 当前 ctxMax（不切去同等大小或更小的）
+    if (c.contextWindow <= current.ctxMax) return false;
+    if (isModelBanned(c.fullId)) return false;
+    if (isModelBanned(c.bareId)) return false;
+    return true;
+  });
+  if (available.length === 0) return null;
+
+  if (preferCheap) {
+    available.sort((a, b) => (a.costInPerM ?? 999) - (b.costInPerM ?? 999));
+  } else {
+    available.sort((a, b) => b.contextWindow - a.contextWindow);
+  }
+  return available[0];
+}
+
 function pickLongCtxModel(
   candidates: string[],
   currentModel: string | undefined,
@@ -1020,39 +1134,70 @@ export function registerContextWatchdog(
       const T = resolveThresholds(channel);
 
       if (percent < T.forceEscalateAt) return undefined;
-      if (s.lastModelCtxMax >= 256_000) return undefined;
+      // v6.6.7: 不再硬截"已是 long ctx (≥256K) 就不切"——用户机器实际 ctx 范围 128-200K，
+      // 只要找到比当前更大的就有意义切（minimax 200K > deepseek 128K 也值得切）
 
       const budgetTight =
         monthlyBudgetUSD !== undefined &&
         monthlyBudgetUSD > 0 &&
         s.estimatedCostUSD > monthlyBudgetUSD * 0.8;
-      // v6.6.4: 从 cfg 读已注册 providers 过滤候选；v6.6.6 包 try/catch 防 api.runtime 不存在或 loadConfig 抛
+
+      // v6.6.7: 优先从用户配置 (cfg.agents.defaults.model.{primary,fallbacks}) 选 ctx 更大的
+      // 用户截图配置：primary=deepseek/DeepSeek-V4-Pro + fallbacks=[minimax/MiniMax-M2.7, deepseek/DeepSeek-V4-Flash]
+      // 当前 deepseek-v4-pro 128K 撞 95% → 切到 minimax-m2.7 200K（用户实际装的）
+      let cfg: unknown;
+      try {
+        cfg = api.runtime?.config?.loadConfig?.();
+      } catch (err) {
+        api.logger.warn(`[ctx-watchdog] loadConfig 失败（忽略，退回硬编码 fallback）: ${(err as Error)?.message}`);
+      }
+      const userCandidates = readUserAgentModels(cfg);
+
+      if (userCandidates.length > 0) {
+        const target = pickEscalateTargetFromUserConfig(
+          { model: s.lastModel, ctxMax: s.lastModelCtxMax },
+          userCandidates,
+          budgetTight,
+        );
+        if (target) {
+          if (!s.originalModel) s.originalModel = s.lastModel;
+          const fromModel = s.lastModel ?? "<unknown>";
+          api.logger.warn(
+            `[ctx-watchdog] FORCE-escalate (user-config): ${fromModel} (${s.lastModelCtxMax}) → ${target.fullId} (${target.contextWindow}) | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | channel=${channel} | budgetTight=${budgetTight}`,
+          );
+          return {
+            modelOverride: target.fullId,
+            providerOverride: target.provider,
+          };
+        }
+        // 用户配置里没有更大的 model — banner 提示已在 prompt build 出过，这里不再强切
+        api.logger.info(
+          `[ctx-watchdog] FORCE-escalate skipped: user-config 中没有 ctx > ${s.lastModelCtxMax} 的可用 model（已是 fallback chain 最大）| session=${sessionKey.slice(0, 12)} | candidates=[${userCandidates.map((c) => `${c.bareId}(${c.contextWindow})`).join(',')}]`,
+        );
+        return undefined;
+      }
+
+      // 用户配置完全没读到（极端兜底）→ 退回 v6.6.4 硬编码 LONG_CTX_CANDIDATES 路径
+      if (s.lastModelCtxMax >= 256_000) return undefined; // 硬编码路径才保留此截断
       let installedProviders: Set<string> = new Set();
       try {
-        installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+        installedProviders = readInstalledProviders(cfg);
       } catch (err) {
         api.logger.warn(`[ctx-watchdog] readInstalledProviders 失败（忽略，退回默认）: ${(err as Error)?.message}`);
       }
       const target = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders, { preferCheap: budgetTight });
       if (!target) {
-        // 所有 long-ctx 候选不可用 —— 不强切，让 model-router 自己决定，banner 已经在 prompt build 那边出过了
         api.logger.warn(
-          `[ctx-watchdog] FORCE-escalate skipped: no long-ctx model available (all banned or no installed provider matches) | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | installedProviders=[${[...installedProviders].join(',')}]`,
+          `[ctx-watchdog] FORCE-escalate skipped: 无 user-config 且 hardcoded 候选不可用 | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}%`,
         );
         return undefined;
       }
-
-      // 记录 originalModel（仅首次切才记，避免被多次强切覆盖）
       if (!s.originalModel) s.originalModel = s.lastModel;
       const fromModel = s.lastModel ?? "<unknown>";
-      // v6.6.4: 同时返 providerOverride,让 OpenClaw 核心切到正确 provider client
-      // (before) 只返 modelOverride 导致 provider mismatch 撞 400 chain_exhausted
       const targetProvider = MODEL_TO_PROVIDER_MAP[target];
       const targetFullId = targetProvider ? `${targetProvider}/${target}` : target;
-      // 不立即修改 sessions 里 lastModel/lastModelCtxMax —— 等 llm_output 来时拿到真实 modelId 自然会更新
-      // （避免被 model-router 覆盖再切回的颠簸）
       api.logger.warn(
-        `[ctx-watchdog] FORCE-escalate to long-ctx: ${fromModel} → ${targetFullId} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | projected=${projected}/${s.lastModelCtxMax} | channel=${channel} | budgetTight=${budgetTight}`,
+        `[ctx-watchdog] FORCE-escalate (hardcoded fallback): ${fromModel} → ${targetFullId} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | channel=${channel}`,
       );
       return targetProvider
         ? { modelOverride: targetFullId, providerOverride: targetProvider }
@@ -1111,8 +1256,15 @@ export function registerContextWatchdog(
         }
         const channel = resolveChannel(ctx);
         const T = resolveThresholds(channel);
-        const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
-        const availableLongCtx = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders);
+        let cfg2: unknown;
+        try { cfg2 = api.runtime?.config?.loadConfig?.(); } catch { /* ignore */ }
+        const userCandidates = readUserAgentModels(cfg2);
+        // v6.6.7: 优先从用户配置中找比当前 ctx 更大的
+        const userTarget = pickEscalateTargetFromUserConfig(
+          { model: s.lastModel, ctxMax: s.lastModelCtxMax },
+          userCandidates,
+        );
+        const availableLongCtx = userTarget?.fullId ?? null;
         return {
           ok: true,
           sessionKey: sessionKey.slice(0, 16) + "…",
@@ -1125,11 +1277,14 @@ export function registerContextWatchdog(
           percent: pctRound,
           severity,
           recommendation,
-          shouldEscalate: percent >= T.escalateAt && s.lastModelCtxMax < 256_000,
+          shouldEscalate: percent >= T.escalateAt && !!userTarget,
+          // v6.6.7: 暴露用户配置候选 + 当前会被强切的 target
           availableLongCtxModel: availableLongCtx,
-          longCtxCandidates: percent >= T.escalateAt
-            ? longCtxCandidates.filter((c) => (KNOWN_MODEL_CTX_MAX[c] ?? 0) >= 256_000)
-            : undefined,
+          userConfigCandidates: userCandidates.map((c) => ({
+            fullId: c.fullId,
+            ctxMax: c.contextWindow,
+            costInPerM: c.costInPerM,
+          })),
           // v6.6.0 新字段
           channel,
           channelThresholds: { hint: T.hintAt, warn: T.warnAt, critical: T.criticalAt, escalate: T.escalateAt, force: T.forceEscalateAt },
@@ -1160,10 +1315,10 @@ export function registerContextWatchdog(
   api.registerTool(
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_route_to_long_ctx",
-      description: "立即切到 long-ctx 模型（≥256K ctx）。当 enhance_ctx_status 显示 percent>=80 时主动调；返目标 model id + 原 model 备份；下一轮 LLM 调用 ctx-watchdog 会强制路由过去（不需要再调 enhance_route_set 持久化）",
+      description: "立即切到更大 ctx 的 model（从 openclaw.json agents.defaults.model.{primary,fallbacks} 中选 ctx 比当前更大的）。当 enhance_ctx_status 显示 percent>=80 时主动调；返目标 model fullId + 原 model 备份；下一轮 LLM 调用 ctx-watchdog 会强制路由过去（不需要再调 enhance_route_set 持久化）",
       inputSchema: Type.Object({
         reason: Type.Optional(Type.String({ description: "切换原因（如 'ctx 已 85%' / '用户主动要求'）" })),
-        target: Type.Optional(Type.String({ description: "目标 model bare id（如 'claude-opus-4.7-1m'）；不填则按 longCtxCandidates 顺序选第一个非 banned 的" })),
+        target: Type.Optional(Type.String({ description: "目标 model fullId（如 'minimax/MiniMax-M2.7'）；不填则从用户 openclaw.json primary+fallbacks 中按 ctx 降序选第一个比当前大的" })),
       }),
       async execute(params: any) {
         const sessionKey = pickSessionKey(ctx);
@@ -1174,64 +1329,105 @@ export function registerContextWatchdog(
         if (!s) {
           return { ok: false, reason: "session 还没开始累加 usage（llm_output 没 fire 过），无法切换" };
         }
-        // 用户指定 target → 验证后用；否则自动选
-        let target: string | null = null;
-        const installedProviders = readInstalledProviders(api.runtime?.config?.loadConfig?.());
+
+        // v6.6.7: 优先用用户 openclaw.json 配置的 model 列表
+        let cfg: unknown;
+        try {
+          cfg = api.runtime?.config?.loadConfig?.();
+        } catch {
+          // ignore — fallback 到硬编码
+        }
+        const userCandidates = readUserAgentModels(cfg);
+
+        // 用户指定 target → 验证后用
+        let targetFullId: string | null = null;
+        let targetProvider: string | null = null;
+        let targetCtxMax: number | null = null;
+
         if (params?.target && typeof params.target === "string") {
           const requested = params.target.trim();
-          const ctxMax = KNOWN_MODEL_CTX_MAX[requested] ?? 0;
-          if (ctxMax < 256_000) {
+          // 优先从 user-config 中匹配（fullId 完全相等或 bareId 相等）
+          const match = userCandidates.find(
+            (c) => c.fullId === requested || c.bareId === requested,
+          );
+          if (match) {
+            if (isModelBanned(match.fullId) || isModelBanned(match.bareId)) {
+              return { ok: false, reason: `${match.fullId} 当前被 latency-tracker ban`, hint: "等解禁或选别的" };
+            }
+            if (match.contextWindow <= s.lastModelCtxMax) {
+              return {
+                ok: false,
+                reason: `${match.fullId} ctx=${match.contextWindow} 不大于当前 ${s.lastModelCtxMax}，切了等于没切`,
+                hint: "选 ctx 更大的 model",
+              };
+            }
+            targetFullId = match.fullId;
+            targetProvider = match.provider;
+            targetCtxMax = match.contextWindow;
+          } else {
             return {
               ok: false,
-              reason: `指定的 ${requested} 在 KNOWN_MODEL_CTX_MAX 里 ctx<256K（=${ctxMax}），不算 long-ctx`,
-              hint: "用 longCtxCandidates 里的 model id；或不传 target 自动选",
+              reason: `指定的 ${requested} 不在 openclaw.json agents.defaults.model.{primary,fallbacks} 注册`,
+              hint: `用户配置 candidates: [${userCandidates.map((c) => c.fullId).join(', ')}]`,
             };
           }
-          if (isModelBanned(requested)) {
-            return { ok: false, reason: `${requested} 当前被 latency-tracker ban`, hint: "等解禁或选别的" };
+        } else if (userCandidates.length > 0) {
+          // 自动从用户配置选 ctx 最大的（不大于当前的会被过滤掉）
+          const auto = pickEscalateTargetFromUserConfig(
+            { model: s.lastModel, ctxMax: s.lastModelCtxMax },
+            userCandidates,
+          );
+          if (auto) {
+            targetFullId = auto.fullId;
+            targetProvider = auto.provider;
+            targetCtxMax = auto.contextWindow;
           }
-          // v6.6.4: 验证 target 的 provider 用户已注册
-          const reqProvider = MODEL_TO_PROVIDER_MAP[requested];
-          if (reqProvider && installedProviders.size > 0 && !installedProviders.has(reqProvider)) {
-            return {
-              ok: false,
-              reason: `指定的 ${requested} provider=${reqProvider} 未在 cfg.agents.defaults.models 注册`,
-              hint: `已注册 providers: [${[...installedProviders].join(', ')}]，请选已装的 model 或先注册 ${reqProvider} provider`,
-            };
-          }
-          target = requested;
-        } else {
-          target = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders);
         }
 
-        if (!target) {
+        // 用户配置完全没读到 → 退回硬编码 fallback（极端兜底）
+        if (!targetFullId) {
+          const installedProviders = readInstalledProviders(cfg);
+          const fallbackBare = pickLongCtxModel(longCtxCandidates, s.lastModel, installedProviders);
+          if (fallbackBare) {
+            const fbProvider = MODEL_TO_PROVIDER_MAP[fallbackBare];
+            targetFullId = fbProvider ? `${fbProvider}/${fallbackBare}` : fallbackBare;
+            targetProvider = fbProvider ?? null;
+            targetCtxMax = KNOWN_MODEL_CTX_MAX[fallbackBare] ?? null;
+          }
+        }
+
+        if (!targetFullId) {
           return {
             ok: false,
-            reason: "no available long-ctx model（all banned or none registered in KNOWN_MODEL_CTX_MAX）",
+            reason: userCandidates.length > 0
+              ? `用户配置中没有 ctx > ${s.lastModelCtxMax} 的可用 model（已是 fallback chain 最大）`
+              : "openclaw.json 未读到任何 model 配置且硬编码 fallback 也不可用",
             hint: "建议立即 /compact 或告知用户开新会话续接",
-            currentBanned: longCtxCandidates.filter((c) => isModelBanned(c)),
+            userConfigCandidates: userCandidates.map((c) => ({
+              fullId: c.fullId,
+              ctxMax: c.contextWindow,
+            })),
           };
         }
 
         // 记 originalModel（首次切才记）
         if (!s.originalModel) s.originalModel = s.lastModel;
         const fromModel = s.lastModel;
-        // 不立刻改 lastModel —— 等下一轮 llm_output 来时拿到真实 model 自然会更新
-        // 但要重置 lastWarnedThreshold 避免 banner 重复
         s.lastWarnedThreshold = 0;
         const used = effectiveTokens(s);
         const percent = Math.round((used / s.lastModelCtxMax) * 100);
         api.logger.warn(
-          `[ctx-watchdog] LLM-triggered escalate: ${fromModel} → ${target} | reason="${params?.reason ?? '-'}" | session=${sessionKey.slice(0, 12)} | percent=${percent}%`,
+          `[ctx-watchdog] LLM-triggered escalate: ${fromModel} (${s.lastModelCtxMax}) → ${targetFullId} (${targetCtxMax}) | reason="${params?.reason ?? '-'}" | session=${sessionKey.slice(0, 12)} | percent=${percent}%`,
         );
         return {
           ok: true,
           from: fromModel,
-          to: target,
-          newCtxMax: KNOWN_MODEL_CTX_MAX[target] ?? DEFAULT_CTX_MAX,
+          to: targetFullId,
+          newCtxMax: targetCtxMax ?? DEFAULT_CTX_MAX,
+          provider: targetProvider,
           currentPercent: percent,
           reason: params?.reason ?? "no reason given",
-          message: `已切到 ${target}（ctx ${(KNOWN_MODEL_CTX_MAX[target] ?? DEFAULT_CTX_MAX).toLocaleString()}）。**下一轮** LLM 调用 ctx-watchdog 会在 before_model_resolve 强制路由过去；当 ctx 降下来后 model-router 重新评估自动选回最优。`,
+          message: `已切到 ${targetFullId}（ctx ${(targetCtxMax ?? DEFAULT_CTX_MAX).toLocaleString()}）。**下一轮** LLM 调用 ctx-watchdog 会在 before_model_resolve 强制路由过去；当 ctx 降下来后 model-router 重新评估自动选回最优。`,
           note: fromModel ? `已记录 originalModel=${s.originalModel}，将来 ctx 降到 60% 以下后会建议切回` : undefined,
         };
       },
@@ -1396,6 +1592,6 @@ export function registerContextWatchdog(
   }
 
   api.logger.info(
-    `[enhance] context-watchdog v6.6.6 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | longCtx=${longCtxCandidates.slice(0, 3).join("→")}… | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | all 6 hooks safeHook-wrapped + runId-dedup + silence + cost+image+subagent+prediction+sqlite）`,
+    `[enhance] context-watchdog v6.6.7 已加载（default thresholds=${Math.round(hintAt * 100)}/${Math.round(warnAt * 100)}/${Math.round(criticalAt * 100)}%, force=${Math.round(forceEscalateAt * 100)}% | userConfig-priority escalate + hardcoded fallback | channelAware=${Object.keys({ ...CHANNEL_THRESHOLDS_DEFAULT, ...(config?.thresholdsByChannel ?? {}) }).length} | budget=${monthlyBudgetUSD ? "$" + monthlyBudgetUSD : "off"} | safeHook + runId-dedup + silence + cost+image+subagent+prediction+sqlite）`,
   );
 }
