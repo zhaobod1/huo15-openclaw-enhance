@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.9",
+  "version": "6.7.0",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.9 — config-doctor 加 model-id 大小写校验：用户 v6.6.8 后新会话发『你好』也撞 Something went wrong，证明根因不在 hook（v6.6.8 已系统性 safeHook 包裹），而在 agents.defaults.model.{primary,fallbacks} 的 model id 字面量跟 models.providers[<p>].models[].id 不匹配（特别是大小写：用户配 'deepseek/DeepSeek-V4-Pro' 但 deepseek 后端只认 'deepseek-v4-pro' 全小写 → 400 chain_exhausted）。新增 checkModelIdRegistration() 启动期把 primary+fallbacks 跟 providers 注册列表 join，case-insensitive 命中时给精确 fix 命令（把哪个改成哪个）。继承 v6.6.8 全模块 hook safeHook + v6.6.7 user-config 优先强切。",
+  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.0 \u2014 large-file-bridge channel \u68c0\u6d4b\u6539\u7528 agentId startsWith wecom- (\u4fee\u590d\u4f01\u5fae 100MB \u9519\u8bef hook \u4e0d\u89e6\u53d1)",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
