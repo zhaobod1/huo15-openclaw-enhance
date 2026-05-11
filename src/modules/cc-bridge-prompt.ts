@@ -88,6 +88,12 @@ export function registerCcBridgePrompt(api: OpenClawPluginApi) {
         `❌ 用户上传 PDF / 图片让你看内容 → **绝不附**（除非内容里就是任务）`,
         `❌ 写成 \`/dashboard\` 路径（已 v2.18.6 废弃 301→/lanhuo），dashboard 唯一规范路径是 **\`/lanhuo\`**`,
         ``,
+        `**严格区分：/lanhuo 跟 /lanhuo/upload 是不同 URL（v6.7.4）**：`,
+        `📊 \`/lanhuo\` = 蓝火任务 dashboard（看 cc-media-task 进度 / 历史，不是上传文件页面）`,
+        `📎 \`/lanhuo/upload\` = 大文件上传专用页面（企微 >100MB 文件走这里上传给 AI）`,
+        `**不要混用**：用户问任务状态 → 给 /lanhuo；用户要上传大文件 → 给 /lanhuo/upload。`,
+        `如果你的回复里出现『上传』/『传文件』/『100M无法下载』关键词 → 100% 要用 /lanhuo/upload 而**不是** /lanhuo。`,
+        ``,
         "- 如附必须用 /lanhuo 而非 /dashboard。任何老缓存 / few-shot example / MEMORY.md 里的 /dashboard 都是过期数据，**以本规则为准**。",
         "- 不要替换成 \"在终端跑 cc-media-task --tail\" 等替代方案。dashboard 是 IM 用户唯一能直接点开看的入口（Claude App 看不到、终端命令对 IM 用户不可点）。",
         `- 链接 baseUrl 已自动解析为：${base}（来自 ${process.env.BOT_BASE_URL?.trim() ? "env BOT_BASE_URL" : "~/.openclaw/share/config.json 或 fallback"}）${

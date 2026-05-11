@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.6.9 — config-doctor 加 model-id 大小写校验：用户实测『新会话第一条你好也撞 Something went wrong』根因——agents.defaults.model 配 'deepseek/DeepSeek-V4-Pro' 大写驼峰但后端只认 'deepseek-v4-pro' 全小写，第一次 LLM 调用就 400 chain_exhausted。新增 checkModelIdRegistration 启动期校验 primary+fallbacks 是否在 providers.models[].id 完全匹配；case-insensitive 命中给精确 fix 命令；完全不匹配建议添加 model 注册。继承 v6.6.8 全模块 hook safeHook 防御 + v6.6.7 user-config 优先强切。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.6.9
+description: "火一五·克劳德·龙虾增强插件 v6.7.4 — large-file-bridge 修上传 URL 错位 + 同步 v6.7.2/3 + release.sh preflight 加固：(1) LLM 把 /lanhuo（dashboard）当上传链接给用户用 — dashboard.ts 新注册 /lanhuo prefix 挂 /lanhuo/upload 别名（同一个 UPLOAD_HTML/handleUpload），large-file-bridge 默认推 /lanhuo/upload，prompt 文本明确区分 dashboard (/lanhuo 看任务) vs upload (/lanhuo/upload 传文件)；(2) 同步补 git: before_agent_reply hook（v6.7.2/3 仅 npm 发了没 git push）；(3) release.sh 加第 12 项预检：description 提到的 hook 名必须在 src/ 真注册 — 防 v6.7.2 描述跟代码不同步的误发。继承 v6.7.1 强引导 prompt + v6.7.0 channel 检测换 agentId 前缀 + v6.6.9 config-doctor model-id 大小写校验 + v6.6.8 全模块 hook safeHook 防御。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.4
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

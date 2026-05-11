@@ -2,6 +2,162 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.4 — 2026-05-11（修 LLM 把 /lanhuo 当上传链接 + 同步 v6.7.2/3 + preflight 加固）
+
+### 触发
+
+用户实测 LLM 在企微大文件场景给出的回复：
+
+> 这是企微的文件传输限制（最大 100MB），超过的话：
+> 👉 `https://keepermac.huo15.com/lanhuo`
+> 通过这个 dashboard 上传大文件，然后把链接发给我处理。
+
+但 `/lanhuo` 是 **cc-media-bridge 的任务 dashboard**，根本不是上传页！LLM 推理混淆了。
+
+用户原话："是不是 `/lanhuo` 后面再加个内容，加个后缀然后写个上传页面比较合适"。
+
+### 根因
+
+`cc-bridge-prompt` 模块给 LLM 注入："用户唯一的可视化入口是 bridge 自带 dashboard：${base}/lanhuo"——LLM 把这条引导泛化用，看到『上传』场景也推 `/lanhuo`。
+
+`large-file-bridge` 给 LLM 注入的是 `${base}/plugins/enhance/upload`（正确的上传页），但 LLM 觉得这个 URL 太长、不像"用户常用入口"，**幻觉**改成 `/lanhuo`。
+
+### v6.7.4 改动
+
+#### 1. `dashboard.ts` 新增 `/lanhuo/upload` 别名
+
+```ts
+api.registerHttpRoute({
+  path: "/lanhuo",
+  match: "prefix",
+  handler: async (req, res) => {
+    const url = parseUrl(req);
+    if (url.pathname === "/lanhuo/upload") {
+      if (req.method === "POST") return handleUpload(req, res);
+      sendHtml(res, UPLOAD_HTML);  // ← 跟 /plugins/enhance/upload 同一份 HTML
+      return true;
+    }
+    return false;  // 其他 /lanhuo/* 不接管，让 nginx fallback 到 cc-media-bridge
+  },
+});
+```
+
+用户 nginx 加一条规则：
+
+```nginx
+location /lanhuo/upload {
+  proxy_pass http://localhost:18789;   # OpenClaw gateway
+}
+location /lanhuo {
+  proxy_pass http://localhost:18790;   # cc-media-bridge
+}
+```
+
+（注意：specific 路径要在前，nginx 才会优先匹配）
+
+#### 2. `large-file-bridge` 默认推 `/lanhuo/upload`
+
+```ts
+function resolveUploadUrl(): string {
+  if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
+  const base = config?.baseUrl?.trim();
+  if (base) return `${base}/lanhuo/upload`;   // v6.7.4: 默认从 /plugins/enhance/upload 改为 /lanhuo/upload
+  return "/lanhuo/upload";
+}
+```
+
+#### 3. prompt 文本明确区分 dashboard / upload
+
+`cc-bridge-prompt`：
+
+```
+**严格区分：/lanhuo 跟 /lanhuo/upload 是不同 URL（v6.7.4）**：
+📊 /lanhuo = 蓝火任务 dashboard（看 cc-media-task 进度，不是上传文件页面）
+📎 /lanhuo/upload = 大文件上传专用页面（企微 >100MB 文件走这里）
+**不要混用**：用户问任务 → /lanhuo；用户要上传大文件 → /lanhuo/upload。
+```
+
+`large-file-bridge`：
+
+```
+⚠️ 严格区分（v6.7.4）：
+- 上传专用页面 = ${url}（这是你**必须**给用户的链接）
+- /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
+```
+
+#### 4. 同步补 v6.7.2 / v6.7.3 改动到 git
+
+之前另一会话只 `npm publish` 了但**没 git commit/push**：v6.7.2 (description 误标) + v6.7.3 (真补 `before_agent_reply` hook)。本期把 v6.7.3 tarball 里的 `large-file-bridge.ts` 拉回本地（含 `before_agent_reply` 强制 appendText 上传链接的兜底逻辑），与 v6.7.4 一起 commit + push。
+
+#### 5. release.sh preflight 新增第 12 项校验
+
+防 v6.7.2 那种"description 提到 `before_agent_reply` 但代码没加"的误发：
+
+```bash
+# 抓 description 里的 hook 名 → grep src/ + index.ts 验证 api.on() 真注册
+HOOK_NAMES=(before_prompt_build before_model_resolve before_agent_reply ...)
+for HK in "${HOOK_NAMES[@]}"; do
+  if echo "$DESC" | grep -q "$HK"; then
+    grep -qrE "api\.on\(\s*[\"']${HK}[\"']" src/ index.ts || {
+      log_err "description 提到 hook \"$HK\" 但源码没注册"
+      exit 1
+    }
+  fi
+done
+```
+
+### 用户操作
+
+1. 升级：
+   ```bash
+   openclaw plugins update @huo15/huo15-openclaw-enhance && openclaw restart
+   ```
+
+2. nginx 配 `/lanhuo/upload` 优先反代到 OpenClaw gateway：
+   ```nginx
+   # 在 keepermac.huo15.com 的 server block 里
+   location /lanhuo/upload {
+     proxy_pass http://localhost:18789;
+     proxy_set_header Host $host;
+     proxy_set_header X-Real-IP $remote_addr;
+     client_max_body_size 100M;   # OpenClaw 自己也允许 100M+
+   }
+   location /lanhuo {
+     proxy_pass http://localhost:18790;  # cc-media-bridge dashboard
+   }
+   ```
+
+3. 验证：浏览器访问 `https://keepermac.huo15.com/lanhuo/upload` 应该看到带拖拽 dropzone 的上传 HTML 页。
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不动 cc-media-bridge
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ `/lanhuo/upload` 别名只接 `/lanhuo/upload` 单路径，其他 `/lanhuo/*` 让出来给 cc-media-bridge
+
+## 6.7.3 — 2026-05-11（large-file-bridge 加 before_agent_reply 强制兜底上传链接）
+
+另一会话独立发布，git 没 push（v6.7.4 一起补回）。
+
+`large-file-bridge` 新增 `before_agent_reply` hook：LLM 输出 final/block 消息时，如果该 session 之前触发过 large-file-bridge prompt 注入但 LLM 回复里**没**含 `upload / /plugins/enhance / 上传链接 / 上传页面` 关键词 → hook 强制 appendText 一段上传链接 suffix 到 LLM 输出末尾。
+
+第三层防御（第 1 层 prompt 引导 / 第 2 层硬性 prompt 模板 / 第 3 层 appendText 兜底）。
+
+## 6.7.2 — 2026-05-11（误发：description 标了 before_agent_reply 但代码忘加）
+
+另一会话独立发布，git 没 push。description 误写"v6.7.2 before_agent_reply 强制插入上传链接"但代码没加 before_agent_reply hook。v6.7.3 立刻补齐。
+
+v6.7.4 release.sh 加 preflight 第 12 项校验防再次出现。
+
+## 6.7.1 — 2026-05-11（large-file-bridge 注入更强制引导文本）
+
+另一会话发布，已 git push。`buildUploadContext` 从软引导改"必读 + 标准回复模板"，让 LLM 直接给上传链接，不再先问诊断问题。
+
+## 6.7.0 — 2026-05-11（large-file-bridge channel 检测改 agentId.startsWith）
+
+另一会话发布，已 git push。修一个 silently-failing bug：之前 `ctx.channel` 在 before_prompt_build 阶段为空 → channel !== "wecom" 总是 true → hook 早 return → large-file-bridge **从未真生效**。改用 `agentId.startsWith("wecom-")` 判断后才激活。
+
 ## 6.6.9 — 2026-05-11（config-doctor 加 model-id 大小写校验）
 
 ### 触发

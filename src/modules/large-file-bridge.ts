@@ -22,7 +22,13 @@ import { DEFAULT_AGENT_ID } from "../types.js";
 
 export interface LargeFileBridgeConfig {
   enabled?: boolean;
-  /** 自定义上传页面 URL；不填则自动生成为 {baseUrl}/plugins/enhance/upload */
+  /**
+   * 自定义上传页面 URL；不填则自动生成为 `${baseUrl}/lanhuo/upload`（v6.7.4 起）。
+   * v6.7.4 决策：用户实测 LLM 把 dashboard `/lanhuo` 当上传链接误用（cc-bridge-prompt 把
+   * /lanhuo 描述成"用户唯一可视化入口"，LLM 推理混淆）。修法：dashboard.ts 在 /lanhuo 下
+   * 挂同一个 UPLOAD_HTML 别名 → 上传 URL 改用 /lanhuo/upload —— LLM 跟用户对 "lanhuo" 的
+   * 心智模型对齐，子路径上传，根 URL 看任务。
+   */
   uploadUrl?: string;
   /** 上传页面基础 URL（企微分享场景需显式填公网地址） */
   baseUrl?: string;
@@ -55,9 +61,13 @@ function buildUploadContext(url: string): string {
   return `【大文件上传指引 — 必读！】用户刚才发送的消息是"视频/文件超过100M，无法下载"。这是企微官方限制。
 **你必须在回复中直接提供下面的上传链接，不要先问诊断问题！**
 
-回复模板：
+回复模板（**URL 必须用下面这个，不要改成 /lanhuo 或别的**）：
 "文件超过100MB无法在企微中直接传输。请通过以下链接上传：${url}
 上传完成后告诉我，我来处理文件。"
+
+⚠️ 严格区分（v6.7.4）：
+- 上传专用页面 = **${url}**（这是你**必须**给用户的链接）
+- /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
 
 也可使用 enhance_upload_link 工具生成 token 化专属上传链接。
 
@@ -78,8 +88,10 @@ export function registerLargeFileBridge(
   function resolveUploadUrl(): string {
     if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
     const base = config?.baseUrl?.trim();
-    if (base) return `${base.replace(/\/+$/, "")}/plugins/enhance/upload`;
-    return "/plugins/enhance/upload";
+    // v6.7.4: 默认推 /lanhuo/upload（dashboard /lanhuo 子路径上传页）
+    // 兼容老的 /plugins/enhance/upload 仍可用，但 prompt 默认走 /lanhuo/upload
+    if (base) return `${base.replace(/\/+$/, "")}/lanhuo/upload`;
+    return "/lanhuo/upload";
   }
 
   api.on("before_prompt_build", (_event, ctx) => {
@@ -127,6 +139,58 @@ export function registerLargeFileBridge(
     );
 
     return { prependContext: text };
+  });
+
+  // before_agent_reply 第三层防御：如果 LLM 回复里没含上传链接关键词，hook 接管整个 reply，
+  // 把原 body 拼上上传链接 suffix 一起作为最终回复返回。
+  //
+  // v6.7.4 修正：v6.7.3 用了 `{appendText: suffix}` —— 但 PluginHookBeforeAgentReplyResult 类型
+  // 实际是 `{handled, reply, reason}`，`appendText` 字段不被 OpenClaw runtime 识别！v6.7.3 那个
+  // hook 实际上**没起作用**（runtime 拿到 unknown field 就 silent ignore）。
+  // 正确做法：return `{ handled: true, reply: { text: body + suffix } }` 接管 reply 并自己拼。
+  api.on("before_agent_reply", (event, ctx) => {
+    const agentId = pickAgentId(ctx);
+    const sessionId = pickSessionId(ctx);
+    const key = `${agentId}::${sessionId}`;
+
+    if (!injectedSessions.has(key)) return;
+    if (!agentId.startsWith("wecom-")) return;
+
+    try {
+      const body: string = (event as any)?.cleanedBody ?? (event as any)?.body ?? "";
+      if (!body) return;
+
+      const url = resolveUploadUrl();
+      // 已含上传相关关键词 → LLM 已经按引导给链接，不重复
+      if (
+        body.includes("upload") ||
+        body.includes("/plugins/enhance") ||
+        body.includes("/lanhuo/upload") ||
+        body.includes("上传链接") ||
+        body.includes("上传页面")
+      ) {
+        return;
+      }
+
+      // 只在 final/block 类型 reply 接管（流式片段不接管）
+      const kind: string = (event as any)?.kind ?? "";
+      if (kind && kind !== "block" && kind !== "final") return;
+
+      const suffix = `\n\n---\n📎 **大文件上传**：文件超过 100MB 无法在企微直接传输，请通过以下链接上传：\n👉 ${url}\n上传完成后告诉我，我来处理文件。`;
+
+      api.logger.info(
+        `[enhance-large-file] before_agent_reply 强制接管 reply 拼上传链接 (agent=${agentId})`,
+      );
+
+      // v6.7.4: return PluginHookBeforeAgentReplyResult shape: {handled, reply, reason}
+      return {
+        handled: true,
+        reply: { text: body + suffix },
+        reason: "large-file-bridge: 强制把上传链接拼到 LLM 回复末尾",
+      };
+    } catch {
+      return;
+    }
   });
 
   api.registerTool(

@@ -232,7 +232,7 @@ else
   log_ok "tag $TAG 不存在，可创建"
 fi
 
-log_step "[11/11] github remote 探测"
+log_step "[11/12] github remote 探测"
 HAS_GITHUB=0
 if git remote get-url github >/dev/null 2>&1; then
   HAS_GITHUB=1
@@ -242,8 +242,32 @@ else
   log_warn "无 github remote，跳过镜像 push"
 fi
 
+# v6.7.4: 描述里提到的 hook 必须真在源码注册（防 v6.7.2 那种"description 提到 before_agent_reply
+# 但代码忘加"的误发）。从 package.json.description + SKILL.md description 抓 hook 名 → grep src/
+log_step "[12/12] description 提到的 hook 名必须真在源码注册"
+DESC_TEXT="$(node -p "require('./package.json').description || ''")"
+SKILL_DESC=""
+if [[ -f SKILL.md ]]; then
+  SKILL_DESC="$(awk '/^description:/{sub(/^description:[ ]*/,""); print; exit}' SKILL.md)"
+fi
+COMBINED_DESC="${DESC_TEXT}${SKILL_DESC}"
+HOOK_NAMES=(before_prompt_build before_model_resolve before_agent_reply before_agent_start before_compaction after_compaction before_reset before_tool_call after_tool_call tool_result_persist llm_input llm_output session_start session_end subagent_spawned subagent_ended subagent_spawning message_received message_sending message_sent gateway_start gateway_stop before_dispatch reply_dispatch before_install agent_end before_message_write inbound_claim model_call_ended subagent_delivery_target)
+DESC_HOOK_MISS=0
+for HK in "${HOOK_NAMES[@]}"; do
+  if echo "$COMBINED_DESC" | grep -qE "\b$HK\b"; then
+    # description 提到了这个 hook → 必须能在 src/ grep 到 api.on("$HK"
+    if ! grep -qrE "api\\.on\\(\\s*[\"']${HK}[\"']" src/ index.ts 2>/dev/null; then
+      log_err "description 提到 hook \"$HK\" 但源码里没找到 api.on(\"$HK\"...) 注册"
+      log_dim "  → 要么源码补上 hook，要么改 description 移除该 hook 名"
+      DESC_HOOK_MISS=1
+    fi
+  fi
+done
+[[ $DESC_HOOK_MISS -eq 0 ]] || exit 1
+log_ok "description 提到的 hook 全部真注册"
+
 echo
-log_ok "${C_GREEN}全部 11 项预检通过${C_RESET}"
+log_ok "${C_GREEN}全部 12 项预检通过${C_RESET}"
 echo
 
 # ---------- 不可逆动作 ----------

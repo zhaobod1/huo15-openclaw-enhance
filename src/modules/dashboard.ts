@@ -749,5 +749,38 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
     },
   });
 
-  api.logger.info("[enhance] 仪表盘模块已加载（v2.2.0：Todos / 章节 / 定时 / Spawn-task），访问 /plugins/enhance/");
+  // v6.7.4: /lanhuo/upload 别名路径（让用户记住的根 URL /lanhuo 下面有专用上传子页）
+  //
+  // 触发：用户实测 LLM 给的链接是 https://keepermac.huo15.com/lanhuo（cc-bridge-prompt
+  // 把 /lanhuo 描述成"用户唯一可视化入口"，LLM 推理混淆为上传页）。修法：在 enhance
+  // 自己的 HTTP gateway 上挂 /lanhuo/upload 别名，UPLOAD_HTML / handleUpload 跟 /plugins/enhance/upload
+  // 完全一样。用户 nginx 把 /lanhuo/upload 反代到 OpenClaw gateway（不是 cc-media-bridge）即可。
+  //
+  // 注意：openclaw plugin SDK 一个 prefix 一次注册，所以新开 prefix /lanhuo，并且**只处理
+  // /lanhuo/upload 子路径**，其他 /lanhuo/* (如 /lanhuo, /lanhuo?task=xxx) 返 404 让 nginx
+  // fallback 给 cc-media-bridge:18790（用户 nginx 应保留 /lanhuo 反代 cc-media-bridge 的规则，
+  // 加一条更高优先级的 /lanhuo/upload → OpenClaw gateway）。
+  api.registerHttpRoute({
+    path: "/lanhuo",
+    match: "prefix",
+    auth: "plugin",
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      detectBaseUrlFromRequest(req);
+      const url = parseUrl(req);
+      const pathname = url.pathname;
+
+      // 仅响应 /lanhuo/upload (GET/POST)，其他路径不处理（让 nginx 把流量送到 cc-media-bridge）
+      if (pathname === "/lanhuo/upload") {
+        if (req.method === "POST") {
+          return handleUpload(req, res);
+        }
+        sendHtml(res, UPLOAD_HTML);
+        return true;
+      }
+      // 不命中 → return false 让 OpenClaw gateway 走 fallback / 其他 plugin route
+      return false;
+    },
+  });
+
+  api.logger.info("[enhance] 仪表盘模块已加载（v2.2.0：Todos / 章节 / 定时 / Spawn-task），访问 /plugins/enhance/ 或 /lanhuo/upload");
 }
