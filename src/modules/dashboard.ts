@@ -946,69 +946,15 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
     },
   });
 
-  // v6.7.4: /lanhuo/upload 别名路径（让用户记住的根 URL /lanhuo 下面有专用上传子页）
+  // v6.7.8: 删除 v6.7.4 的 /lanhuo/upload 别名 route 和 v6.7.7 的 /upload 短 URL route
+  // 用户原话：『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』
   //
-  // 触发：用户实测 LLM 给的链接是 https://keepermac.huo15.com/lanhuo（cc-bridge-prompt
-  // 把 /lanhuo 描述成"用户唯一可视化入口"，LLM 推理混淆为上传页）。修法：在 enhance
-  // 自己的 HTTP gateway 上挂 /lanhuo/upload 别名，UPLOAD_HTML / handleUpload 跟 /plugins/enhance/upload
-  // 完全一样。用户 nginx 把 /lanhuo/upload 反代到 OpenClaw gateway（不是 cc-media-bridge）即可。
+  // 现在 enhance 上传只暴露两条路径（都在 /plugins/enhance/ namespace 下，职责清晰）：
+  //   - /plugins/enhance/upload               — 通用上传页（无 token，共享）
+  //   - /plugins/enhance-upload/<token>       — token 化（bot-upload-link 模块注册，AI 能追踪是谁传了什么）
   //
-  // 注意：openclaw plugin SDK 一个 prefix 一次注册，所以新开 prefix /lanhuo，并且**只处理
-  // /lanhuo/upload 子路径**，其他 /lanhuo/* (如 /lanhuo, /lanhuo?task=xxx) 返 404 让 nginx
-  // fallback 给 cc-media-bridge:18790（用户 nginx 应保留 /lanhuo 反代 cc-media-bridge 的规则，
-  // 加一条更高优先级的 /lanhuo/upload → OpenClaw gateway）。
-  api.registerHttpRoute({
-    path: "/lanhuo",
-    match: "prefix",
-    auth: "plugin",
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      detectBaseUrlFromRequest(req);
-      const url = parseUrl(req);
-      const pathname = url.pathname;
+  // LLM 默认推 token 化 URL（调 enhance_upload_link 工具） — 这样 AI 通过 enhance_upload_check
+  // 工具能查"这个 token 收到了什么文件"。
 
-      // 仅响应 /lanhuo/upload (GET/POST)，其他路径不处理（让 nginx 把流量送到 cc-media-bridge）
-      if (pathname === "/lanhuo/upload") {
-        if (req.method === "POST") {
-          return handleUpload(req, res);
-        }
-        sendHtml(res, UPLOAD_HTML);
-        return true;
-      }
-      // 不命中 → return false 让 OpenClaw gateway 走 fallback / 其他 plugin route
-      return false;
-    },
-  });
-
-  // v6.7.7: /upload 最短 URL route — 直接命中 OpenClaw gateway，不依赖 cc-media-bridge
-  //
-  // 触发：用户实测 https://keepermac.huo15.com/upload 跳到 /upload/chat?session=main —
-  // 因为远端 47.104.78.121:18080 跑的是 OpenClaw gateway control UI（SPA），不是 cc-media-bridge。
-  // OpenClaw control UI 看到 /upload 不在路由表，SPA fallback 返 index.html，前端 JS 把 path
-  // 解读成 chat panel → 跳 /upload/chat?session=main。
-  //
-  // 修法：enhance 在 OpenClaw gateway 直接注册 /upload prefix route，比 control UI SPA 优先级高。
-  // 这样不管 nginx 反代到 OpenClaw gateway 还是 cc-media-bridge 都能命中（双保险）。
-  api.registerHttpRoute({
-    path: "/upload",
-    match: "prefix",
-    auth: "plugin",
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      detectBaseUrlFromRequest(req);
-      const url = parseUrl(req);
-      const pathname = url.pathname;
-
-      // 仅响应 /upload 根路径（GET 返 HTML / POST 接收文件）
-      if (pathname === "/upload" || pathname === "/upload/") {
-        if (req.method === "POST") {
-          return handleUpload(req, res);
-        }
-        sendHtml(res, UPLOAD_HTML);
-        return true;
-      }
-      // 不接管 /upload/anything 子路径（让 OpenClaw control UI SPA 接管，比如 /upload/chat）
-      return false;
-    },
-  });
-
-  api.logger.info("[enhance] 仪表盘模块已加载（v2.2.0：Todos / 章节 / 定时 / Spawn-task），访问 /plugins/enhance/ 或 /upload （短URL，v6.7.7）");
+  api.logger.info("[enhance] 仪表盘模块已加载（v6.7.8：删 /lanhuo/upload + /upload 别名，统一 /plugins/enhance/upload + bot-upload-link token 化）");
 }

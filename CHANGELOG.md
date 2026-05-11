@@ -2,6 +2,89 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.8 — 2026-05-11（统一上传 URL 到 /plugins/enhance/* + 强化 token 化追踪）
+
+### 触发
+
+用户两连发：
+
+1. **问 token 化**：『这里上传他怎么知道我上传了啥呢，应该 agent 给一个带 hash 的比如 .../upload/2efabc00000 才能追踪吧』
+2. **改主意 URL 风格**：『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』
+
+### 改动
+
+#### A. 删 /lanhuo/upload (v6.7.4) 和 /upload (v6.7.7) 两条 alias route
+
+dashboard.ts 整段 `api.registerHttpRoute({ path: "/lanhuo", ... })` 删除。`/upload` route 同样删（被 OpenClaw control UI SPA 截，注册了也用不上）。
+
+理由：
+- `/lanhuo/upload` 跟 cc-media-bridge 的 `/lanhuo/*` namespace 撞，职责混乱
+- `/upload` 短 URL 走不通（v6.7.7 实测）
+- `/plugins/enhance/*` 是 enhance 自己的 namespace，最清晰
+
+#### B. resolveUploadUrl 默认回 /plugins/enhance/upload
+
+```ts
+function resolveUploadUrl(): string {
+  if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
+  const base = config?.baseUrl?.trim();
+  if (base) return `${base}/plugins/enhance/upload`;
+  return "/plugins/enhance/upload";
+}
+```
+
+#### C. prompt 强化：LLM 优先调 enhance_upload_link 拿 token URL
+
+`large-file-bridge` buildUploadContext 改写：
+
+```
+首选：调 enhance_upload_link 工具拿 token 化 URL 给用户
+  1. 你调 enhance_upload_link({label: "<本次任务简述>"}) → 返
+     https://keepermac.huo15.com/plugins/enhance-upload/<12-hex-token>
+  2. 把 URL 发给用户："请通过此链接上传：<url>，传完告诉我"
+  3. 用户上传完说"传完了" → 你调 enhance_upload_check({token: "..."}) → 拉清单
+  4. 拿到文件路径 → Read 工具读文件分析
+
+备用（仅在 enhance_upload_link 不可用时）：共享 URL /plugins/enhance/upload
+  无 token，AI 不知道是谁传了什么，仅适合一次性快速上传
+```
+
+`cc-bridge-prompt` 严格区分段同步更新。
+
+### 现在 enhance 暴露的两条上传路径
+
+| URL 模式 | 模块 | 特点 |
+|---|---|---|
+| `/plugins/enhance/upload` | dashboard.ts | 共享，无 token，AI 不能追踪 |
+| `/plugins/enhance-upload/<12-hex-token>` | **bot-upload-link.ts (v6.5.2 已实现!)** | token 隔离，AI 通过 enhance_upload_check 查清单 |
+
+bot-upload-link 三个工具（v6.5.2 已有，无需改）：
+- `enhance_upload_link({label?, expireHours?})` — 生成 token + 返 URL
+- `enhance_upload_check({token})` — 列该 token 已收文件 + 路径
+- `enhance_upload_revoke({token})` — 撤销 token
+
+### 用户场景
+
+```
+群里 ZhaoBo 转发 200MB 视频 → 企微推「视频/文件超过100M无法下载」纯文本给 bot
+LLM 看到 + large-file-bridge prompt 触发 →
+  调 enhance_upload_link({label: "视频分析"}) →
+  返 https://keepermac.huo15.com/plugins/enhance-upload/ab12cd1234ef
+LLM 群里回："企微 100MB 限制，请打开此链接上传：https://...ab12cd1234ef
+            传完跟我说一声"
+ZhaoBo 浏览器打开 → 拖拽 200MB 视频 → 流式写到 ~/.openclaw/upload/ab12cd1234ef/files/video.mp4
+ZhaoBo 群里："传完了"
+LLM 调 enhance_upload_check({token: "ab12cd1234ef"}) → 拿到 [{path:"...", size:200MB}]
+LLM Read 路径 → 分析视频 → 回结果
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ /plugins/enhance/* namespace 干净（不跟 cc-media-bridge /lanhuo 混淆）
+
 ## 6.7.7 — 2026-05-11（/upload 短 URL 走不通 — 退回 /lanhuo/upload）
 
 ### 触发

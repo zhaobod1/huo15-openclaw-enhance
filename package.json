@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.7",
+  "version": "6.7.8",
   "publishConfig": {
     "access": "public"
   },
-  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.7 \u2014 /upload \u77ed URL \u9000\u56de /lanhuo/upload\uff08OpenClaw control UI SPA \u5360 root path\uff09\uff1av6.7.6 \u6539\u9ed8\u8ba4\u63a8 /upload \u77ed URL\uff0c\u4f46\u5b9e\u6d4b\u53d1\u73b0 OpenClaw gateway \u7684 control UI SPA \u5728 root \u8def\u5f84\u4f18\u5148\u7ea7\u6700\u9ad8\uff0cplugin \u6ce8\u518c\u7684 /upload route \u88ab SPA \u622a\u4e86\uff08\u8fd4 OpenClaw Control HTML \u2192 \u524d\u7aef JS \u8df3 /upload/chat?session=main \u9519\u8bef\u9875\uff09\u3002\u53ea\u6709 /lanhuo/* \u548c /plugins/* \u4e24\u4e2a prefix \u8ba9\u7ed9 plugin\u3002\u4fee\u6cd5\uff1aresolveUploadUrl \u9ed8\u8ba4\u56de\u9000\u5230 /lanhuo/upload\uff1bprompt \u6587\u672c\u660e\u786e\u300e/upload \u4e0d\u53ef\u7528\uff0c\u5fc5\u987b\u7528 /lanhuo/upload\u300f\u3002\u672c\u673a\u9a8c\u8bc1\uff1a/lanhuo/upload \u8fd4 6263B enhance HTML \u2713\uff0c/upload \u8fd4 2821B OpenClaw Control SPA \u2717\u3002\u7ee7\u627f v6.7.5 2GB \u6d41\u5f0f + v6.7.4 dashboard \u4e0a\u4f20\u9875\u3002",
+  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.8 \u2014 \u7edf\u4e00\u4e0a\u4f20 URL \u5230 /plugins/enhance/* namespace + \u5f3a\u5316 token \u5316\u8ffd\u8e2a\uff1a\u7528\u6237\u539f\u8bdd\u300e\u9ed8\u8ba4\u7528 /plugins/enhance/upload\uff0c/lanhuo/upload \u8fd9\u4e2a\u5148\u5220\u9664\u4e86\u300f\u3002\u5220\u9664 v6.7.4 \u52a0\u7684 /lanhuo/upload \u522b\u540d + v6.7.7 \u52a0\u7684 /upload \u77ed URL\uff08\u4e24\u6761\u90fd\u6ca1\u610f\u4e49\uff1a\u524d\u8005\u8ddf cc-media-bridge /lanhuo namespace \u6df7\u6dc6\uff0c\u540e\u8005\u88ab OpenClaw control UI SPA \u622a\uff09\u3002enhance \u4e0a\u4f20\u73b0\u5728\u53ea\u6709\u4e24\u6761\u8def\u5f84\uff1a(1) /plugins/enhance/upload \u5171\u4eab\u4e0a\u4f20\u9875\uff08\u65e0 token\uff0cAI \u4e0d\u77e5\u9053\u8c01\u4f20\u4e86\u4ec0\u4e48\uff09\uff1b(2) /plugins/enhance-upload/<token> token \u5316\u4e0a\u4f20\uff08bot-upload-link \u6a21\u5757\u6ce8\u518c\uff09\u3002prompt \u5f3a\u5316\uff1aLLM \u4f18\u5148\u8c03 enhance_upload_link \u5de5\u5177\u62ff token URL\uff08AI \u901a\u8fc7 enhance_upload_check \u80fd\u8ffd\u8e2a\u300e\u8fd9\u4e2a token \u6536\u5230\u4ec0\u4e48\u6587\u4ef6\u300f\uff09\u3002\u5171\u4eab URL \u4ec5\u4f5c fallback\u3002",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

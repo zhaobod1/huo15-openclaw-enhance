@@ -61,20 +61,22 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
 
 function buildUploadContext(url: string): string {
   return `【大文件上传指引 — 必读！】用户刚才发送的消息是"视频/文件超过100M，无法下载"。这是企微官方限制。
-**你必须在回复中直接提供下面的上传链接，不要先问诊断问题！**
 
-回复模板（**URL 必须用下面这个，不要换成 /upload 或 /lanhuo 别的**）：
-"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：
-${url}
+**首选：调 \`enhance_upload_link\` 工具拿 token 化 URL 给用户**（token 隔离，AI 能追踪上传了什么文件）：
+1. 你调 enhance_upload_link({label: "<本次任务简述>"}) → 返回 \`${url.replace("/plugins/enhance/upload", "/plugins/enhance-upload/<token>")}\` 这种带 token 的 URL
+2. 把 URL 发给用户："请通过此链接上传：<url>，传完告诉我"
+3. 用户上传完说"传完了" → 你调 enhance_upload_check({token: "<token>"}) → 拉清单
+4. 拿到文件路径 → Read 工具读文件分析
+
+**备用（仅在 enhance_upload_link 不可用时）**：直接给共享 URL ${url}（无 token，AI 不知道是谁传了什么，仅适合一次性快速上传）：
+"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：${url}
 （流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
 
-⚠️ 严格区分（v6.7.7+）：
-- 上传专用页面 = **${url}**（支持 ≤2GB 流式）
+⚠️ 严格区分（v6.7.8+）：
+- 共享上传 = ${url}（无 token，备用）
+- token 化上传 = enhance_upload_link 工具生成，URL 含 \`/plugins/enhance-upload/<12-hex-token>\`（首选）
 - /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
-- /upload 短 URL **不可用**！OpenClaw control UI SPA 占了 root path，访问 /upload 会跳 /upload/chat?session=main（错的）
-- 备用等价：/plugins/enhance/upload（更长，仅在 /lanhuo/upload 不可用时退回）
-
-也可使用 enhance_upload_link 工具生成 token 化专属上传链接（同样 ≤2GB）。
+- /upload 和 /lanhuo/upload **均不可用**！v6.7.8 已删除（OpenClaw SPA 截 root /upload；/lanhuo/upload 跟 cc-media-bridge namespace 混淆）
 
 (由 enhance large-file-bridge 触发；关闭: config.largeFileBridge.enabled = false)`;
 }
@@ -93,14 +95,11 @@ export function registerLargeFileBridge(
   function resolveUploadUrl(): string {
     if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
     const base = config?.baseUrl?.trim();
-    // v6.7.7: 回退到 /lanhuo/upload。
-    // 实测发现 OpenClaw gateway control UI SPA 占了 root path，plugin 无法注册 root-level
-    // /upload route（被 SPA 接管返 index.html → 前端 JS 跳 /upload/chat?session=main）。
-    // 只有 /lanhuo/* 和 /plugins/* 两个 prefix 让给 plugin，所以短 URL 走不通。
-    // 用户实测: https://keepermac.huo15.com/upload → 跳 /upload/chat?session=main
-    //          https://keepermac.huo15.com/lanhuo/upload → 正常拖拽页 ✓
-    if (base) return `${base.replace(/\/+$/, "")}/lanhuo/upload`;
-    return "/lanhuo/upload";
+    // v6.7.8: 用户原话：『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』
+    // 这是无 token 的共享上传 URL（AI 不知道是谁传了什么），适合给"快速一次性上传"用。
+    // 推荐 LLM 在群里给用户优先调 enhance_upload_link 工具拿 token 化 URL — AI 能追踪。
+    if (base) return `${base.replace(/\/+$/, "")}/plugins/enhance/upload`;
+    return "/plugins/enhance/upload";
   }
 
   api.on("before_prompt_build", (_event, ctx) => {

@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.7 — /upload 短 URL 退回 /lanhuo/upload（OpenClaw control UI SPA 占 root path）：v6.7.6 改推 /upload 短 URL 后实测 OpenClaw gateway control UI SPA 在 root 优先级最高,plugin /upload route 被 SPA 截 → 返 OpenClaw Control HTML → 前端跳 /upload/chat?session=main 错误页。只有 /lanhuo/* 和 /plugins/* 让给 plugin。修法: 默认回 /lanhuo/upload; prompt 明确『/upload 不可用,必须用 /lanhuo/upload』。本机验证 /lanhuo/upload 返 6263B enhance HTML ✓。继承 v6.7.5 2GB 流式上传。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.7
+description: "火一五·克劳德·龙虾增强插件 v6.7.8 — 统一上传 URL 到 /plugins/enhance/* + 强化 token 追踪：用户原话『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』。删 v6.7.4 /lanhuo/upload 别名 + v6.7.7 /upload 短 URL（两条都没意义）。enhance 上传只剩两条路径：(1) /plugins/enhance/upload 共享上传 (AI 不知道是谁传了什么)；(2) /plugins/enhance-upload/<token> token 化 (AI 用 enhance_upload_check 能查清单)。prompt 强化 LLM 优先调 enhance_upload_link 拿 token URL — AI 通过 enhance_upload_check 能追踪『这个 token 收到什么文件』，共享 URL 仅 fallback。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.8
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
