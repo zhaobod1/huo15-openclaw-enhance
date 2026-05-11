@@ -2,6 +2,62 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.16 — 2026-05-11（bot-upload-link error path 漏判 hotfix）
+
+### 触发
+
+v6.7.15 发布后本地实测三轮验证：
+
+| 测试 | 场景 | 结果 |
+|---|---|---|
+| A | 127.0.0.1 本地直连上传 30MB | ✓ HTTP 200 / SHA256 字节级一致 / 38ms / 789MB/s |
+| B | keepermac.huo15.com → frp → 本地全链路 30MB | ✓ HTTP 200 / SHA256 一致 / 44.8s / 0.67MB/s（家庭上行限速）|
+| C | 中途用 `curl --max-time 3` 强制中断（模拟 408）| ✓ 已有 30MB SHA256 完全未变（核心防破坏机制工作）<br>但 stderr 有 `rename failed: ENOENT` 误报 |
+
+### 根因（v6.7.15 留下的小 logic bug）
+
+```ts
+// v6.7.15 timeline (curl --max-time 3 后):
+17:10:45.935  upload-start                            // req.pipe 开始
+17:10:48.937  req.on('error', err='aborted')          // 3 秒 timeout
+              rmSync(partialPath)                     // ✓ 删 partial
+              api.logger.warn('upload-failed ...')    // ✓ 日志
+              finish() → Promise done
+
+// 但 await 后只有 `if (aborted) return`，error case 没被拦截！
+17:10:48.940  renameSync(partialPath, filePath)       // ✗ ENOENT（partial 已删）
+              api.logger.warn('rename failed ...')    // 误报
+```
+
+功能上：rename 失败 → 旧完整文件依然完好（v6.7.15 核心防破坏机制依然成立）。
+但日志里多一条 confusing 的"rename failed"误报。
+
+### v6.7.16 改动
+
+加 `failed` flag，error handler 里 set，Promise 后双条件拦截：
+
+```ts
+let aborted = false;
+let failed = false;     // ← v6.7.16 新增
+
+req.on("error", (err) => {
+  failed = true;        // ← set
+  ...
+});
+ws.on("error", (err) => {
+  failed = true;        // ← set
+  ...
+});
+
+if (aborted || failed) return true;   // ← 双条件
+```
+
+### 验证
+
+- `npx tsc --noEmit` 通过
+- 单文件 4 行改动（1 处 let / 2 处 = true / 1 处条件加 || failed）
+- 不影响 v6.7.15 核心 .partial 临时文件 + renameSync 原子替换机制
+
 ## 6.7.15 — 2026-05-11（bot-upload-link stream pipe 原子化 + 完整 upload 日志）
 
 ### 触发（huangxuanrong 工单深度追踪）

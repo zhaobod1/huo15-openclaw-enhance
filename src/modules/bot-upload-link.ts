@@ -476,6 +476,10 @@ export function registerBotUploadLink(
         // Stream pipe req → file，过程中累计 bytes，超 maxFileBytes 主动 abort
         let receivedBytes = 0;
         let aborted = false;
+        // v6.7.16: failed flag — req.on('error') / ws.on('error') 触发后不能走 rename 路径
+        // 之前 bug：失败后 finish() done Promise，外面 if (aborted) return 不拦截 error case，
+        // 继续走到 renameSync(partial, file) → ENOENT（partial 已被 rmSync 删）→ stderr 误报
+        let failed = false;
         const ws = createWriteStream(partialPath);
 
         await new Promise<void>((done) => {
@@ -519,6 +523,7 @@ export function registerBotUploadLink(
             }
           });
           req.on("error", (err: Error) => {
+            failed = true;
             try {
               ws.destroy();
             } catch {
@@ -540,6 +545,7 @@ export function registerBotUploadLink(
             finish();
           });
           ws.on("error", (err: Error) => {
+            failed = true;
             try {
               rmSync(partialPath, { force: true });
             } catch {
@@ -558,7 +564,7 @@ export function registerBotUploadLink(
           req.pipe(ws);
         });
 
-        if (aborted) return true;
+        if (aborted || failed) return true;
 
         // v6.7.15: 落盘成功 → 原子 rename .partial → 真实 filePath
         // 这是核心：先写 partial，最后才"亮"出来，绝不破坏已有的成功文件
