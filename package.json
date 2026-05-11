@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.0",
+  "version": "6.7.1",
   "publishConfig": {
     "access": "public"
   },
-  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.0 \u2014 large-file-bridge channel \u68c0\u6d4b\u6539\u7528 agentId startsWith wecom- (\u4fee\u590d\u4f01\u5fae 100MB \u9519\u8bef hook \u4e0d\u89e6\u53d1)",
+  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.1 \u2014 large-file-bridge \u6ce8\u5165\u66f4\u5f3a\u5236\u5f15\u5bfc\u6587\u672c\uff08\u76f4\u63a5\u7ed9\u4e0a\u4f20\u94fe\u63a5\uff0c\u4e0d\u5148\u95ee\u8bca\u65ad\u95ee\u9898\uff09",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

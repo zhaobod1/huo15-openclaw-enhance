@@ -52,12 +52,14 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
 }
 
 function buildUploadContext(url: string): string {
-  return `【大文件上传指引】当前会话来自企业微信渠道。企微聊天文件传输有 100MB 上限，超过后系统会直接拒绝。
-如果你或用户需要传输大文件（>100MB），**首选**调 \`enhance_upload_link\` 工具生成 token 化专属链接（24h TTL，per-token 隔离目录），把返回的 URL 发给用户即可。
-用户上传完成后说"传完了"，再调 \`enhance_upload_check\`（参数 token）拉清单，路径用 Read 工具读文件分析。
+  return `【大文件上传指引 — 必读！】用户刚才发送的消息是"视频/文件超过100M，无法下载"。这是企微官方限制。
+**你必须在回复中直接提供下面的上传链接，不要先问诊断问题！**
 
-兜底链接（无 token 隔离，仅在 enhance_upload_link 不可用时用）：
-📎 ${url}
+回复模板：
+"文件超过100MB无法在企微中直接传输。请通过以下链接上传：${url}
+上传完成后告诉我，我来处理文件。"
+
+也可使用 enhance_upload_link 工具生成 token 化专属上传链接。
 
 (由 enhance large-file-bridge 触发；关闭: config.largeFileBridge.enabled = false)`;
 }
