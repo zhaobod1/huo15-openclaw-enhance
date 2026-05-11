@@ -20,9 +20,10 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { getChannel } from "../utils/channel-detect.js";
 import { DEFAULT_AGENT_ID } from "../types.js";
 import { resolveBaseUrl as resolveBaseUrlFromBridge } from "../utils/http-route-bridge.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { randomBytes } from "node:crypto";
 
 export interface LargeFileBridgeConfig {
   enabled?: boolean;
@@ -63,7 +64,15 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
   return ((ctx?.sessionKey ?? ctx?.sessionId ?? "") + "").trim();
 }
 
-function buildUploadContext(url: string): string {
+function buildUploadContext(url: string, token: string | null): string {
+  const tokenInfo = token
+    ? `\n# 已为本次会话预生成 token（AI 可追踪）
+
+token = \`${token}\`（已写入 manifest，24h 有效）。用户上传后,你**必须**调:
+  enhance_upload_check({token: "${token}"})
+拉清单 → 拿到 \`{path, size, name}\` 数组 → Read 路径分析文件。`
+    : `\n# 本次未生成 token（兜底共享 URL，AI 不能追踪是谁传了什么）`;
+
   return `【大文件上传 — 强制规则，禁止违反】
 
 用户上一条消息是「视频/文件超过100M，无法下载」。这是企微官方对 bot 接收文件的硬上限拦截，**你不需要查任何源码、不需要问任何诊断问题、不需要解释技术原因**。
@@ -75,6 +84,7 @@ function buildUploadContext(url: string): string {
 ${url}
 
 上传完成后告诉我，我来处理。
+${tokenInfo}
 
 # 严禁的行为（违反 = 用户卡死）
 
@@ -83,15 +93,7 @@ ${url}
 ❌ 不要建议用户 \`openclaw config set\` 或修改任何配置 — 用户**就是想传文件给你**，不是改配置
 ❌ 不要叙述性提到 "large-file-bridge 模块" / "增强包 hook" / "插件内置限制" — 用户不关心实现
 ❌ 不要给 \`/plugins/enhance/upload\` 这种**裸路径**（缺 https:// 前缀），用户点不开
-
-# 高级用法（可选，AI 想精确追踪文件归属时用）
-
-若需要 token 化隔离（每个上传链接独立目录，AI 通过 enhance_upload_check 工具能精确查"这个 token 收到什么"）：
-1. 调 enhance_upload_link({label: "<场景简述>"}) → 工具返 \`/plugins/enhance-upload/<12-hex-token>\` 这种带 token 的 URL
-2. 把这个 token URL 发给用户（**仍是完整 https://... URL**，不是裸 path）
-3. 用户传完说"传完了" → 调 enhance_upload_check({token}) → 拉清单 → Read 文件
-
-不需要精确追踪时，直接给 ${url} 即可（最简单，用户最快）。
+${token ? `❌ 不要再调 enhance_upload_link 工具生成新 token — token \`${token}\` 已预备好,直接发给用户即可` : ""}
 
 (由 enhance large-file-bridge 触发；关闭: config.largeFileBridge.enabled = false)`;
 }
@@ -105,7 +107,53 @@ export function registerLargeFileBridge(
   const detectWecomError = config?.detectWecomError !== false;
   const proactiveOffer = config?.proactiveOffer !== false;
 
-  const injectedSessions = new Map<string, number>();
+  // v6.7.12: 每个 session 关联一个 token，让 prompt 引导 + 兜底 hook 都给同一个 token URL
+  // → AI 之后能调 enhance_upload_check({token}) 拿清单（精确追踪谁传了什么）
+  const injectedSessions = new Map<string, { token: string; createdAt: number }>();
+
+  // v6.7.12: token 自动生成 + manifest 写入（跟 bot-upload-link 同一份 ~/.openclaw/upload/）
+  // 这样 LLM 不调 enhance_upload_link 工具,我们 hook 兜底也能给 token URL,enhance_upload_check 仍能查清单
+  const UPLOAD_ROOT = join(homedir(), ".openclaw", "upload");
+  const MANIFEST_PATH = join(UPLOAD_ROOT, "manifest.json");
+  const URL_PREFIX = "/plugins/enhance-upload";
+
+  function createUploadToken(label: string | undefined, ownerAgent: string | undefined): string | null {
+    try {
+      const token = randomBytes(6).toString("hex");  // 12 hex chars,与 bot-upload-link 一致
+      const tokenDir = join(UPLOAD_ROOT, token, "files");
+      mkdirSync(tokenDir, { recursive: true });
+
+      // 读取或新建 manifest（跟 bot-upload-link 同一份,所以 enhance_upload_check 能查到）
+      let manifest: { version: 1; entries: any[] } = { version: 1, entries: [] };
+      if (existsSync(MANIFEST_PATH)) {
+        try {
+          const parsed = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8"));
+          if (parsed && Array.isArray(parsed.entries)) manifest = parsed;
+        } catch { /* ignore corrupt manifest, start fresh */ }
+      }
+
+      const now = new Date();
+      const expireAt = new Date(now.getTime() + 24 * 3600 * 1000);  // 24h TTL（跟 bot-upload-link 默认一致）
+      manifest.entries.push({
+        token,
+        label,
+        ownerAgent,
+        createdAt: now.toISOString(),
+        expireAt: expireAt.toISOString(),
+        files: [],
+      });
+
+      writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2), "utf-8");
+      return token;
+    } catch (err) {
+      api.logger.warn(`[enhance-large-file] createUploadToken 失败,fallback 到无 token URL: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  function buildTokenUrl(baseUrl: string, token: string): string {
+    return `${baseUrl.replace(/\/+$/, "")}${URL_PREFIX}/${token}`;
+  }
 
   /**
    * v6.7.9: baseUrl 优先级（跟 bot-share-link / bot-upload-link 同款）:
@@ -174,17 +222,27 @@ export function registerLargeFileBridge(
 
     if (injectedSessions.has(key)) return;
 
-    const url = resolveUploadUrl();
-    const text = buildUploadContext(url);
+    // v6.7.12: 自动生成 token + 拼 token URL（让 AI 通过 enhance_upload_check 能追踪）
+    const baseUrl = resolveBaseUrlFromBridge({
+      configBaseUrl: config?.baseUrl?.trim() || readSharedBaseUrl(),
+      envName: "BOT_BASE_URL",
+      fallback: "http://localhost:18789",
+    });
+    const token = createUploadToken(`session:${sessionId.slice(0, 12)}`, agentId);
+    const url = token
+      ? buildTokenUrl(baseUrl, token)
+      : resolveUploadUrl();  // token 生成失败兜底用共享 URL
+
+    const text = buildUploadContext(url, token);
 
     if (injectedSessions.size >= MAX_DEDUP_ENTRIES) {
       const oldest = injectedSessions.keys().next().value;
       if (oldest !== undefined) injectedSessions.delete(oldest);
     }
-    injectedSessions.set(key, Date.now());
+    injectedSessions.set(key, { token: token ?? "", createdAt: Date.now() });
 
     api.logger.info(
-      `[enhance-large-file] ${reason} (agent=${agentId}, session=${sessionId.slice(0, 12)})`,
+      `[enhance-large-file] ${reason} | token=${token ?? "<fallback-no-token>"} | url=${url} (agent=${agentId}, session=${sessionId.slice(0, 12)})`,
     );
 
     return { prependContext: text };
@@ -202,16 +260,22 @@ export function registerLargeFileBridge(
     const sessionId = pickSessionId(ctx);
     const key = `${agentId}::${sessionId}`;
 
-    if (!injectedSessions.has(key)) return;
-    // v6.7.10: 删 agentId.startsWith("wecom-") 检查——跟 before_prompt_build 一致放宽。
-    // injectedSessions 命中本身就说明 before_prompt_build 已经因为 WECOM_LARGE_FILE_ERROR
-    // 命中而 inject 过 prompt，所以这条 reply 就该附 URL，不分 channel。
+    const entry = injectedSessions.get(key);
+    if (!entry) return;
 
     try {
       const body: string = (event as any)?.cleanedBody ?? (event as any)?.body ?? "";
       if (!body) return;
 
-      const url = resolveUploadUrl();
+      // v6.7.12: 用 before_prompt_build 时记下的 token 拼 URL（前后一致）
+      const baseUrl = resolveBaseUrlFromBridge({
+        configBaseUrl: config?.baseUrl?.trim() || readSharedBaseUrl(),
+        envName: "BOT_BASE_URL",
+        fallback: "http://localhost:18789",
+      });
+      const url = entry.token
+        ? buildTokenUrl(baseUrl, entry.token)
+        : resolveUploadUrl();
       // v6.7.11: 收紧"已含上传链接"判断 — 只在含**真实可点 URL**时跳过。
       // 之前用 body.includes("upload") 太宽泛 — LLM 叙述性提到 "large-file-bridge"
       // 或 "上传相关问题" 也会误判为"已给链接"。MiniMax M2.7 等弱模型反向操作

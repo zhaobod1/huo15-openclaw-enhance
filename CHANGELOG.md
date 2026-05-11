@@ -2,6 +2,113 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.12 — 2026-05-11（large-file-bridge 自动生成 token URL — 兜底也给 token，AI 追踪零依赖弱模型）
+
+### 触发
+
+用户原话：**「没有后缀 token 啊」**
+
+v6.7.11 兜底虽然给了 `https://keepermac.huo15.com/plugins/enhance/upload` 完整 URL，但 **没 token** → AI 拿不到 `enhance_upload_check({token})` 的输入 → **不能查谁传了什么**。
+
+弱模型（MiniMax M2.7）从来不会主动调 `enhance_upload_link` 工具拿 token，所以 token URL 一直没机会生效。
+
+### 设计取舍
+
+让 `large-file-bridge` **在 hook 内部自动生成 token**，不依赖 LLM 主动调工具：
+
+| 时机 | 动作 |
+|---|---|
+| `before_prompt_build` 命中 WECOM_LARGE_FILE_ERROR | `randomBytes(6).hex()` 生成 token + mkdir `<uploadRoot>/<token>/files/` + 写 manifest.json |
+| 同 session 后续触发 | injectedSessions Map 已存 token，复用 |
+| `before_agent_reply` 兜底 | 用 injectedSessions 里那个 token 拼 URL（前后一致） |
+
+manifest.json 跟 `bot-upload-link` **共用 `~/.openclaw/upload/manifest.json`**，所以 LLM 调 `enhance_upload_check({token})` 工具时 bot-upload-link 能读到这条 token，拉清单成功。
+
+### 改动
+
+#### 1. `injectedSessions` Map 升级
+
+```ts
+// v6.7.11: Map<string, number>          (只存 timestamp)
+// v6.7.12: Map<string, { token: string; createdAt: number }>
+```
+
+#### 2. 新增 `createUploadToken()` helper
+
+```ts
+const UPLOAD_ROOT = join(homedir(), ".openclaw", "upload");
+const MANIFEST_PATH = join(UPLOAD_ROOT, "manifest.json");
+
+function createUploadToken(label, ownerAgent): string | null {
+  const token = randomBytes(6).toString("hex");  // 12 hex
+  mkdirSync(join(UPLOAD_ROOT, token, "files"), { recursive: true });
+
+  // 读/写 manifest（与 bot-upload-link 共用）
+  let manifest = existsSync(MANIFEST_PATH)
+    ? JSON.parse(readFileSync(MANIFEST_PATH, "utf-8"))
+    : { version: 1, entries: [] };
+  manifest.entries.push({
+    token, label, ownerAgent,
+    createdAt: new Date().toISOString(),
+    expireAt: new Date(Date.now() + 24*3600*1000).toISOString(),
+    files: [],
+  });
+  writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+
+  return token;
+}
+
+function buildTokenUrl(baseUrl, token): string {
+  return `${baseUrl}/plugins/enhance-upload/${token}`;
+}
+```
+
+#### 3. before_prompt_build 用 token URL
+
+```ts
+const token = createUploadToken(`session:${sessionId.slice(0,12)}`, agentId);
+const url = token ? buildTokenUrl(baseUrl, token) : resolveUploadUrl();
+const text = buildUploadContext(url, token);  // prompt 提示 token 已就绪
+injectedSessions.set(key, { token: token ?? "", createdAt: Date.now() });
+```
+
+#### 4. before_agent_reply 用同一个 token URL
+
+```ts
+const entry = injectedSessions.get(key);
+const url = entry.token ? buildTokenUrl(baseUrl, entry.token) : resolveUploadUrl();
+// suffix 拼 token URL，前后完全一致
+```
+
+#### 5. prompt 增强：告诉 LLM token 已预备好
+
+```
+# 已为本次会话预生成 token（AI 可追踪）
+
+token = `abc123def456`（已写入 manifest，24h 有效）。用户上传后,你**必须**调:
+  enhance_upload_check({token: "abc123def456"})
+拉清单 → 拿到 {path, size, name} 数组 → Read 路径分析文件。
+
+# 严禁的行为
+❌ 不要再调 enhance_upload_link 工具生成新 token — token "abc123def456" 已预备好,直接发给用户即可
+```
+
+### 用户场景验证
+
+| 步骤 | 之前 (v6.7.11) | 现在 (v6.7.12) |
+|---|---|---|
+| 用户发"视频/文件超过100M无法下载" | hook 注 prompt + 兜底，URL 是共享 `/plugins/enhance/upload`（无 token，AI 拿不到追踪 key） | hook 注 prompt + 兜底，URL 是 `/plugins/enhance-upload/<token>`（manifest 已写，AI 立刻能用 token） |
+| LLM 完全无视 prompt | 兜底 appendText 共享 URL，**AI 不能查谁传了什么** | 兜底 appendText token URL，**AI 调 enhance_upload_check({token}) 查清单成功** |
+| 用户上传 → "传完了" | AI 没 token，只能 `ls ~/.openclaw/upload/` 全盘扫（隐私 + 性能差） | AI 调 enhance_upload_check({token: "abc..."}) → 精确返该 token 文件清单 → Read |
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖（randomBytes 是 node stdlib）
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ manifest 跟 bot-upload-link 共用，避免重复实现 token 系统
+- ✅ token 生成失败时优雅降级到共享 URL（不阻塞主流程）
+
 ## 6.7.11 — 2026-05-11（large-file-bridge 双重 prompt-following 加固 — 针对 MiniMax M2.7 等弱模型）
 
 ### 触发

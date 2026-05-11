@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.11 — large-file-bridge 双重 prompt-following 加固（修 MiniMax M2.7 等弱模型反向操作）：实测 wecom-default-dm-huangxuanrong + MiniMax M2.7 场景,enhance prompt 已注入,但 LLM 完全无视硬指令反向 grep wecom 源码探索 MAX_DOCUMENT_BYTES。before_agent_reply 兜底也失效——LLM 叙述性回复含 'upload' 子串就被误判为'已给链接'。修法：(1) prompt 改命令式『回复必须是下面这一段一字不改』+ 严禁 exec/反问/改配置；(2) 兜底关键词从 body.includes('upload') 改正则 /https?:.*\\/plugins\\/enhance(-upload)?\\//，叙述性提及不再误判。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.11
+description: "火一五·克劳德·龙虾增强插件 v6.7.12 — large-file-bridge 自动生成 token URL（兜底零依赖弱模型）：用户原话『没有后缀 token 啊』。before_prompt_build 命中时自动 randomBytes(6).hex() 生成 12-hex token + 写 manifest.json（跟 bot-upload-link 共用 ~/.openclaw/upload/manifest.json,enhance_upload_check 工具能查到）,URL = /plugins/enhance-upload/<token>。injectedSessions Map 升级存 token,before_agent_reply 兜底用同一 token 拼 URL 前后一致。即使弱模型完全无视 prompt,兜底也保证 LLM 输出末尾被 appendText token URL,AI 调 enhance_upload_check 能查清单。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.12
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
