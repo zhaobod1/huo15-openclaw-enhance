@@ -2,6 +2,68 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.10 — 2026-05-11（large-file-bridge 触发放宽 — 不再卡 agentId.startsWith("wecom-")）
+
+### 触发
+
+用户实测 v6.7.9 升级后 LLM 回复（在某个非企微渠道发"视频/文件超过100M无法下载"）：
+
+```
+这是 openclaw-media-bridge 的下载限制，文件超过 100MB 会被截断。让我查一下当前的配置：
+找到关键信息了。文件大小有几层限制：
+- MAX_VIDEO_BYTES : 16 MB
+- MAX_DOCUMENT_BYTES : 100 MB ← 这就是你遇到的
+- MAX_AUDIO_BYTES : 16 MB
+- ...
+如果你想让贾维斯能处理更大的文件，可以调高配置：
+openclaw config set channels.wecom.mediaMaxMb 200
+```
+
+LLM **完全没走 enhance 引导**（没调 `enhance_upload_link`、没给 `/plugins/enhance/upload` URL），反而自己读 source code 调研 `MAX_DOCUMENT_BYTES`。
+
+### 根因
+
+v6.7.0 修 channel 检测 bug 时加了：
+
+```ts
+if (!agentId.startsWith("wecom-")) return;
+```
+
+但 main agent / terminal / Claude CLI / Claude Desktop / dingtalk / wechat-service 等所有非 wecom 渠道的 agentId **都不以 `wecom-` 开头** → 这些场景 large-file-bridge **彻底不工作**。
+
+但「视频/文件超过 100M，无法下载」**是企微独家错误文本**——只要消息含这句话，就一定是企微大文件场景（即使 LLM 在非 wecom agent 上看到了，比如用户在 Claude CLI 里贴企微截图）。
+
+### v6.7.10 改动
+
+`before_prompt_build` hook：
+
+```ts
+// v6.7.10: 触发条件不再卡 agentId
+if (detectWecomError && WECOM_LARGE_FILE_ERROR.test(promptText)) {
+  reason = "detected-wecom-large-file-error";
+  // ↑ 命中即触发，不管 channel/agentId
+}
+else if (
+  proactiveOffer &&
+  LARGE_FILE_INTENT.test(promptText) &&
+  FILE_UPLOAD_KEYWORDS.test(promptText) &&
+  agentId.startsWith("wecom-")     // ← 仅这条仍卡 wecom-
+) {
+  reason = "detected-large-file-intent";
+}
+```
+
+`before_agent_reply` hook 同步：删除 `if (!agentId.startsWith("wecom-")) return;`，靠 `injectedSessions.has(key)` 一致性自动联动。
+
+**结果**：用户在任何渠道（企微/terminal/Claude CLI/dingtalk/...）贴企微错误文本 → 100% 命中 enhance 引导。
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 主动「要传大文件」泛意图引导仍卡 wecom-（避免 terminal 用户误触发）
+
 ## 6.7.9 — 2026-05-11（large-file-bridge baseUrl 解析 hotfix — 修裸路径缺 https:// 前缀）
 
 ### 触发

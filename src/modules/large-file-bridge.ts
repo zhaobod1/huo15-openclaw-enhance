@@ -131,10 +131,6 @@ export function registerLargeFileBridge(
     const sessionId = pickSessionId(ctx);
     const key = `${agentId}::${sessionId}`;
 
-    // agentId 以 "wecom-" 开头 = 企微渠道
-    // ctx 中 channel/originatingChannel 字段在 before_prompt_build 时可能为空
-    if (!agentId.startsWith("wecom-")) return;
-
     const promptText = (() => {
       try {
         return String((_event as any).prompt ?? (_event as any).promptText ?? "");
@@ -147,9 +143,19 @@ export function registerLargeFileBridge(
 
     let reason = "";
 
+    // v6.7.10: 触发条件**不再卡 agentId**——「视频/文件超过 100M，无法下载」
+    // 是企微独家错误文本，命中即必定是企微大文件场景，**不管 channel 是什么**都该引导。
+    // 之前 v6.7.0 加 agentId.startsWith("wecom-") 是为了"避免 terminal 误触"，但实际
+    // terminal 用户也可能粘贴这句错误文本来问 AI 怎么处理——同样应该给上传链接。
     if (detectWecomError && WECOM_LARGE_FILE_ERROR.test(promptText)) {
       reason = "detected-wecom-large-file-error";
-    } else if (proactiveOffer && LARGE_FILE_INTENT.test(promptText) && FILE_UPLOAD_KEYWORDS.test(promptText)) {
+    } else if (
+      proactiveOffer &&
+      LARGE_FILE_INTENT.test(promptText) &&
+      FILE_UPLOAD_KEYWORDS.test(promptText) &&
+      // 主动引导仍卡 wecom-（这种泛泛的「想传大文件」表达 terminal 用户其实有别的路径）
+      agentId.startsWith("wecom-")
+    ) {
       reason = "detected-large-file-intent";
     }
 
@@ -186,7 +192,9 @@ export function registerLargeFileBridge(
     const key = `${agentId}::${sessionId}`;
 
     if (!injectedSessions.has(key)) return;
-    if (!agentId.startsWith("wecom-")) return;
+    // v6.7.10: 删 agentId.startsWith("wecom-") 检查——跟 before_prompt_build 一致放宽。
+    // injectedSessions 命中本身就说明 before_prompt_build 已经因为 WECOM_LARGE_FILE_ERROR
+    // 命中而 inject 过 prompt，所以这条 reply 就该附 URL，不分 channel。
 
     try {
       const body: string = (event as any)?.cleanedBody ?? (event as any)?.body ?? "";

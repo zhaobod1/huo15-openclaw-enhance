@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.9 — large-file-bridge baseUrl 解析 hotfix：v6.7.8 LLM 回复给的链接是 `👉 /plugins/enhance/upload`（裸路径，缺 https://公网前缀）。修法：resolveUploadUrl 接入跟 bot-share-link / bot-upload-link 同款的共享 baseUrl 解析链 (env BOT_BASE_URL > config.baseUrl > ~/.openclaw/share/config.json > bridge 检测外网 URL)，确保所有场景都拼公网前缀。继承 v6.7.8 统一 /plugins/enhance/* + token 化追踪。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.9
+description: "火一五·克劳德·龙虾增强插件 v6.7.10 — large-file-bridge 触发条件放宽：v6.7.0 加的 agentId.startsWith('wecom-') 检查把 main agent / terminal / cli 全部排除,LLM 在这些渠道完全没走 enhance 引导,反而读 source code 自己调研『MAX_DOCUMENT_BYTES』。修法：『视频/文件超过 100M,无法下载』企微独家错误文本命中即触发,不再卡 agentId。主动『要传大文件』引导仍卡 wecom-。继承 v6.7.9 baseUrl 多源解析 + v6.7.8 /plugins/enhance/* 统一 + token 化追踪。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.10
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
