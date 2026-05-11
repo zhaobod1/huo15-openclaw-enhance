@@ -62,14 +62,15 @@ function buildUploadContext(url: string): string {
 **你必须在回复中直接提供下面的上传链接，不要先问诊断问题！**
 
 回复模板（**URL 必须用下面这个，不要改成 /lanhuo 或别的**）：
-"文件超过100MB无法在企微中直接传输。请通过以下链接上传：${url}
-上传完成后告诉我，我来处理文件。"
+"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：
+${url}
+（流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
 
-⚠️ 严格区分（v6.7.4）：
-- 上传专用页面 = **${url}**（这是你**必须**给用户的链接）
+⚠️ 严格区分（v6.7.4+）：
+- 上传专用页面 = **${url}**（这是你**必须**给用户的链接，支持 ≤2GB）
 - /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
 
-也可使用 enhance_upload_link 工具生成 token 化专属上传链接。
+也可使用 enhance_upload_link 工具生成 token 化专属上传链接（同样 ≤2GB）。
 
 (由 enhance large-file-bridge 触发；关闭: config.largeFileBridge.enabled = false)`;
 }

@@ -2,6 +2,140 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.5 — 2026-05-11（上传支持 2GB 单文件 — 流式写盘不 OOM）
+
+### 触发
+
+用户实测企微大文件场景，说："要 2G 以内都可以"。
+
+但 v6.7.4 的 `handleUpload` 是 v5.x 老实现：
+
+```ts
+const chunks: Buffer[] = [];
+for await (const chunk of req) chunks.push(Buffer.from(chunk));  // ← 全 buffer 进内存
+const parsed = parseMultipart(Buffer.concat(chunks), boundary);   // ← concat 出一个超大 Buffer
+```
+
+2GB 文件走这条路径 **100% OOM** —— Node V8 默认 heap ~1.5GB，Buffer.concat 出 2GB 超大 buffer 直接撞 `Cannot allocate Buffer`。
+
+### 改动
+
+#### 1. handleUpload 新增 octet-stream 流式路径
+
+`Content-Type: application/octet-stream` (或非 multipart) 走 `handleStreamingUpload`：
+
+```ts
+async function handleStreamingUpload(req, res, contentLengthHint) {
+  const safeName = sanitizeUploadFilename(req.headers["x-filename"]);
+  const destPath = join(getUploadDir(), `${Date.now()}-${safeName}`);
+  let receivedBytes = 0;
+  const ws = createWriteStream(destPath);
+
+  return new Promise((resolve) => {
+    req.on("data", (chunk) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > UPLOAD_MAX_BYTES) {  // 2GB 硬上限
+        req.destroy(); ws.destroy(); rmSync(destPath);
+        res.writeHead(413); res.end("..."); resolve(true); return;
+      }
+      // 背压：write 返 false 时暂停 req，等 drain 再 resume
+      const canContinue = ws.write(chunk);
+      if (!canContinue) {
+        req.pause();
+        ws.once("drain", () => req.resume());
+      }
+    });
+    req.on("end", () => ws.end(() => { sendJson(res, {...}); resolve(true); }));
+    req.on("error", () => { /* abort + cleanup */ });
+    ws.on("error", () => { /* abort + cleanup */ });
+  });
+}
+```
+
+- **2GB 硬上限**：`content-length` 头预检 + 边读边累计字节，超过主动 destroy + 删盘
+- **背压处理**：`ws.write` 返 `false` 时 `req.pause()`，避免 client 推太快内存堆积
+- **错误清理**：req/ws 任一抛错都 cleanup 已写部分文件
+
+#### 2. multipart/form-data 老路径保留但加 100MB 上限
+
+兼容旧 form 上传，但超过 100MB 直接 413 + 提示用 octet-stream：
+
+```ts
+if (contentLength > MULTIPART_INMEM_MAX /* 100MB */) {
+  res.writeHead(413);
+  res.end(JSON.stringify({
+    error: "multipart 模式仅支持 <100MB；2GB 以内大文件请改用 application/octet-stream 头",
+    hint: "fetch(url, { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': file.name } })",
+  }));
+}
+```
+
+#### 3. UPLOAD_HTML 默认走 octet-stream
+
+```js
+xhr.open('POST', location.pathname, true);  // 同源相对路径
+xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+xhr.send(file);  // 直接发 File 对象，浏览器自动流式
+```
+
+- `location.pathname` 让同一份 HTML 既能在 `/lanhuo/upload` 跑也能在 `/plugins/enhance/upload` 跑（自动同源相对路径）
+- `xhr.send(file)` 直发 File 对象，浏览器原生 stream，**不全 buffer 进 RAM**
+- progress 实时更新：`100 MB / 1.5 GB (8.5%)` 这种细粒度显示
+- 客户端预检：选 >2GB 文件直接 alert，不发请求
+
+#### 4. large-file-bridge prompt 更新
+
+```
+回复模板:
+"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：
+${url}
+（流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
+```
+
+#### 5. nginx 配置补充
+
+`client_max_body_size 2050M` 让反代不被 nginx 自己截胡（默认 1MB），keepermac.huo15.com 的 server block 都要加：
+
+```nginx
+server {
+  client_max_body_size 2050M;  # 留 50MB margin
+
+  location /lanhuo/upload {
+    proxy_pass http://localhost:18789;
+    proxy_request_buffering off;  # ← 关键：让上传也是流式，nginx 不缓存全包
+    proxy_read_timeout 600s;       # 慢网传 2GB 可能 >5 分钟
+  }
+  location /lanhuo {
+    proxy_pass http://localhost:18790;
+  }
+}
+```
+
+`proxy_request_buffering off` 让 nginx 把 request body 边收边传给后端 — 否则 nginx 会先缓存 2GB 到磁盘再转发，再被后端流式收一遍，两遍 IO 浪费。
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖（fs.createWriteStream + http 原生 stream）
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ Path traversal sanitizer 仍生效（`sanitizeUploadFilename`）
+- ✅ content-length 头预检 + 边读累计双闸门，防恶意大请求
+
+### 用户操作
+
+```bash
+# 1. 升级
+openclaw plugins update @huo15/huo15-openclaw-enhance && openclaw restart
+
+# 2. nginx 加 client_max_body_size + proxy_request_buffering off
+# 编辑 /etc/nginx/sites-enabled/keepermac.huo15.com 加上面那段
+sudo nginx -t && sudo nginx -s reload
+
+# 3. 浏览器测试: https://keepermac.huo15.com/lanhuo/upload
+# 拖一个 500MB+ 文件，progress 应该实时更新到 100%
+```
+
 ## 6.7.4 — 2026-05-11（修 LLM 把 /lanhuo 当上传链接 + 同步 v6.7.2/3 + preflight 加固）
 
 ### 触发

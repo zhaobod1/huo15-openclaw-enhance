@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.4 — large-file-bridge 修上传 URL 错位 + 同步 v6.7.2/3 + release.sh preflight 加固：(1) LLM 把 /lanhuo（dashboard）当上传链接给用户用 — dashboard.ts 新注册 /lanhuo prefix 挂 /lanhuo/upload 别名（同一个 UPLOAD_HTML/handleUpload），large-file-bridge 默认推 /lanhuo/upload，prompt 文本明确区分 dashboard (/lanhuo 看任务) vs upload (/lanhuo/upload 传文件)；(2) 同步补 git: before_agent_reply hook（v6.7.2/3 仅 npm 发了没 git push）；(3) release.sh 加第 12 项预检：description 提到的 hook 名必须在 src/ 真注册 — 防 v6.7.2 描述跟代码不同步的误发。继承 v6.7.1 强引导 prompt + v6.7.0 channel 检测换 agentId 前缀 + v6.6.9 config-doctor model-id 大小写校验 + v6.6.8 全模块 hook safeHook 防御。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.4
+description: "火一五·克劳德·龙虾增强插件 v6.7.5 — 上传支持到 2GB 单文件（流式写盘）：用户希望 2GB 以内都能传。handleUpload 加 octet-stream + X-Filename header 路径，req.pipe(createWriteStream) 流式直写盘，过程中累计字节超 2GB 主动 abort + 删已写部分（不 OOM）。老 multipart 路径保留但加 100MB 上限防内存爆。UPLOAD_HTML 改 xhr.send(file) 二进制流上传，progress 实时显示 N MB / X GB 百分比。同源相对路径 location.pathname，nginx 反代 /lanhuo/upload 或 /plugins/enhance/upload 都命中同一份后端。large-file-bridge prompt 更新『2GB 以内都可以』。继承 v6.7.4 /lanhuo/upload 别名修 URL 错位。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.5
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

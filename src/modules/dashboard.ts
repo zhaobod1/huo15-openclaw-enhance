@@ -24,7 +24,7 @@ import {
   searchMemories,
 } from "../utils/sqlite-store.js";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_AGENT_ID, type DashboardConfig, type Workflow, type NotificationQueue } from "../types.js";
@@ -491,22 +491,75 @@ function parseMultipart(buffer: Buffer, boundary: string): { filename: string; d
   return { filename, data, contentType };
 }
 
+/** v6.7.5: 2GB 单文件硬上限（防内存爆 + 防恶意大请求） */
+const UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+/** v6.7.5: multipart 内存解析路径上限（大文件必须走 octet-stream） */
+const MULTIPART_INMEM_MAX = 100 * 1024 * 1024; // 100MB
+
 async function handleUpload(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   if (req.method !== "POST") return false;
-  const contentType = String(req.headers["content-type"] ?? "");
+  const contentType = String(req.headers["content-type"] ?? "").toLowerCase();
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+
+  // v6.7.5: content-length 预检 — 超 2GB 直接 413（不开 socket 收数据）
+  if (contentLength > UPLOAD_MAX_BYTES) {
+    const body = JSON.stringify({
+      error: `文件超过 ${UPLOAD_MAX_BYTES / 1024 / 1024 / 1024} GB 上限`,
+      contentLength,
+      max: UPLOAD_MAX_BYTES,
+    });
+    res.writeHead(413, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return true;
+  }
+
+  // v6.7.5: octet-stream / binary 走流式写盘（支持到 2GB），跟 bot-upload-link 同一套
+  // 浏览器 fetch(url, { body: file }) / curl -T file --data-binary @file 默认走这条路径
+  if (
+    contentType.startsWith("application/octet-stream") ||
+    contentType.startsWith("application/binary") ||
+    !contentType.includes("multipart/")
+  ) {
+    return handleStreamingUpload(req, res, contentLength);
+  }
+
+  // multipart/form-data 走老路径，但加 100MB 上限（超过让用户改用 octet-stream）
   const boundaryMatch = contentType.match(/boundary=(.+)/i);
   if (!boundaryMatch) {
-    const body = JSON.stringify({ error: "需要 multipart/form-data" });
+    const body = JSON.stringify({ error: "需要 multipart/form-data boundary 参数" });
     res.writeHead(400, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return true;
+  }
+  if (contentLength > MULTIPART_INMEM_MAX) {
+    const body = JSON.stringify({
+      error: `multipart 模式仅支持 <${MULTIPART_INMEM_MAX / 1024 / 1024}MB；2GB 以内大文件请改用 application/octet-stream 头`,
+      hint: "用 fetch(url, { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': file.name } })",
+    });
+    res.writeHead(413, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
     res.end(body);
     return true;
   }
   const boundary = boundaryMatch[1]!.trim().replace(/^["']|["']$/g, "");
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  let inmemTotal = 0;
+  for await (const chunk of req) {
+    inmemTotal += (chunk as Buffer).length;
+    if (inmemTotal > MULTIPART_INMEM_MAX) {
+      // 实际超了 content-length 没声明的极端 case
+      try { req.destroy(); } catch { /* ignore */ }
+      const body = JSON.stringify({ error: "multipart 实际传输超 100MB（无 content-length 预声明）" });
+      if (!res.headersSent) {
+        res.writeHead(413, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+      }
+      return true;
+    }
+    chunks.push(Buffer.from(chunk));
+  }
   const parsed = parseMultipart(Buffer.concat(chunks), boundary);
   if (!parsed) {
-    const body = JSON.stringify({ error: "无法解析上传文件" });
+    const body = JSON.stringify({ error: "无法解析 multipart 内容" });
     res.writeHead(400, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
     res.end(body);
     return true;
@@ -523,6 +576,105 @@ async function handleUpload(req: IncomingMessage, res: ServerResponse): Promise<
   }
   sendJson(res, { ok: true, filename: safeName, size: parsed.data.length, path: destPath });
   return true;
+}
+
+/**
+ * v6.7.5: 流式上传 — 支持到 2GB 单文件，不全 buffer 进内存
+ *
+ * 用法：
+ *   POST /lanhuo/upload  (Content-Type: application/octet-stream)
+ *     Header: X-Filename: my-video.mp4    ← 必填，文件名（path traversal sanitized）
+ *     Body: 二进制流（最大 2GB）
+ *
+ * 流式写盘到 ~/.openclaw/upload/<timestamp>-<filename>，过程中累计 bytes，
+ * 超 2GB 主动 abort + 删除已写部分。
+ */
+async function handleStreamingUpload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  contentLengthHint: number,
+): Promise<boolean> {
+  // 文件名：优先 X-Filename header，否则按时间戳生成
+  const rawFilename = String(req.headers["x-filename"] ?? "").trim();
+  const safeName = rawFilename ? sanitizeUploadFilename(rawFilename) : `upload-${Date.now()}.bin`;
+  const destPath = join(getUploadDir(), `${Date.now()}-${safeName}`);
+
+  let receivedBytes = 0;
+  let aborted = false;
+  const ws = createWriteStream(destPath);
+
+  return new Promise<boolean>((resolve) => {
+    let finished = false;
+    const finish = (ok: boolean) => {
+      if (finished) return;
+      finished = true;
+      resolve(ok);
+    };
+
+    req.on("data", (chunk: Buffer) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > UPLOAD_MAX_BYTES) {
+        aborted = true;
+        try { req.destroy(); } catch { /* ignore */ }
+        try { ws.destroy(); } catch { /* ignore */ }
+        try { rmSync(destPath, { force: true }); } catch { /* ignore */ }
+        if (!res.headersSent) {
+          const body = JSON.stringify({
+            error: `文件超过 ${UPLOAD_MAX_BYTES / 1024 / 1024 / 1024} GB 上限`,
+            receivedBytes,
+            max: UPLOAD_MAX_BYTES,
+          });
+          res.writeHead(413, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+          res.end(body);
+        }
+        finish(true);
+        return;
+      }
+      // 流式写入：背压自然由 createWriteStream 处理（write 返 false 时暂停 req 读）
+      const canContinue = ws.write(chunk);
+      if (!canContinue) {
+        req.pause();
+        ws.once("drain", () => req.resume());
+      }
+    });
+
+    req.on("end", () => {
+      if (aborted) return;
+      ws.end(() => {
+        if (aborted) return;
+        sendJson(res, {
+          ok: true,
+          filename: safeName,
+          size: receivedBytes,
+          path: destPath,
+          contentLengthHint,
+        });
+        finish(true);
+      });
+    });
+
+    req.on("error", (err) => {
+      try { ws.destroy(); } catch { /* ignore */ }
+      try { rmSync(destPath, { force: true }); } catch { /* ignore */ }
+      if (!res.headersSent) {
+        const body = JSON.stringify({ error: `上传中断: ${String(err)}` });
+        res.writeHead(500, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+      }
+      finish(true);
+    });
+
+    ws.on("error", (err) => {
+      try { req.destroy(); } catch { /* ignore */ }
+      try { rmSync(destPath, { force: true }); } catch { /* ignore */ }
+      if (!res.headersSent) {
+        const body = JSON.stringify({ error: `写入文件失败: ${String(err)}` });
+        res.writeHead(500, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+        res.end(body);
+      }
+      finish(true);
+    });
+  });
 }
 
 const UPLOAD_HTML = `<!DOCTYPE html>
@@ -555,11 +707,11 @@ const UPLOAD_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>&#x1F4E4; 大文件上传</h1>
-<p class="subtitle">企微聊天文件上限 100MB，需要传大文件时通过此页面提交</p>
+<p class="subtitle">企微聊天文件上限 100MB，本页支持最大 <b>2GB</b> 单文件流式上传</p>
 <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
   <div class="icon">&#x1F4C1;</div>
   <p>点击选择文件或拖拽文件到此处</p>
-  <p style="font-size:0.75em;color:#555">支持任意格式，无大小限制</p>
+  <p style="font-size:0.75em;color:#555">支持任意格式，单文件 ≤ 2GB（流式上传，不占内存）</p>
 </div>
 <input type="file" id="fileInput" onchange="handleFile(this.files[0])">
 <div id="progress"><p id="progressText" style="font-size:0.85em">上传中...</p><div class="bar"><div class="fill" id="progressFill"></div></div></div>
@@ -578,7 +730,52 @@ var dz=document.getElementById('dropzone');
 ['dragleave','drop'].forEach(function(e){dz.addEventListener(e,function(){dz.classList.remove('dragover');});});
 dz.addEventListener('drop',function(ev){var dt=ev.dataTransfer;if(dt.files.length)handleFile(dt.files[0]);});
 function formatSize(b){if(!b)return'0 B';var u=['B','KB','MB','GB'],i=0,v=b;while(v>=1024&&i<u.length-1){v/=1024;i++;}return v.toFixed(i>0?1:0)+' '+u[i];}
-function handleFile(file){if(!file)return;document.getElementById('result').style.display='none';document.getElementById('error').style.display='none';document.getElementById('progress').style.display='block';document.getElementById('progressText').textContent='正在上传 '+file.name+'...';document.getElementById('progressFill').style.width='20%';var fd=new FormData();fd.append('file',file);var xhr=new XMLHttpRequest();xhr.open('POST','/plugins/enhance/upload',true);xhr.upload.onprogress=function(ev){if(ev.lengthComputable)document.getElementById('progressFill').style.width=(20+60*(ev.loaded/ev.total))+'%';};xhr.onload=function(){document.getElementById('progressFill').style.width='100%';setTimeout(function(){document.getElementById('progress').style.display='none';if(xhr.status===200){try{var d=JSON.parse(xhr.responseText);document.getElementById('resultName').textContent=d.filename;document.getElementById('resultSize').textContent=formatSize(d.size);document.getElementById('resultPath').textContent=d.path;document.getElementById('result').style.display='block';}catch(e){showError('响应解析失败: '+xhr.responseText.slice(0,100));}}else{try{var e=JSON.parse(xhr.responseText);showError(e.error||'HTTP '+xhr.status);}catch(e2){showError('HTTP '+xhr.status+': '+xhr.responseText.slice(0,100));}}},300);};xhr.onerror=function(){document.getElementById('progress').style.display='none';showError('网络错误，请重试');};xhr.send(fd);}
+// v6.7.5: 改用 octet-stream + X-Filename header（流式，不全 buffer 进内存）支持 2GB 单文件
+// 注意：upload URL 用相对路径，nginx 反代 /lanhuo/upload 或 /plugins/enhance/upload 都能命中同一份后端
+function handleFile(file){
+  if(!file)return;
+  if(file.size > 2*1024*1024*1024){ showError('文件超过 2GB 上限（实际 '+formatSize(file.size)+'）'); return; }
+  document.getElementById('result').style.display='none';
+  document.getElementById('error').style.display='none';
+  document.getElementById('progress').style.display='block';
+  document.getElementById('progressText').textContent='上传中 '+file.name+' ('+formatSize(file.size)+')...';
+  document.getElementById('progressFill').style.width='2%';
+  var xhr=new XMLHttpRequest();
+  // 同源相对路径：浏览器自动用当前页面 URL 的 path 作 prefix（/lanhuo/upload 或 /plugins/enhance/upload）
+  xhr.open('POST', location.pathname, true);
+  xhr.setRequestHeader('Content-Type','application/octet-stream');
+  xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+  xhr.upload.onprogress=function(ev){
+    if(ev.lengthComputable){
+      var pct = (ev.loaded/ev.total)*100;
+      document.getElementById('progressFill').style.width=pct+'%';
+      document.getElementById('progressText').textContent='上传中 '+file.name+' '+formatSize(ev.loaded)+' / '+formatSize(ev.total)+' ('+pct.toFixed(1)+'%)';
+    }
+  };
+  xhr.onload=function(){
+    document.getElementById('progressFill').style.width='100%';
+    setTimeout(function(){
+      document.getElementById('progress').style.display='none';
+      if(xhr.status===200){
+        try{
+          var d=JSON.parse(xhr.responseText);
+          document.getElementById('resultName').textContent=d.filename;
+          document.getElementById('resultSize').textContent=formatSize(d.size);
+          document.getElementById('resultPath').textContent=d.path;
+          document.getElementById('result').style.display='block';
+        }catch(e){ showError('响应解析失败: '+xhr.responseText.slice(0,100)); }
+      }else{
+        try{ var e=JSON.parse(xhr.responseText); showError(e.error||'HTTP '+xhr.status); }
+        catch(e2){ showError('HTTP '+xhr.status+': '+xhr.responseText.slice(0,200)); }
+      }
+    },300);
+  };
+  xhr.onerror=function(){
+    document.getElementById('progress').style.display='none';
+    showError('网络错误（可能是反代 client_max_body_size 没开够 2G，或网络中断）');
+  };
+  xhr.send(file);  // ← 直接发 File 对象，浏览器自动 stream，不全 buffer
+}
 function showError(msg){document.getElementById('error').textContent=msg;document.getElementById('error').style.display='block';}
 </script>
 </body>
