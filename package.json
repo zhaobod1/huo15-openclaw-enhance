@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.6",
+  "version": "6.7.7",
   "publishConfig": {
     "access": "public"
   },
-  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.6 \u2014 \u4e0a\u4f20 URL \u7b80\u5316\u5230\u6700\u77ed /upload\uff1a\u7528\u6237\u5e0c\u671b\u300ehttps://keepermac.huo15.com/upload\u300f\u8fd9\u79cd\u77ed URL\u3002cc-media-bridge v2.18.9 \u5df2 native \u652f\u6301 /upload\uff08_lanhuo_strip \u8ba9 /upload \u76f4\u547d\u4e2d\u540c\u4efd UPLOAD_HTML\uff09\uff0cnginx \u4e0d\u7528\u5355\u72ec\u914d location\u3002enhance large-file-bridge.resolveUploadUrl \u9ed8\u8ba4\u63a8 /upload\uff1bcc-bridge-prompt + large-file-bridge prompt \u90fd\u6539 /upload \u77ed URL \u5f15\u5bfc LLM\u3002/lanhuo/upload \u548c /plugins/enhance/upload \u4ecd\u517c\u5bb9\u4f5c alias\u3002\u7ee7\u627f v6.7.5 2GB \u6d41\u5f0f\u4e0a\u4f20\u4e0d OOM + v6.7.4 dashboard \u4e0a\u4f20\u9875\u3002",
+  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.7 \u2014 /upload \u77ed URL \u9000\u56de /lanhuo/upload\uff08OpenClaw control UI SPA \u5360 root path\uff09\uff1av6.7.6 \u6539\u9ed8\u8ba4\u63a8 /upload \u77ed URL\uff0c\u4f46\u5b9e\u6d4b\u53d1\u73b0 OpenClaw gateway \u7684 control UI SPA \u5728 root \u8def\u5f84\u4f18\u5148\u7ea7\u6700\u9ad8\uff0cplugin \u6ce8\u518c\u7684 /upload route \u88ab SPA \u622a\u4e86\uff08\u8fd4 OpenClaw Control HTML \u2192 \u524d\u7aef JS \u8df3 /upload/chat?session=main \u9519\u8bef\u9875\uff09\u3002\u53ea\u6709 /lanhuo/* \u548c /plugins/* \u4e24\u4e2a prefix \u8ba9\u7ed9 plugin\u3002\u4fee\u6cd5\uff1aresolveUploadUrl \u9ed8\u8ba4\u56de\u9000\u5230 /lanhuo/upload\uff1bprompt \u6587\u672c\u660e\u786e\u300e/upload \u4e0d\u53ef\u7528\uff0c\u5fc5\u987b\u7528 /lanhuo/upload\u300f\u3002\u672c\u673a\u9a8c\u8bc1\uff1a/lanhuo/upload \u8fd4 6263B enhance HTML \u2713\uff0c/upload \u8fd4 2821B OpenClaw Control SPA \u2717\u3002\u7ee7\u627f v6.7.5 2GB \u6d41\u5f0f + v6.7.4 dashboard \u4e0a\u4f20\u9875\u3002",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

@@ -979,5 +979,36 @@ export function registerDashboard(api: OpenClawPluginApi, _config?: DashboardCon
     },
   });
 
-  api.logger.info("[enhance] 仪表盘模块已加载（v2.2.0：Todos / 章节 / 定时 / Spawn-task），访问 /plugins/enhance/ 或 /lanhuo/upload");
+  // v6.7.7: /upload 最短 URL route — 直接命中 OpenClaw gateway，不依赖 cc-media-bridge
+  //
+  // 触发：用户实测 https://keepermac.huo15.com/upload 跳到 /upload/chat?session=main —
+  // 因为远端 47.104.78.121:18080 跑的是 OpenClaw gateway control UI（SPA），不是 cc-media-bridge。
+  // OpenClaw control UI 看到 /upload 不在路由表，SPA fallback 返 index.html，前端 JS 把 path
+  // 解读成 chat panel → 跳 /upload/chat?session=main。
+  //
+  // 修法：enhance 在 OpenClaw gateway 直接注册 /upload prefix route，比 control UI SPA 优先级高。
+  // 这样不管 nginx 反代到 OpenClaw gateway 还是 cc-media-bridge 都能命中（双保险）。
+  api.registerHttpRoute({
+    path: "/upload",
+    match: "prefix",
+    auth: "plugin",
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      detectBaseUrlFromRequest(req);
+      const url = parseUrl(req);
+      const pathname = url.pathname;
+
+      // 仅响应 /upload 根路径（GET 返 HTML / POST 接收文件）
+      if (pathname === "/upload" || pathname === "/upload/") {
+        if (req.method === "POST") {
+          return handleUpload(req, res);
+        }
+        sendHtml(res, UPLOAD_HTML);
+        return true;
+      }
+      // 不接管 /upload/anything 子路径（让 OpenClaw control UI SPA 接管，比如 /upload/chat）
+      return false;
+    },
+  });
+
+  api.logger.info("[enhance] 仪表盘模块已加载（v2.2.0：Todos / 章节 / 定时 / Spawn-task），访问 /plugins/enhance/ 或 /upload （短URL，v6.7.7）");
 }

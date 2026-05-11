@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.6 — 上传 URL 简化到最短 /upload：用户希望『keepermac.huo15.com/upload』短 URL。cc-media-bridge v2.18.9 已 native 支持 /upload（_lanhuo_strip 让 /upload 直命中同份上传页），nginx 不用单独 location。large-file-bridge.resolveUploadUrl 默认推 /upload；cc-bridge-prompt + large-file-bridge prompt 都改 /upload 引导 LLM。/lanhuo/upload + /plugins/enhance/upload 仍兼容 alias。继承 v6.7.5 2GB 流式上传不 OOM。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.6
+description: "火一五·克劳德·龙虾增强插件 v6.7.7 — /upload 短 URL 退回 /lanhuo/upload（OpenClaw control UI SPA 占 root path）：v6.7.6 改推 /upload 短 URL 后实测 OpenClaw gateway control UI SPA 在 root 优先级最高,plugin /upload route 被 SPA 截 → 返 OpenClaw Control HTML → 前端跳 /upload/chat?session=main 错误页。只有 /lanhuo/* 和 /plugins/* 让给 plugin。修法: 默认回 /lanhuo/upload; prompt 明确『/upload 不可用,必须用 /lanhuo/upload』。本机验证 /lanhuo/upload 返 6263B enhance HTML ✓。继承 v6.7.5 2GB 流式上传。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.7
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

@@ -2,6 +2,86 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.7 — 2026-05-11（/upload 短 URL 走不通 — 退回 /lanhuo/upload）
+
+### 触发
+
+用户实测 v6.7.6 升级后访问 `https://keepermac.huo15.com/upload`，浏览器**自动跳转**到 `https://keepermac.huo15.com/upload/chat?session=main`（OpenClaw control UI 的 chat panel 路径，错误页）。
+
+### 根因
+
+诊断 `curl -i https://keepermac.huo15.com/upload`：
+
+```
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-length: 2821
+
+<!doctype html>
+<title>OpenClaw Control</title>
+```
+
+返回的是 **OpenClaw control UI SPA 的 index.html**（2821 bytes），不是 enhance 的 UPLOAD_HTML（应该 5688 bytes）。
+
+进一步本机对比 enhance 在 OpenClaw gateway 注册的几个 route：
+
+| URL | size | 谁返回 |
+|---|---|---|
+| `/upload` | 2821 | **OpenClaw control UI SPA**（截了！） |
+| `/upload/foo` | 2821 | 同上 |
+| `/lanhuo/upload` | 6263 | **enhance UPLOAD_HTML** ✓ |
+| `/plugins/enhance/upload` | 6263 | **enhance UPLOAD_HTML** ✓ |
+
+**OpenClaw gateway 的 control UI SPA 在 root path 优先级最高**，plugin 注册的 root-level prefix（如 `/upload`）会被 SPA 接管返 index.html。只有 OpenClaw 让给 plugin 的特定 prefix（`/lanhuo/*`、`/plugins/*`）才能被 plugin route 拦截。
+
+v6.7.6 我在 cc-media-bridge 加的 `/upload` handler 也用不上 — 用户 nginx 反代根 `/` 到 OpenClaw gateway (47.104.78.121:18080)，**不是** cc-media-bridge。
+
+### 改动（v6.7.7 = revert v6.7.6 + prompt 更明确）
+
+1. `large-file-bridge.resolveUploadUrl()` **默认回 `/lanhuo/upload`**（从 `/upload` 退回）
+2. `large-file-bridge buildUploadContext` prompt 加显式禁止：
+   ```
+   /upload 短 URL **不可用**！OpenClaw control UI SPA 占了 root path，
+   访问 /upload 会跳 /upload/chat?session=main（错的）
+   ```
+3. `cc-bridge-prompt` 严格区分段同步更新：
+   ```
+   📊 /lanhuo = 蓝火任务 dashboard
+   📎 /lanhuo/upload = 大文件上传专用页面
+   ❌ /upload 短 URL 不可用——OpenClaw control UI SPA 占了 root
+   ```
+
+`/upload` route 在 `dashboard.ts` 仍注册（无副作用，被 SPA 截了也不报错），万一未来 OpenClaw 让出 root prefix 可立即生效。
+
+### 短 URL 走通的唯一办法（说明）
+
+要让 `https://keepermac.huo15.com/upload` 工作，**唯一可行路径**是把 nginx `/upload` 单独反代到一个不被 OpenClaw control UI 占用的进程：
+
+```nginx
+location ^~ /upload {
+  proxy_pass http://47.104.78.121:18790;   # cc-media-bridge native /upload (v2.18.10)
+  client_max_body_size 2050M;
+  proxy_request_buffering off;
+  # ...
+}
+```
+
+但这要求 cc-media-bridge 在远端 18790 端口暴露公网（默认只 bind 127.0.0.1）。
+
+**红线 #2 不复制龙虾原生 + 不修龙虾核心** → enhance 无法让 OpenClaw control UI 把 `/upload` 让给 plugin。所以现实可用 URL：
+
+| URL | 状态 |
+|---|---|
+| `https://keepermac.huo15.com/lanhuo/upload` | ✅ **推荐** — 当前默认 |
+| `https://keepermac.huo15.com/plugins/enhance/upload` | ✅ 等价备用 |
+| `https://keepermac.huo15.com/upload` | ❌ 不可用 — OpenClaw SPA 截 |
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不动 control UI SPA 优先级
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+
 ## 6.7.6 — 2026-05-11（上传 URL 简化到最短 /upload）
 
 ### 触发
