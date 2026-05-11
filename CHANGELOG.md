@@ -2,6 +2,101 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.15 — 2026-05-11（bot-upload-link stream pipe 原子化 + 完整 upload 日志）
+
+### 触发（huangxuanrong 工单深度追踪）
+
+用户报：「我发给他的时候就显示 100%了，怎么显示 100% 后过了 10 分钟显示 408 了」。
+
+诊断 manifest vs 文件系统：
+
+```
+manifest.json 说:
+  token=ff934f734879 files=[TM-...recording-1.mp4 (174MB)] receivedAt=16:33:20
+
+ls ~/.openclaw/upload/ff934f734879/files/  实际:
+  空目录（76 bytes，只有 . 和 ..）
+```
+
+manifest 记录文件 174MB 已收，但目录是空的。
+
+### 根因（两层）
+
+#### 第一层：nginx 反代超时 408（远端问题，不在插件代码）
+
+浏览器 100% = 浏览器已把 174MB 字节 push 给 nginx，但**没等到 response**。
+nginx → openclaw 还在传 + 等响应。如果 `proxy_read_timeout` 默认 60s 不够（174MB 大文件 + 写盘 + 写 manifest），nginx 给浏览器报 408，
+即使 openclaw 后端已成功完成 + 写完 manifest 也回不到浏览器。
+
+#### 第二层：openclaw 端 createWriteStream 默认 truncate 旧文件（本插件代码缺陷）
+
+```ts
+// v6.7.14 之前的 buggy 代码
+const ws = createWriteStream(filePath);   // 默认 'w' 模式 → truncate 已有文件！
+```
+
+用户看到 408 后**点重新上传**，第二次请求触发：
+1. createWriteStream(filePath) 立刻把**已成功**的 174MB 文件 truncate 到 0
+2. 第二次上传也撞 nginx 超时 → req.on('error') → rmSync(filePath, force)
+3. 结果：文件目录被清空，但 manifest 还在显示老的"174MB receivedAt=16:33"
+
+### v6.7.15 改动
+
+#### 1. `.partial-<ts>-<rand>` 临时文件 + renameSync 原子替换
+
+```ts
+// v6.7.15
+const partialPath = `${filePath}.partial-${Date.now()}-${randomBytes(3).toString("hex")}`;
+const ws = createWriteStream(partialPath);   // 写临时文件
+// ... pipe ...
+renameSync(partialPath, filePath);   // ws.on('finish') 后才原子替换
+```
+
+POSIX `rename(2)` 在同分区内是原子操作。即使重传中途失败、partial 被 rmSync 删掉，
+**真实 filePath 上的旧完整文件不会动**。多次重传 = 多个 partial-<ts>-<rand>，互不影响。
+
+req.on('error') / ws.on('error') / `> maxFileBytes` 三个失败路径里的 `rmSync` 全部改成只删 `partialPath`。
+
+#### 2. 完整 upload 日志（4 档）
+
+```
+[enhance-bot-upload] upload-start  token=<t> file=<f> (partial=<rel-path>)
+[enhance-bot-upload] upload-ok     token=<t> file=<f> bytes=<n> (<formatted>) duration=<ms>ms throughput=<x>MB/s
+[enhance-bot-upload] upload-aborted token=<t> file=<f> reason=too-large received=<n> max=<n>
+[enhance-bot-upload] upload-failed  token=<t> file=<f> reason=req-error|write-error received=<n> error=<msg>
+```
+
+之前 upload 路径只有错误才打 warn，成功路径**沉默** → 事后无法追查"哪些请求成功 / 何时完成"。
+
+### 验证
+
+- `npx tsc --noEmit` 通过
+- 临时文件名带时间戳 + 3 字节随机十六进制（如 `recording.mp4.partial-1778492345678-a3f8e1`），并发上传不冲突
+- 同分区内 renameSync 原子性 = POSIX rename(2) 保证（macOS APFS / Linux ext4 都支持）
+
+### 用户还要配 nginx（远程服务器，本插件改不动）
+
+`/plugins/enhance-upload/` location 至少要加：
+
+```nginx
+location /plugins/enhance-upload/ {
+    client_max_body_size 2048m;          # 允许 2GB body（默认 1MB 会 413）
+    proxy_request_buffering off;          # 流式透传，不本地缓冲
+    proxy_read_timeout 1800s;             # 30 分钟读超时
+    proxy_send_timeout 1800s;
+    proxy_pass http://127.0.0.1:18790;
+}
+```
+
+少了 `proxy_request_buffering off` → nginx 会先把整个 body 收到磁盘再 POST 给 openclaw，
+浏览器 "100% 后等很久" 的根因。
+
+### 红线遵守
+
+- ✅ 零 child_process（renameSync 是 node:fs 同步原语）
+- ✅ 不改 OpenClaw 核心
+- ✅ 单文件 buggy 模块的非侵入式修复（其它模块不动）
+
 ## 6.7.14 — 2026-05-11（config-doctor 加 tools.profile 闸门检测）
 
 ### 触发

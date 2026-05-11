@@ -34,6 +34,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -461,10 +462,21 @@ export function registerBotUploadLink(
           return true;
         }
 
+        // v6.7.15: stream pipe req → .partial 临时文件 → 完成后 rename 原子替换
+        // Why: 上传完成但 nginx 反代超时给浏览器 408 时，用户重新上传会让
+        // createWriteStream(filePath) 默认 truncate 已成功的文件 → 然后 408 触发 rmSync
+        // → 留空目录但 manifest 还说"174MB 已收"（5/11 huangxuanrong 实测事故）。
+        // 临时文件 + rename = 即使重传中途失败，旧的完整文件依然在。
+        const partialPath = `${filePath}.partial-${Date.now()}-${randomBytes(3).toString("hex")}`;
+        const uploadStartedAt = Date.now();
+        api.logger.info(
+          `[enhance-bot-upload] upload-start token=${token} file=${fileName} (partial=${partialPath.slice(uploadRoot.length)})`,
+        );
+
         // Stream pipe req → file，过程中累计 bytes，超 maxFileBytes 主动 abort
         let receivedBytes = 0;
         let aborted = false;
-        const ws = createWriteStream(filePath);
+        const ws = createWriteStream(partialPath);
 
         await new Promise<void>((done) => {
           let finished = false;
@@ -490,10 +502,13 @@ export function registerBotUploadLink(
                 /* ignore */
               }
               try {
-                rmSync(filePath, { force: true });
+                rmSync(partialPath, { force: true });
               } catch {
                 /* ignore */
               }
+              api.logger.warn(
+                `[enhance-bot-upload] upload-aborted token=${token} file=${fileName} reason=too-large received=${receivedBytes} max=${maxFileBytes}`,
+              );
               if (!res.headersSent) {
                 res.writeHead(413);
                 res.end(
@@ -509,11 +524,15 @@ export function registerBotUploadLink(
             } catch {
               /* ignore */
             }
+            // v6.7.15: 只删 .partial 临时文件，原 filePath 上的旧完整文件不动
             try {
-              rmSync(filePath, { force: true });
+              rmSync(partialPath, { force: true });
             } catch {
               /* ignore */
             }
+            api.logger.warn(
+              `[enhance-bot-upload] upload-failed token=${token} file=${fileName} reason=req-error received=${receivedBytes} error=${err.message}`,
+            );
             if (!aborted && !res.headersSent) {
               res.writeHead(500);
               res.end(`Upload error: ${err.message}`);
@@ -521,8 +540,13 @@ export function registerBotUploadLink(
             finish();
           });
           ws.on("error", (err: Error) => {
+            try {
+              rmSync(partialPath, { force: true });
+            } catch {
+              /* ignore */
+            }
             api.logger.warn(
-              `[enhance-bot-upload] write stream error ${filePath}: ${err.message}`,
+              `[enhance-bot-upload] upload-failed token=${token} file=${fileName} reason=write-error received=${receivedBytes} error=${err.message}`,
             );
             if (!aborted && !res.headersSent) {
               res.writeHead(500);
@@ -536,7 +560,28 @@ export function registerBotUploadLink(
 
         if (aborted) return true;
 
-        // 落盘成功 → 更新 manifest
+        // v6.7.15: 落盘成功 → 原子 rename .partial → 真实 filePath
+        // 这是核心：先写 partial，最后才"亮"出来，绝不破坏已有的成功文件
+        // 同分区内 rename 是原子操作（POSIX rename(2)）
+        try {
+          renameSync(partialPath, filePath);
+        } catch (err) {
+          try {
+            rmSync(partialPath, { force: true });
+          } catch {
+            /* ignore */
+          }
+          api.logger.warn(
+            `[enhance-bot-upload] rename failed: ${partialPath} → ${filePath}: ${(err as Error).message}`,
+          );
+          if (!res.headersSent) {
+            res.writeHead(500);
+            res.end(`Rename failed: ${(err as Error).message}`);
+          }
+          return true;
+        }
+
+        // 更新 manifest
         const fresh = safeReadManifest(manifestPath);
         const idx = fresh.entries.findIndex((e) => e.token === token);
         if (idx >= 0) {
@@ -557,6 +602,13 @@ export function registerBotUploadLink(
             );
           }
         }
+
+        const durationMs = Date.now() - uploadStartedAt;
+        const throughputMBs =
+          durationMs > 0 ? (receivedBytes / 1024 / 1024 / (durationMs / 1000)).toFixed(2) : "?";
+        api.logger.info(
+          `[enhance-bot-upload] upload-ok token=${token} file=${fileName} bytes=${receivedBytes} (${formatSize(receivedBytes)}) duration=${durationMs}ms throughput=${throughputMBs}MB/s`,
+        );
 
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(
