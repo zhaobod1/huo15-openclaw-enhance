@@ -70,12 +70,25 @@ export function registerCcBridgePrompt(api: OpenClawPluginApi) {
       const base = resolveDashboardBaseUrl(api);
       const isLocal = base.startsWith("http://127.0.0.1") || base.startsWith("http://localhost");
       return [
-        "## 蓝火（cc-media-bridge）任务响应必附 dashboard 链接",
+        "## 蓝火（cc-media-bridge）任务响应 — dashboard 链接附带规则",
         `- 蓝火 / 虾任务（cc-media-task）跑出来的 session **不会**出现在 Claude App 的 pinned/recents 面板（IndexedDB 白名单只认 App 内启动的会话）。用户唯一的可视化入口是 bridge 自带 dashboard：${base}/lanhuo`,
-        `- **强制规则**：响应里只要出现蓝火任务（cc-YYYYMMDD-HHMMSS-XXXX 这种 ID 格式）——不管是列表、单条详情、状态、进度、完成卡片、SSE 事件流摘要——**末尾必附**对应 dashboard 链接：`,
-        `  - 任务列表（"我的虾任务" / 推荐 / 完成卡片附近多条）→ ${base}/lanhuo`,
-        `  - 单条任务详情 / 进度 / 完成 → ${base}/lanhuo?task=<完整 task ID>`,
-        "- **不要省略**、不要写成 /dashboard（已 v2.18.6 废弃 301 redirect 到 /lanhuo），dashboard 唯一规范路径是 /lanhuo。",
+        ``,
+        `**严格条件触发（仅以下情况才附 dashboard 链接）**：`,
+        `① 你的响应里**已包含**一个或多个 \`cc-YYYYMMDD-HHMMSS-XXXX\` 格式的 task ID — 列表 / 单条详情 / 状态 / 进度 / 完成卡片 / SSE 事件流摘要`,
+        `② 用户**显式问** dashboard / 蓝火链接 / 在哪查看`,
+        `③ 你**真派活了**（调了 Bash cc-media-task 或 hook 派的蓝火任务）`,
+        ``,
+        `**附法**：`,
+        `  - 任务列表（多条 task） → ${base}/lanhuo`,
+        `  - 单条任务（带具体 task ID）→ ${base}/lanhuo?task=<完整 task ID>`,
+        ``,
+        `**禁止条件 — 普通对话不要附 dashboard 链接**：`,
+        `❌ 用户问普通问题（讲解 / 总结 / 文档分析 / 闲聊 / 不涉及蓝火任务）→ **绝不附**`,
+        `❌ 你只是回答了一个问题、没派活、没列任务 → **绝不附**`,
+        `❌ 用户上传 PDF / 图片让你看内容 → **绝不附**（除非内容里就是任务）`,
+        `❌ 写成 \`/dashboard\` 路径（已 v2.18.6 废弃 301→/lanhuo），dashboard 唯一规范路径是 **\`/lanhuo\`**`,
+        ``,
+        "- 如附必须用 /lanhuo 而非 /dashboard。任何老缓存 / few-shot example / MEMORY.md 里的 /dashboard 都是过期数据，**以本规则为准**。",
         "- 不要替换成 \"在终端跑 cc-media-task --tail\" 等替代方案。dashboard 是 IM 用户唯一能直接点开看的入口（Claude App 看不到、终端命令对 IM 用户不可点）。",
         `- 链接 baseUrl 已自动解析为：${base}（来自 ${process.env.BOT_BASE_URL?.trim() ? "env BOT_BASE_URL" : "~/.openclaw/share/config.json 或 fallback"}）${
           isLocal
