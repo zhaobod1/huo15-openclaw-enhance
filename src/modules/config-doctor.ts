@@ -570,6 +570,37 @@ export function checkOpenClawConfig(
   // 全小写带连字符 → 第一次 LLM 调用就 400 → 整条 fallback 链都因同名 bug 全 400
   results.push(...checkModelIdRegistration(cfg));
 
+  // v6.7.14: 检测 cfg.tools.profile 是显式白名单 → @huo15/* 插件 tool 全被 deny
+  // 实测根因（2026-05-11 huangxuanrong 工单）：
+  //   cfg.tools.profile = "coding" → CORE_TOOL_PROFILES.coding 是 allow-list，
+  //   只放行 21 个 core tool（read/write/edit/exec/memory_*/sessions_*/web_*/image*/video_/music_），
+  //   plugin tools（enhance_* / wecom_mcp / send_dingtalk_file 等 ~50 个）全被 deny。
+  //   trajectory 实测 enhance plugin 注册 36 toolNames 全部，但 context.compiled.tools 0 个 enhance_*
+  //   user 撞"当前会话没有 enhance_upload_check 这个工具"，根因不在插件代码而在 profile 闸门。
+  // OpenClaw 源码：tool-policy-shared-Ce8ZI4la.js:372 CORE_TOOL_PROFILES = {
+  //   coding: { allow: [...core 21..., "bundle-mcp"] }, full: { allow: ["*"] }, ...
+  // }
+  // 修法两种：(1) profile 改 "full"（推荐，最简）；(2) 显式 allowlist 把插件 tool 全列上（繁琐）
+  const toolsProfile = cfg?.tools?.profile;
+  if (typeof toolsProfile === "string" && toolsProfile.trim() && toolsProfile !== "full") {
+    results.push({
+      ok: false,
+      level: "warn",
+      category: "tools-profile-blocks-plugin-tools",
+      message:
+        `cfg.tools.profile="${toolsProfile}" 是显式白名单，只放行 OpenClaw core tools 和 bundle-mcp，` +
+        `所有 @huo15/* 插件 tool（含 enhance_upload_check / enhance_share_file / enhance_memory_store / ` +
+        `wecom_mcp / send_dingtalk_file 等 ~50 个）会被 OpenClaw profile 闸门 deny。` +
+        `LLM 在企微/钉钉/微信渠道看不到任何插件工具 → 用户问"传完了"、"发个文件"等场景无法响应。` +
+        `（trace.metadata.plugins.entries[].toolNames 注册成功不等于 LLM 可见——profile 在后端再过一道闸）`,
+      fixCommand:
+        `# 推荐方案：把 profile 改成 "full"（允许所有 tool 含插件 tool）\n` +
+        `python3 -c "import json,pathlib;p=pathlib.Path.home()/'.openclaw'/'openclaw.json';c=json.loads(p.read_text());c.setdefault('tools',{})['profile']='full';p.write_text(json.dumps(c,indent=2,ensure_ascii=False));print('OK: tools.profile=full')"\n` +
+        `# 改完重启 openclaw 生效（gateway 重载 cfg）\n` +
+        `# 或：如果坚持 "${toolsProfile}" profile，需要在 cfg.tools.allow 显式加每个插件 tool 名`,
+    });
+  }
+
   // v5.7.4: 扫所有已装插件的 bare pluginApi（违反 ">=X.Y.Z" 规则的会被 openclaw 拒绝）
   results.push(...scanInstalledPluginsForBarePluginApi(openclawDir));
   // v5.7.21: 扫已装插件的 async register（loader 拒收，整个插件 silent no-op）

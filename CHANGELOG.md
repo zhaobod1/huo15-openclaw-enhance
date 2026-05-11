@@ -2,6 +2,104 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.14 — 2026-05-11（config-doctor 加 tools.profile 闸门检测）
+
+### 触发
+
+用户 huangxuanrong 工单跟进 v6.7.13 测试反馈：
+
+```
+黄宣榕 5-11 15:31
+我已经上传好了
+
+贾维斯 5-11 15:31
+我查了一下，当前会话没有 enhance_upload_check 这个工具。
+不过我可以帮你换个方式——直接去上传目录找文件...
+```
+
+v6.7.13 死循环已修，但 LLM 报『**没有 enhance_upload_check 这个工具**』。诊断后发现根因**不在插件代码**。
+
+### 根因（诊断链全过程）
+
+直接对照 `trace.metadata` 与 `context.compiled.tools`：
+
+```
+trace.metadata.plugins.entries[enhance]:
+  status=loaded version=2.6.0
+  toolNames=[36 个：enhance_chapter_list, enhance_config_doctor, ...,
+              enhance_upload_check, enhance_upload_link, enhance_upload_revoke]
+  ✓ 全部 36 个含 3 个 upload tool 都成功注册
+
+context.compiled.tools (实际给 LLM 的工具 schema):
+  21 个全是 OpenClaw core tool（edit/exec/read/write/memory_*/sessions_*/web_*/image*/video_/music_）
+  ✗ 0 个 enhance_* tool
+  ✗ 0 个 wecom_mcp / send_dingtalk_file（@huo15/* 插件 tool）
+```
+
+memory-core 的 `memory_get`、`memory_search` 出现了 → 因为它们**碰巧**是 OpenClaw core tool definition 里 `profiles: ["coding"]` 之一。
+
+最终定位 OpenClaw 源码 `tool-policy-shared-Ce8ZI4la.js:372`：
+
+```js
+const CORE_TOOL_PROFILES = {
+  minimal:   { allow: listCoreToolIdsForProfile("minimal") },
+  coding:    { allow: [...listCoreToolIdsForProfile("coding"), "bundle-mcp"] },   // 显式白名单！
+  messaging: { allow: [...listCoreToolIdsForProfile("messaging"), "bundle-mcp"] },
+  full:      { allow: ["*"] }
+};
+```
+
+`coding` profile 是**显式 allow-list**——只放行 CORE_TOOL_DEFINITIONS 里 `profiles` 含 `"coding"` 的 21 个 tool + 1 个 `bundle-mcp`。其他全 deny，包括所有 `@huo15/*` 插件 tool 和 wecom_mcp、send_dingtalk_file。
+
+用户配置 `~/.openclaw/openclaw.json`:
+```json
+"tools": { "profile": "coding" }   // ← 这个 profile 把所有插件 tool 都 deny 了
+```
+
+→ 插件注册成功（toolNames=36）但 LLM 看不到（context.compiled.tools 0 个 enhance_*）。
+
+### v6.7.14 改动
+
+#### 1. config-doctor 加 `tools-profile-blocks-plugin-tools` 检测
+
+`src/modules/config-doctor.ts` 启动期扫 `cfg.tools.profile`：
+
+```ts
+const toolsProfile = cfg?.tools?.profile;
+if (typeof toolsProfile === "string" && toolsProfile.trim() && toolsProfile !== "full") {
+  results.push({
+    level: "warn",
+    category: "tools-profile-blocks-plugin-tools",
+    message: `cfg.tools.profile="${toolsProfile}" 是显式白名单，所有 @huo15/* 插件 tool 会被 deny`,
+    fixCommand: `python3 -c "...cfg['tools']['profile']='full'..."`,
+  });
+}
+```
+
+非 `"full"` 就 warn + 给 1 行 python3 fix command（沿用 config-doctor 一贯的"诊断不修复"红线 — 不动用户配置文件）。
+
+#### 2. 立刻可用的 1 行修法
+
+用户当前可手动跑这条：
+
+```bash
+python3 -c "import json,pathlib;p=pathlib.Path.home()/'.openclaw'/'openclaw.json';c=json.loads(p.read_text());c.setdefault('tools',{})['profile']='full';p.write_text(json.dumps(c,indent=2,ensure_ascii=False));print('OK: tools.profile=full')"
+```
+
+然后重启 openclaw gateway，所有 36 个 enhance_* tool + wecom_mcp + send_dingtalk_file 立刻可见。
+
+### 红线遵守
+
+- ✅ 完全只读 openclaw.json（红线 §6.4 "诊断不修复"）
+- ✅ 零 child_process（红线 §6.2）
+- ✅ 不改 OpenClaw 核心（红线 §11.4 #1）
+- ✅ 不复制龙虾原生功能（红线 §11.4 #2）—— `tool-policy-shared` 是龙虾的事，这里只诊断
+
+### 后续 candidate
+
+- `enhance_hook_doctor` 也加同样的 profile 检测（如果用户先调 hook-doctor 而不是 config-doctor）
+- 可考虑 prompt supplement：检测到 `coding` profile 且会话是企微/钉钉/微信 → 主动加一段 "当前 profile 闸门已拦截插件 tool"
+
 ## 6.7.13 — 2026-05-11（large-file-bridge 兜底死循环修复 + 用户上传后流程引导）
 
 ### 触发
