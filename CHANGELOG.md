@@ -2,6 +2,23 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.6.5 — 2026-05-11（doc sync — SKILL.md / package.json description 跟版本号对齐）
+
+### 触发
+
+发现 SKILL.md description 字段还停留在 v6.6.2（但 `version: 6.6.4`）——release.sh preflight 只校验 version 数字相等，没校验 description 文本和 version 的语义一致性。
+
+ClawHub manifest 用 SKILL.md description 字段做插件介绍——用户在 ClawHub 浏览插件看到的还是『v6.6.2 runId 去重 + 静音工具』，不知道 v6.6.4 的关键 hotfix（强切 long-ctx 跨 provider 撞 400）。
+
+### 改动
+
+仅 doc sync，无代码改动：
+
+- `SKILL.md` description 同步到 v6.6.5（含 v6.6.3/4/5 hotfix 闭环）
+- `package.json` description 同步到 v6.6.5
+
+ClawHub manifest 重新发布后，新用户看到的描述跟实际能力对齐。
+
 ## 6.6.4 — 2026-05-11（修跨 provider 强切撞 400 mismatch — long-ctx 选型必带 providerOverride）
 
 ### 触发

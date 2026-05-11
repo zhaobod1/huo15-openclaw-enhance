@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.6.2 — 上下文守护『runId 去重 + 静音工具』：(1) P3-13 修 retry 重算 bug — seenRunIds Set 内存去重（bounded 20 FIFO），龙虾 model-fallback retry 时 llm_output 同 runId 二次 emit 跳过累加；(2) P2-10 enhance_ctx_silence({minutes 1-60, reason?}) 工具，期间所有 banner 跳过，过期自动解除。继承 v6.6.0 cost-aware + 多模态精算 + channel 差异化 + v6.5.7 subagent + 预测式 + v6.5.6 sqlite + v6.5.5 真实切换。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.6.4
+description: "火一五·克劳德·龙虾增强插件 v6.6.5 — 上下文守护 hotfix 闭环（v6.6.3/4/5 修跨 provider 强切撞 400 + dashboard 链接误注 + doc sync）：(1) v6.6.4 long-ctx 强切必带 providerOverride：MODEL_TO_PROVIDER_MAP 反查 + readInstalledProviders 扫 agents.defaults.models 拿用户实际注册 provider，filter 时 intersect 三重过滤（KNOWN_MODEL_CTX_MAX × providerKnown × providerInstalled），before_model_resolve 同时返 modelOverride+providerOverride 让 OpenClaw 切到正确 client；(2) v6.6.3 cc-bridge-prompt 普通对话不附 dashboard 链接（避免每条消息都被注 /lanhuo URL）；(3) v6.6.2 runId 去重 + enhance_ctx_silence。继承 v6.6.0 cost-aware + 多模态精算 + channel 差异化 + v6.5.7 subagent + 预测式。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.6.5
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---

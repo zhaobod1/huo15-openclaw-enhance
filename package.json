@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.6.4",
+  "version": "6.6.5",
   "publishConfig": {
     "access": "public"
   },
-  "description": "火一五·克劳德·龙虾增强插件 v6.6.2 — 上下文守护『runId 去重 + 静音工具』bug fix + UX：(1) P3-13 修 retry 重算 bug — seenRunIds Set 内存去重（bounded 20 FIFO），龙虾 model-fallback retry 时 llm_output 同 runId 二次 emit 跳过累加；(2) P2-10 enhance_ctx_silence({minutes, reason?}) 工具 — 1-60 分钟静音，期间所有 banner（revert/threshold/prediction/budget）跳过，过期自动解除，重启自动解除。enhance_ctx_status 加 mutedUntilMs / seenRunIdsCount 字段。继承 v6.6.0 cost-aware + 多模态精算 + channel 差异化 + v6.5.7 subagent 累加 + 预测式提醒。",
+  "description": "火一五·克劳德·龙虾增强插件 v6.6.5 — 上下文守护 hotfix 闭环 (v6.6.3/4/5)：(1) v6.6.4 修跨 provider 强切撞 400 mismatch — 新增 MODEL_TO_PROVIDER_MAP + readInstalledProviders 扫 agents.defaults.models 拿真实 provider，filter 三重过滤（KNOWN × providerKnown × providerInstalled），before_model_resolve 同时返 modelOverride+providerOverride 让 OpenClaw 切到正确 client，修用户实测『麻将观战可行性报告』→ Something went wrong 事故；(2) v6.6.3 cc-bridge-prompt 严格触发，普通对话不附 dashboard 链接 + 杜绝 /dashboard 残留；(3) v6.6.5 SKILL.md / package.json description 跟版本号同步（之前 SKILL.md 描述还说 v6.6.2 但 version 6.6.4）。继承 v6.6.2 runId 去重 + 静音工具 + v6.6.0 cost-aware + 多模态精算 + channel 差异化。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
