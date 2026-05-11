@@ -85,9 +85,9 @@ export function registerLargeFileBridge(
     const sessionId = pickSessionId(ctx);
     const key = `${agentId}::${sessionId}`;
 
-    // 直接从 ctx 获取 channel，不依赖缓存
-    const channel = ((ctx as any)?.channel ?? (ctx as any)?.originatingChannel ?? "").toLowerCase().trim();
-    if (channel !== "wecom") return;
+    // agentId 以 "wecom-" 开头 = 企微渠道
+    // ctx 中 channel/originatingChannel 字段在 before_prompt_build 时可能为空
+    if (!agentId.startsWith("wecom-")) return;
 
     const promptText = (() => {
       try {
