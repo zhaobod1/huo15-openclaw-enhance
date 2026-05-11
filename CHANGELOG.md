@@ -2,6 +2,106 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.11 — 2026-05-11（large-file-bridge 双重 prompt-following 加固 — 针对 MiniMax M2.7 等弱模型）
+
+### 触发
+
+用户报错持续，让我"查本地 agent"。grep `~/.openclaw/agents/` 找到根因：
+
+**agent**: `wecom-default-dm-huangxuanrong`
+**model**: `minimax/MiniMax-M2.7`
+**session jsonl**: `6b98e16a-...jsonl`
+
+读 jsonl line 6 — **enhance prompt 已完整注入**（含『首选调 enhance_upload_link → 返 /plugins/enhance-upload/<token>』+ 备用 URL 等所有引导）。
+
+但 LLM 后续 messages 显示：
+
+| LLM 动作 | 实际做了什么 |
+|---|---|
+| 调 `enhance_upload_link`? | ❌ 没有 |
+| 给用户 `https://...upload` URL? | ❌ 没有 |
+| 改去 `exec grep wecom 源码` | ✅ 做了 3-4 次 |
+| 自己发现 `DEFAULT_WECOM_MEDIA_MAX_BYTES = 80MB` | ✅ |
+| 反问用户『请把完整错误消息截图发给我』 | ✅ |
+
+**LLM 完全无视 enhance 的硬指令，反向操作**：
+- 指令『不要先问诊断问题』 → 反问"请把完整错误消息截图发给我"
+- 指令『首选调 enhance_upload_link』 → 不调，自己 grep 源码
+- 指令『把 URL 发给用户』 → 没给
+
+这是 **MiniMax M2.7 prompt-following 能力差** + **prompt 措辞不够刺激** 的双重失败。
+
+### 第三层防御也失效
+
+`before_agent_reply` hook 本应兜底强制 appendText 上传 URL：
+
+```ts
+// v6.7.10 兜底逻辑
+if (
+  body.includes("upload") ||      // ← 太宽! LLM 叙述里说"upload 相关问题"也命中
+  body.includes("/plugins/enhance") ||
+  body.includes("/lanhuo/upload") ||
+  body.includes("上传链接") ||      // ← 太宽! LLM 说"插件有上传链接功能"也命中
+  body.includes("上传页面")
+) return;                          // ← 误判已给链接,不接管
+```
+
+LLM 最终回复里**叙述性**提到："克劳德增强包里有一个 `large-file-bridge` 模块专门处理这个场景" + "请你确认 large-file-bridge 模块是否已经在运行" + "上传链接相关问题" — 含 `large-file-bridge` 等字符串触发 `body.includes("upload")` → 误判 → 兜底放行。
+
+### v6.7.11 改动
+
+#### 1. prompt 改命令式硬规则（针对弱模型）
+
+```
+【大文件上传 — 强制规则，禁止违反】
+
+# 你的回复必须是下面这一段，一字不改：
+
+文件超过 100MB 无法在企微直接传输，请通过下面这个链接上传（支持 2GB 以内，浏览器拖拽即可）：
+
+${url}
+
+上传完成后告诉我，我来处理。
+
+# 严禁的行为（违反 = 用户卡死）
+
+❌ 不要 exec/grep wecom / openclaw 源码查"limit / maxBytes / MAX_DOCUMENT_BYTES"等
+❌ 不要反问用户"请把完整错误消息截图发给我" / "你是哪个场景" / "需要更多信息才能定位"
+❌ 不要建议用户 `openclaw config set` 或修改任何配置
+❌ 不要叙述性提到 "large-file-bridge 模块" / "增强包 hook" / "插件内置限制"
+❌ 不要给 `/plugins/enhance/upload` 这种**裸路径**（缺 https:// 前缀），用户点不开
+```
+
+把 LLM 容易"反向操作"的具体路径**逐条列字面值禁止**（参考红线 #11 / Allen 流的"具体反例字面写进 prompt"原则）。
+
+#### 2. before_agent_reply 兜底关键词收紧
+
+```ts
+// v6.7.11 新逻辑
+const hasRealUrl =
+  body.includes(url) ||                                          // 完整匹配当前 url
+  /https?:\/\/[^\s)]+\/plugins\/enhance(-upload)?\//.test(body) || // 任何 enhance 上传 URL
+  body.includes("enhance_upload_link") ||                        // 调过工具会留下 marker
+  body.includes("enhance_upload_check");
+if (hasRealUrl) return;
+```
+
+只在含**真实可点 URL**（http(s):// 前缀 + /plugins/enhance.../ 路径）或工具名 marker 时跳过。叙述性提及不再误判 → 兜底真正生效 → 强制 appendText 完整上传链接。
+
+### 红线自查
+
+- ✅ 不修龙虾核心
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ 把 LLM 反向操作的具体路径字面写进 prompt（红线 #11 anti-pattern in prompt）
+
+### 通用沉淀
+
+**LLM 给定相同 prompt 会因 model 不同表现差异巨大**。强模型（Claude / GPT）能 follow 一句"必须给链接"硬指令；弱模型（MiniMax M2.7 / DeepSeek-V4-Flash）需要：
+1. 命令式硬指令（"必须 / 禁止"，不是描述性）
+2. 把具体反例（"不要 exec grep 源码 / 不要反问"）字面写进 prompt
+3. 兜底 hook 关键词匹配要"内容驱动"（含真实 URL）而非"语义驱动"（含 "upload" 字面）
+
 ## 6.7.10 — 2026-05-11（large-file-bridge 触发放宽 — 不再卡 agentId.startsWith("wecom-")）
 
 ### 触发

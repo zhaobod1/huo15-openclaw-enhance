@@ -64,23 +64,34 @@ function pickSessionId(ctx: { sessionKey?: string; sessionId?: string } | undefi
 }
 
 function buildUploadContext(url: string): string {
-  return `【大文件上传指引 — 必读！】用户刚才发送的消息是"视频/文件超过100M，无法下载"。这是企微官方限制。
+  return `【大文件上传 — 强制规则，禁止违反】
 
-**首选：调 \`enhance_upload_link\` 工具拿 token 化 URL 给用户**（token 隔离，AI 能追踪上传了什么文件）：
-1. 你调 enhance_upload_link({label: "<本次任务简述>"}) → 返回 \`${url.replace("/plugins/enhance/upload", "/plugins/enhance-upload/<token>")}\` 这种带 token 的 URL
-2. 把 URL 发给用户："请通过此链接上传：<url>，传完告诉我"
-3. 用户上传完说"传完了" → 你调 enhance_upload_check({token: "<token>"}) → 拉清单
-4. 拿到文件路径 → Read 工具读文件分析
+用户上一条消息是「视频/文件超过100M，无法下载」。这是企微官方对 bot 接收文件的硬上限拦截，**你不需要查任何源码、不需要问任何诊断问题、不需要解释技术原因**。
 
-**备用（仅在 enhance_upload_link 不可用时）**：直接给共享 URL ${url}（无 token，AI 不知道是谁传了什么，仅适合一次性快速上传）：
-"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：${url}
-（流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
+# 你的回复必须是下面这一段，一字不改：
 
-⚠️ 严格区分（v6.7.8+）：
-- 共享上传 = ${url}（无 token，备用）
-- token 化上传 = enhance_upload_link 工具生成，URL 含 \`/plugins/enhance-upload/<12-hex-token>\`（首选）
-- /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
-- /upload 和 /lanhuo/upload **均不可用**！v6.7.8 已删除（OpenClaw SPA 截 root /upload；/lanhuo/upload 跟 cc-media-bridge namespace 混淆）
+文件超过 100MB 无法在企微直接传输，请通过下面这个链接上传（支持 2GB 以内，浏览器拖拽即可）：
+
+${url}
+
+上传完成后告诉我，我来处理。
+
+# 严禁的行为（违反 = 用户卡死）
+
+❌ 不要 exec/grep wecom / openclaw 源码查"limit / maxBytes / MAX_DOCUMENT_BYTES"等 — 已知是企微平台 100MB 上限，**结论已确定**
+❌ 不要反问用户"请把完整错误消息截图发给我" / "你是哪个场景" / "需要更多信息才能定位"
+❌ 不要建议用户 \`openclaw config set\` 或修改任何配置 — 用户**就是想传文件给你**，不是改配置
+❌ 不要叙述性提到 "large-file-bridge 模块" / "增强包 hook" / "插件内置限制" — 用户不关心实现
+❌ 不要给 \`/plugins/enhance/upload\` 这种**裸路径**（缺 https:// 前缀），用户点不开
+
+# 高级用法（可选，AI 想精确追踪文件归属时用）
+
+若需要 token 化隔离（每个上传链接独立目录，AI 通过 enhance_upload_check 工具能精确查"这个 token 收到什么"）：
+1. 调 enhance_upload_link({label: "<场景简述>"}) → 工具返 \`/plugins/enhance-upload/<12-hex-token>\` 这种带 token 的 URL
+2. 把这个 token URL 发给用户（**仍是完整 https://... URL**，不是裸 path）
+3. 用户传完说"传完了" → 调 enhance_upload_check({token}) → 拉清单 → Read 文件
+
+不需要精确追踪时，直接给 ${url} 即可（最简单，用户最快）。
 
 (由 enhance large-file-bridge 触发；关闭: config.largeFileBridge.enabled = false)`;
 }
@@ -201,14 +212,17 @@ export function registerLargeFileBridge(
       if (!body) return;
 
       const url = resolveUploadUrl();
-      // 已含上传相关关键词 → LLM 已经按引导给链接，不重复
-      if (
-        body.includes("upload") ||
-        body.includes("/plugins/enhance") ||
-        body.includes("/lanhuo/upload") ||
-        body.includes("上传链接") ||
-        body.includes("上传页面")
-      ) {
+      // v6.7.11: 收紧"已含上传链接"判断 — 只在含**真实可点 URL**时跳过。
+      // 之前用 body.includes("upload") 太宽泛 — LLM 叙述性提到 "large-file-bridge"
+      // 或 "上传相关问题" 也会误判为"已给链接"。MiniMax M2.7 等弱模型反向操作
+      // (问诊断 + 自己 grep source code) 时回复里有 "upload" 字符串但**没真给 URL**，
+      // 兜底 hook 不接管 = 用户什么都拿不到。
+      const hasRealUrl =
+        body.includes(url) ||                                       // 完整匹配本次 url
+        /https?:\/\/[^\s)]+\/plugins\/enhance(-upload)?\//.test(body) ||  // 任何 enhance 上传 URL
+        body.includes("enhance_upload_link") ||                     // LLM 调过工具会留下 marker
+        body.includes("enhance_upload_check");
+      if (hasRealUrl) {
         return;
       }
 
