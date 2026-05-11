@@ -2,6 +2,70 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.6 — 2026-05-11（上传 URL 简化到最短 /upload）
+
+### 触发
+
+用户原话：『 [https://keepermac.huo15.com/upload](https://keepermac.huo15.com/lanhuo/upload) 能不能换成这个链接』
+
+之前 v6.7.4 改用 `/lanhuo/upload` 是因为想跟 dashboard `/lanhuo` 心智模型对齐。但用户偏向**最短易记 URL**：
+
+| URL | 长度 | 易记度 |
+|---|---|---|
+| `/upload` | 7 字符 | ⭐⭐⭐⭐⭐ |
+| `/lanhuo/upload` | 14 字符 | ⭐⭐⭐ |
+| `/plugins/enhance/upload` | 23 字符 | ⭐ |
+
+### 改动
+
+cc-media-bridge v2.18.9 的 `_lanhuo_strip(path)` 函数：
+```python
+if path.startswith("/lanhuo/"):
+    return path[len("/lanhuo"):]
+return path     # ← 直接 /upload 不映射，原样 return
+```
+
+所以 `path == "/upload"` 已经命中 cc-media-bridge 的 upload handler（**zero 改动 cc-media-bridge**）。
+
+enhance v6.7.6：
+1. **`large-file-bridge.resolveUploadUrl`** 默认 `${base}/upload`（从 `${base}/lanhuo/upload` 简化）
+2. **`large-file-bridge buildUploadContext`** prompt 文本提示 LLM 用 `/upload` 短 URL
+3. **`cc-bridge-prompt`** 严格区分段落：
+   ```
+   📊 /lanhuo = 蓝火任务 dashboard
+   📎 /upload = 大文件上传专用页面（最短最易记）
+       备用等价 URL：/lanhuo/upload / /plugins/enhance/upload
+   ```
+
+### 等价性保证
+
+三个 URL **完全等价**（cc-media-bridge v2.18.9 已 native 支持，nginx 不用配 location）：
+
+| URL | 路径流转 |
+|---|---|
+| `/upload` ⭐ | _lanhuo_strip 不映射 → handle_upload |
+| `/lanhuo/upload` | _lanhuo_strip 剥成 `/upload` → handle_upload |
+| `/plugins/enhance/upload` | enhance dashboard.ts 注册的 OpenClaw gateway route（如果 nginx 反代到 gateway） |
+
+本机 diff 验证：`/upload` 和 `/lanhuo/upload` 返回完全相同的 5688 bytes HTML。
+
+### 用户操作
+
+升级到 v6.7.6 后 LLM 给出的回复将默认推 `/upload` 短 URL：
+
+```
+"企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：
+https://keepermac.huo15.com/upload
+（流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不动 cc-media-bridge（v2.18.9 已 native 支持）
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ /lanhuo/upload 兼容 alias，老的 prompt cache / few-shot example 仍工作
+
 ## 6.7.5 — 2026-05-11（上传支持 2GB 单文件 — 流式写盘不 OOM）
 
 ### 触发

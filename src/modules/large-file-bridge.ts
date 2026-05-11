@@ -23,11 +23,13 @@ import { DEFAULT_AGENT_ID } from "../types.js";
 export interface LargeFileBridgeConfig {
   enabled?: boolean;
   /**
-   * 自定义上传页面 URL；不填则自动生成为 `${baseUrl}/lanhuo/upload`（v6.7.4 起）。
-   * v6.7.4 决策：用户实测 LLM 把 dashboard `/lanhuo` 当上传链接误用（cc-bridge-prompt 把
-   * /lanhuo 描述成"用户唯一可视化入口"，LLM 推理混淆）。修法：dashboard.ts 在 /lanhuo 下
-   * 挂同一个 UPLOAD_HTML 别名 → 上传 URL 改用 /lanhuo/upload —— LLM 跟用户对 "lanhuo" 的
-   * 心智模型对齐，子路径上传，根 URL 看任务。
+   * 自定义上传页面 URL；不填则自动生成为 `${baseUrl}/upload`（v6.7.6 起最短 URL）。
+   *
+   * 历程：
+   *   v6.7.4: 改 /lanhuo/upload 避免 LLM 把 /lanhuo 当上传链接误用
+   *   v6.7.6: cc-media-bridge v2.18.9 已 native 支持 /upload 短 URL（_lanhuo_strip 让 /upload 直命中）
+   *           用户原话："能不能换成 https://keepermac.huo15.com/upload" → 改最短 URL
+   *           /lanhuo/upload 仍兼容（等价 alias）
    */
   uploadUrl?: string;
   /** 上传页面基础 URL（企微分享场景需显式填公网地址） */
@@ -61,14 +63,15 @@ function buildUploadContext(url: string): string {
   return `【大文件上传指引 — 必读！】用户刚才发送的消息是"视频/文件超过100M，无法下载"。这是企微官方限制。
 **你必须在回复中直接提供下面的上传链接，不要先问诊断问题！**
 
-回复模板（**URL 必须用下面这个，不要改成 /lanhuo 或别的**）：
+回复模板（**URL 必须用下面这个最短版，不要改成 /lanhuo 或别的**）：
 "企微聊天文件上限 100MB，2GB 以内大文件都可以通过下面这个链接上传：
 ${url}
 （流式上传，浏览器拖拽即可，传完告诉我我来处理。）"
 
-⚠️ 严格区分（v6.7.4+）：
-- 上传专用页面 = **${url}**（这是你**必须**给用户的链接，支持 ≤2GB）
+⚠️ 严格区分（v6.7.6+）：
+- 上传专用页面 = **${url}**（最短最易记 URL，支持 ≤2GB 流式）
 - /lanhuo = 蓝火任务 dashboard，**不是**上传页！不要把它当上传链接给用户！
+- 备用等价 URL：/lanhuo/upload / /plugins/enhance/upload（都返同一份上传页）
 
 也可使用 enhance_upload_link 工具生成 token 化专属上传链接（同样 ≤2GB）。
 
@@ -89,10 +92,10 @@ export function registerLargeFileBridge(
   function resolveUploadUrl(): string {
     if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
     const base = config?.baseUrl?.trim();
-    // v6.7.4: 默认推 /lanhuo/upload（dashboard /lanhuo 子路径上传页）
-    // 兼容老的 /plugins/enhance/upload 仍可用，但 prompt 默认走 /lanhuo/upload
-    if (base) return `${base.replace(/\/+$/, "")}/lanhuo/upload`;
-    return "/lanhuo/upload";
+    // v6.7.6: 默认推最短 URL /upload（cc-media-bridge v2.18.9 native 支持，nginx 不用单独配 location）
+    // 兼容: /lanhuo/upload 仍等价，/plugins/enhance/upload 老路径仍可用
+    if (base) return `${base.replace(/\/+$/, "")}/upload`;
+    return "/upload";
   }
 
   api.on("before_prompt_build", (_event, ctx) => {
