@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.8",
+  "version": "6.7.9",
   "publishConfig": {
     "access": "public"
   },
-  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.8 \u2014 \u7edf\u4e00\u4e0a\u4f20 URL \u5230 /plugins/enhance/* namespace + \u5f3a\u5316 token \u5316\u8ffd\u8e2a\uff1a\u7528\u6237\u539f\u8bdd\u300e\u9ed8\u8ba4\u7528 /plugins/enhance/upload\uff0c/lanhuo/upload \u8fd9\u4e2a\u5148\u5220\u9664\u4e86\u300f\u3002\u5220\u9664 v6.7.4 \u52a0\u7684 /lanhuo/upload \u522b\u540d + v6.7.7 \u52a0\u7684 /upload \u77ed URL\uff08\u4e24\u6761\u90fd\u6ca1\u610f\u4e49\uff1a\u524d\u8005\u8ddf cc-media-bridge /lanhuo namespace \u6df7\u6dc6\uff0c\u540e\u8005\u88ab OpenClaw control UI SPA \u622a\uff09\u3002enhance \u4e0a\u4f20\u73b0\u5728\u53ea\u6709\u4e24\u6761\u8def\u5f84\uff1a(1) /plugins/enhance/upload \u5171\u4eab\u4e0a\u4f20\u9875\uff08\u65e0 token\uff0cAI \u4e0d\u77e5\u9053\u8c01\u4f20\u4e86\u4ec0\u4e48\uff09\uff1b(2) /plugins/enhance-upload/<token> token \u5316\u4e0a\u4f20\uff08bot-upload-link \u6a21\u5757\u6ce8\u518c\uff09\u3002prompt \u5f3a\u5316\uff1aLLM \u4f18\u5148\u8c03 enhance_upload_link \u5de5\u5177\u62ff token URL\uff08AI \u901a\u8fc7 enhance_upload_check \u80fd\u8ffd\u8e2a\u300e\u8fd9\u4e2a token \u6536\u5230\u4ec0\u4e48\u6587\u4ef6\u300f\uff09\u3002\u5171\u4eab URL \u4ec5\u4f5c fallback\u3002",
+  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.9 \u2014 large-file-bridge baseUrl \u89e3\u6790 hotfix\uff1a\u7528\u6237\u5b9e\u6d4b v6.7.8 LLM \u56de\u590d\u7ed9\u7684\u94fe\u63a5\u662f `\ud83d\udc49 /plugins/enhance/upload`\uff08\u88f8\u8def\u5f84\uff09\uff0c\u7f3a `https://keepermac.huo15.com` \u516c\u7f51\u524d\u7f00\uff0c\u7528\u6237\u6839\u672c\u70b9\u4e0d\u5f00\u3002\u6839\u56e0\uff1alarge-file-bridge.resolveUploadUrl() \u5728 config.baseUrl \u6ca1\u586b\u65f6\u76f4\u63a5\u8fd4\u88f8\u8def\u5f84\uff0c\u6ca1\u63a5\u5165\u8ddf bot-share-link / bot-upload-link \u540c\u6b3e\u7684\u5171\u4eab baseUrl \u89e3\u6790\u94fe\uff08env BOT_BASE_URL > config.baseUrl > ~/.openclaw/share/config.json > bridge \u68c0\u6d4b\u5916\u7f51 URL\uff09\u3002\u4fee\u6cd5\uff1aimport resolveBaseUrl from http-route-bridge + readSharedBaseUrl \u515c\u5e95\uff0c\u786e\u4fdd\u6240\u6709\u573a\u666f\u90fd\u62fc\u516c\u7f51\u524d\u7f00\u3002\u7ee7\u627f v6.7.8 \u7edf\u4e00 /plugins/enhance/* URL namespace + token \u5316\u8ffd\u8e2a\u3002",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

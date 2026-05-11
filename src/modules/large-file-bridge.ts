@@ -19,6 +19,10 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { getChannel } from "../utils/channel-detect.js";
 import { DEFAULT_AGENT_ID } from "../types.js";
+import { resolveBaseUrl as resolveBaseUrlFromBridge } from "../utils/http-route-bridge.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 export interface LargeFileBridgeConfig {
   enabled?: boolean;
@@ -92,14 +96,34 @@ export function registerLargeFileBridge(
 
   const injectedSessions = new Map<string, number>();
 
+  /**
+   * v6.7.9: baseUrl 优先级（跟 bot-share-link / bot-upload-link 同款）:
+   *   env BOT_BASE_URL > config.baseUrl > ~/.openclaw/share/config.json
+   *   > bridge 检测到的外网 URL > internal fallback
+   *
+   * 修 v6.7.8- bug：默认推 `/plugins/enhance/upload` 时没拼公网域名，
+   * LLM 给用户的回复变成 `👉 /plugins/enhance/upload`（没 https://...），用户根本点不开。
+   */
+  function readSharedBaseUrl(): string | undefined {
+    try {
+      const sharePath = join(homedir(), ".openclaw", "share", "config.json");
+      if (!existsSync(sharePath)) return undefined;
+      const j = JSON.parse(readFileSync(sharePath, "utf-8")) as { baseUrl?: string };
+      return j?.baseUrl?.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   function resolveUploadUrl(): string {
     if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
-    const base = config?.baseUrl?.trim();
-    // v6.7.8: 用户原话：『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』
-    // 这是无 token 的共享上传 URL（AI 不知道是谁传了什么），适合给"快速一次性上传"用。
-    // 推荐 LLM 在群里给用户优先调 enhance_upload_link 工具拿 token 化 URL — AI 能追踪。
-    if (base) return `${base.replace(/\/+$/, "")}/plugins/enhance/upload`;
-    return "/plugins/enhance/upload";
+    // 多源 baseUrl: env > config > shared share/config.json > bridge detected
+    const base = resolveBaseUrlFromBridge({
+      configBaseUrl: config?.baseUrl?.trim() || readSharedBaseUrl(),
+      envName: "BOT_BASE_URL",
+      fallback: "http://localhost:18789",
+    });
+    return `${base.replace(/\/+$/, "")}/plugins/enhance/upload`;
   }
 
   api.on("before_prompt_build", (_event, ctx) => {

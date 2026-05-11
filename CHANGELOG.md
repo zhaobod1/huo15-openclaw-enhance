@@ -2,6 +2,83 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.9 — 2026-05-11（large-file-bridge baseUrl 解析 hotfix — 修裸路径缺 https:// 前缀）
+
+### 触发
+
+用户截图 LLM 回复给的链接：
+
+```
+📎 大文件上传：文件超过 100MB 无法在企微直接传输，请通过以下链接上传：
+👉 /plugins/enhance/upload          ← 裸路径！缺 https://keepermac.huo15.com
+上传完成后告诉我，我来处理文件。
+```
+
+用户根本点不开 — IM 客户端不会把裸路径补成绝对 URL。
+
+### 根因
+
+`large-file-bridge.resolveUploadUrl()` 在 `config.baseUrl` 没填时直接返裸路径：
+
+```ts
+// v6.7.8 旧代码
+if (base) return `${base}/plugins/enhance/upload`;
+return "/plugins/enhance/upload";   // ← 没拼公网前缀
+```
+
+跟 bot-share-link / bot-upload-link 比 — 它们都用了 `resolveBaseUrl()` 多源解析链（env > config > shared share/config.json > bridge 检测外网 URL）。**large-file-bridge 是独立写的，从未接入这套**。
+
+### v6.7.9 改动
+
+```ts
+function readSharedBaseUrl(): string | undefined {
+  const sharePath = join(homedir(), ".openclaw", "share", "config.json");
+  if (!existsSync(sharePath)) return undefined;
+  const j = JSON.parse(readFileSync(sharePath, "utf-8"));
+  return j?.baseUrl?.trim() || undefined;
+}
+
+function resolveUploadUrl(): string {
+  if (config?.uploadUrl?.trim()) return config.uploadUrl.trim();
+  const base = resolveBaseUrlFromBridge({
+    configBaseUrl: config?.baseUrl?.trim() || readSharedBaseUrl(),
+    envName: "BOT_BASE_URL",
+    fallback: "http://localhost:18789",
+  });
+  return `${base}/plugins/enhance/upload`;   // ← 永远拼前缀
+}
+```
+
+baseUrl 解析优先级（跟 bot-share-link / bot-upload-link 完全一致）：
+
+1. `env BOT_BASE_URL`
+2. `config.largeFileBridge.baseUrl`
+3. `~/.openclaw/share/config.json` 的 `baseUrl`（bot-share-link 用户配过的）
+4. bridge `detectBaseUrlFromRequest()` 缓存的外网 URL
+5. `http://localhost:18789` fallback（最次）
+
+### 现在的 LLM 回复
+
+```
+📎 大文件上传：文件超过 100MB 无法在企微直接传输，请通过以下链接上传：
+👉 https://keepermac.huo15.com/plugins/enhance/upload      ← 完整公网 URL ✓
+上传完成后告诉我，我来处理文件。
+```
+
+### 红线自查
+
+- ✅ 不修龙虾核心 / 不动 cc-media-bridge
+- ✅ 零 child_process / 零新 npm 依赖
+- ✅ pluginApi `>=2026.4.24` 仍 ranged
+- ✅ readSharedBaseUrl 只读 ~/.openclaw/share/config.json（用户主动 enhance_share_set_baseurl 写过）
+
+### 用户操作
+
+```bash
+openclaw plugins update @huo15/huo15-openclaw-enhance && openclaw restart
+# 然后必须 /new 开新会话 — 老 session 的 prompt 是 freeze 的
+```
+
 ## 6.7.8 — 2026-05-11（统一上传 URL 到 /plugins/enhance/* + 强化 token 化追踪）
 
 ### 触发

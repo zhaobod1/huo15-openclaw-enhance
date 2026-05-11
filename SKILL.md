@@ -1,7 +1,7 @@
 ---
 name: huo15-huo15-openclaw-enhance
-description: "火一五·克劳德·龙虾增强插件 v6.7.8 — 统一上传 URL 到 /plugins/enhance/* + 强化 token 追踪：用户原话『默认用 /plugins/enhance/upload，/lanhuo/upload 这个先删除了』。删 v6.7.4 /lanhuo/upload 别名 + v6.7.7 /upload 短 URL（两条都没意义）。enhance 上传只剩两条路径：(1) /plugins/enhance/upload 共享上传 (AI 不知道是谁传了什么)；(2) /plugins/enhance-upload/<token> token 化 (AI 用 enhance_upload_check 能查清单)。prompt 强化 LLM 优先调 enhance_upload_link 拿 token URL — AI 通过 enhance_upload_check 能追踪『这个 token 收到什么文件』，共享 URL 仅 fallback。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
-version: 6.7.8
+description: "火一五·克劳德·龙虾增强插件 v6.7.9 — large-file-bridge baseUrl 解析 hotfix：v6.7.8 LLM 回复给的链接是 `👉 /plugins/enhance/upload`（裸路径，缺 https://公网前缀）。修法：resolveUploadUrl 接入跟 bot-share-link / bot-upload-link 同款的共享 baseUrl 解析链 (env BOT_BASE_URL > config.baseUrl > ~/.openclaw/share/config.json > bridge 检测外网 URL)，确保所有场景都拼公网前缀。继承 v6.7.8 统一 /plugins/enhance/* + token 化追踪。Use when: 给 OpenClaw 加非侵入式增强（不改龙虾核心、不复制原生功能）。"
+version: 6.7.9
 homepage: https://cnb.cool/huo15/ai/huo15-openclaw-enhance
 metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ---
