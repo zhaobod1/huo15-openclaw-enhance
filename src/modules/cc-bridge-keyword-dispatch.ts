@@ -33,13 +33,34 @@ const BRIDGE_PORT = Number(process.env.MCP_SERVER_PORT) || 18790;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
 const BRIDGE_STATE_DIR = ".openclaw-media-bridge";
 
-// 关键词触发：仅在用户消息以"蓝火"或"@蓝火"开头时生效
-//   例: "蓝火 帮我修登录bug"  ✓
-//        "@蓝火 帮我做 PPT"     ✓
-//        "蓝火,继续优化"        ✓
-//        "蓝火：发给我那个文档" ✓
-//        "我用蓝火做"           ✗ (不在开头)
-//        "蓝火好用吗"           ✗ (没空格/标点 + 短)
+// v6.6.4 三模式关键词触发（按优先级匹配，先 specific > latest > new）：
+//
+// 模式 1 SPECIFIC：蓝火 cc-YYYYMMDD-HHMMSS-XXX <新指令>  → 接续该 task
+//   例: "蓝火 cc-20260512-093000-abc123 改一下标题颜色"  ✓
+//        "@蓝火 cc-... 加上数据透视表"                     ✓
+//
+// 模式 2 LATEST：蓝火 继续/接上/接着/上一个/上次/续上 <新指令> → 接续本 owner 最近 task
+//   例: "蓝火 继续 加上图表"                ✓ (接最近 done/failed task)
+//        "蓝火 接上 把那个换成饼图"          ✓
+//
+// 模式 3 NEW（v6.5.0 原有）：蓝火 <新指令> → 新 task
+//   例: "蓝火 帮我修登录bug"                ✓
+//
+// 反例（不触发）：
+//   "我用蓝火做"   ✗ (不在开头)
+//   "蓝火好用吗"   ✗ (无空格/标点 + 短)
+
+const TASK_ID_RE = /cc-\d{8}-\d{6}-[0-9a-f]+/i;
+
+// 模式 1: SPECIFIC — 含 task_id
+const CONTINUE_SPECIFIC_RE =
+  /^[\s　]*@?(?:蓝火|Lanhuo)[\s　:：,，、]+(cc-\d{8}-\d{6}-[0-9a-f]+)[\s　:：,，、]+([^\s].{2,1500})$/is;
+
+// 模式 2: LATEST — 含"继续/接上/接着/上一个/上次/续上"
+const CONTINUE_LATEST_RE =
+  /^[\s　]*@?(?:蓝火|Lanhuo)[\s　:：,，、]+(?:继续|接上|接着|上一个|上次|续上|接续)[\s　:：,，、]*([^\s].{2,1500})$/is;
+
+// 模式 3: NEW — 兜底
 const TRIGGER_RE =
   /^[\s　]*@?(?:蓝火|Lanhuo)[\s　:：,，、]+([^\s].{2,1500})$/is;
 
@@ -54,18 +75,28 @@ interface DispatchResp {
   task_id?: string | null;
   dashboard_url?: string | null;
   owner_id?: string | null;
+  continued_from?: string | null;
+  mode?: "new" | "continue";
   error?: string;
+}
+
+interface DispatchOpts {
+  continue_task_id?: string;  // 接续特定 task
+  continue_latest?: boolean;  // 接续本 owner 最近 task
 }
 
 function postDispatch(
   desc: string,
   ownerId: string | undefined,
+  opts: DispatchOpts = {},
   timeoutMs = 6000,
 ): Promise<DispatchResp> {
   const body = JSON.stringify({
     desc,
     owner_id: ownerId || "",
     background: true,
+    continue_task_id: opts.continue_task_id || "",
+    continue_latest: !!opts.continue_latest,
   });
   return new Promise((resolve, reject) => {
     const req = httpRequest(
@@ -112,31 +143,47 @@ function extractOwner(prompt: string): string | undefined {
   return `${channel}:${m[1]}`;
 }
 
-function renderResponseTemplate(taskId: string, dashboardUrl: string, desc: string): string {
+function renderResponseTemplate(
+  taskId: string,
+  dashboardUrl: string,
+  desc: string,
+  continuedFrom?: string | null,
+): string {
   // 用户没说"@贾维斯"也会触发蓝火 —— 让 LLM 直接 echo 这段，不要任何额外动作
   const shortDesc = desc.length > 60 ? desc.slice(0, 60) + "…" : desc;
-  return [
-    `## 🦞 [蓝火智能体已派活 — 不是 LLM 编造，本 plugin 已直接调 cc-media-bridge POST /dispatch 派出]`,
+  const isContinue = !!continuedFrom;
+  const headerEmoji = isContinue ? "🔄" : "🦞";
+  const headerLine = isContinue
+    ? `🔄 蓝火接续之前的对话`
+    : `🦞 蓝火接活了`;
+  const lines: string[] = [
+    `## ${headerEmoji} [蓝火智能体已派活 — 本 plugin 已直接调 cc-media-bridge POST /dispatch ${isContinue ? "**接续**" : "**新建**"} session]`,
     ``,
-    `用户输入「蓝火 …」关键词触发蓝火智能体，已**直接派给 cc-media-task**（不是 ACP 子 agent / 不是你 jarvis 自己干）。`,
+    `用户输入「蓝火 …」关键词触发蓝火智能体，已**直接派给 cc-media-task**${isContinue ? `（**接续模式** — 用 claude --resume 加载 session ${continuedFrom} 历史上下文）` : "（新任务）"}。`,
     ``,
     `**你的唯一动作**：原文复制以下 markdown 给用户作为回复（不要 spawn 任何工具，不要解释，不要思考补充）：`,
     ``,
     "```",
-    `🦞 蓝火接活了`,
+    headerLine,
     ``,
-    `📋 任务：${shortDesc}`,
+    `📋 ${isContinue ? "追加" : "任务"}：${shortDesc}`,
+  ];
+  if (isContinue) lines.push(`↩️ 接续自：\`${continuedFrom}\``);
+  lines.push(
     `🎯 task_id：\`${taskId}\``,
     `🔗 进度：${dashboardUrl}`,
     ``,
-    `蓝火会在 dashboard 实时回写每一步工具调用 / 思考过程 / 结果。`,
+    isContinue
+      ? `蓝火会在 dashboard 实时回写新一轮工具调用 / 思考过程 / 结果（基于之前的 session 上下文）。`
+      : `蓝火会在 dashboard 实时回写每一步工具调用 / 思考过程 / 结果。`,
     "```",
     ``,
     `**禁止动作**（hook 已运行了真正派活动作，你 jarvis 不要再 spawn）：`,
     `- ❌ 调用 sessions_spawn / Task / spawn_task / mcp__ccd_session__spawn_task`,
     `- ❌ Bash claude -p / claude --resume / 直接 exec claude`,
     `- ❌ 自己 Write/Edit/Bash 把这个任务做了——任务已经派给蓝火，等结果就行`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function renderErrorTemplate(error: string, desc: string): string {
@@ -169,21 +216,62 @@ export function registerCcBridgeKeywordDispatch(api: OpenClawPluginApi) {
     const userMessage: string = (event as any)?.prompt ?? "";
     if (!userMessage || userMessage.length < 5 || userMessage.length > 4000) return {};
 
-    const m = TRIGGER_RE.exec(userMessage);
-    if (!m) return {};
-    const desc = m[1].trim();
-    if (desc.length < 3) return {}; // 防"蓝火 ？"这种空指令
+    // 优先级匹配：SPECIFIC > LATEST > NEW
+    let mode: "new" | "continue_specific" | "continue_latest" = "new";
+    let desc = "";
+    let continueTaskId: string | undefined;
+
+    const m1 = CONTINUE_SPECIFIC_RE.exec(userMessage);
+    if (m1) {
+      mode = "continue_specific";
+      continueTaskId = m1[1];
+      desc = m1[2].trim();
+    } else {
+      const m2 = CONTINUE_LATEST_RE.exec(userMessage);
+      if (m2) {
+        mode = "continue_latest";
+        desc = m2[1].trim();
+      } else {
+        const m3 = TRIGGER_RE.exec(userMessage);
+        if (!m3) return {};
+        desc = m3[1].trim();
+        // 防误伤：desc 不能以 task_id 开头（SPECIFIC 已尽力匹配，这里兜底）
+        if (TASK_ID_RE.test(desc.slice(0, 50))) {
+          // 含 cc-XXX 但 SPECIFIC 没匹配 → 格式不对，不触发
+          return {};
+        }
+      }
+    }
+    if (desc.length < 3) return {}; // 防空指令
 
     const owner = extractOwner(userMessage);
     const sessionKey: string =
       ctx?.sessionKey ?? ctx?.sessionId ?? ctx?.agentId ?? "?";
 
     api.logger.info?.(
-      `[enhance-cc-keyword-dispatch] 关键词命中 (session=${sessionKey.slice(-12)}) desc="${desc.slice(0, 60)}..." owner=${owner || "(none)"}`,
+      `[enhance-cc-keyword-dispatch] 关键词命中 mode=${mode} (session=${sessionKey.slice(-12)}) ` +
+      `desc="${desc.slice(0, 60)}..." owner=${owner || "(none)"} ` +
+      `continue_task=${continueTaskId || "(none)"}`,
     );
 
     try {
-      const resp = await postDispatch(desc, owner);
+      const opts: DispatchOpts = {};
+      if (mode === "continue_specific" && continueTaskId) {
+        opts.continue_task_id = continueTaskId;
+      } else if (mode === "continue_latest") {
+        opts.continue_latest = true;
+        if (!owner) {
+          // 没 owner 无法定位 latest task → 报错让 LLM 提示用户
+          return {
+            prependContext: renderErrorTemplate(
+              "找不到 owner（沟通元数据缺失）—— 接续模式需要 owner，请改用 \"蓝火 cc-XXX <新指令>\" 显式指定 task_id，或换用新任务 \"蓝火 <新指令>\"。",
+              desc,
+            ),
+          };
+        }
+      }
+
+      const resp = await postDispatch(desc, owner, opts);
       if (!resp.ok || !resp.task_id) {
         api.logger.warn?.(
           `[enhance-cc-keyword-dispatch] dispatch 返回但无 task_id: ${JSON.stringify(resp).slice(0, 200)}`,
@@ -196,13 +284,14 @@ export function registerCcBridgeKeywordDispatch(api: OpenClawPluginApi) {
         };
       }
       api.logger.info?.(
-        `[enhance-cc-keyword-dispatch] ✓ 派活成功 task_id=${resp.task_id} (session=${sessionKey.slice(-12)})`,
+        `[enhance-cc-keyword-dispatch] ✓ 派活成功 mode=${resp.mode || mode} task_id=${resp.task_id} continued_from=${resp.continued_from || "(none)"} (session=${sessionKey.slice(-12)})`,
       );
       return {
         prependContext: renderResponseTemplate(
           resp.task_id,
           resp.dashboard_url || `https://keepermac.huo15.com/lanhuo?task=${resp.task_id}`,
           desc,
+          resp.continued_from,
         ),
       };
     } catch (e) {
