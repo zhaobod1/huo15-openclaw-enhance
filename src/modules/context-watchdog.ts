@@ -1166,7 +1166,9 @@ export function registerContextWatchdog(
             `[ctx-watchdog] FORCE-escalate (user-config): ${fromModel} (${s.lastModelCtxMax}) → ${target.fullId} (${target.contextWindow}) | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | channel=${channel} | budgetTight=${budgetTight}`,
           );
           return {
-            modelOverride: target.fullId,
+            // v6.7.18: modelOverride 必须 bare（target.bareId，不是 fullId）——核心把它直接当 API model
+            // 字段，带前缀会被 deepseek API 拒 400。详见 model-router.ts 的 toBareModel 注释。
+            modelOverride: target.bareId,
             providerOverride: target.provider,
           };
         }
@@ -1199,8 +1201,9 @@ export function registerContextWatchdog(
       api.logger.warn(
         `[ctx-watchdog] FORCE-escalate (hardcoded fallback): ${fromModel} → ${targetFullId} | session=${sessionKey.slice(0, 12)} | percent=${Math.round(percent * 100)}% | channel=${channel}`,
       );
+      // v6.7.18: modelOverride 必须 bare（target 已是 bare id），providerOverride 单独定 provider。
       return targetProvider
-        ? { modelOverride: targetFullId, providerOverride: targetProvider }
+        ? { modelOverride: target, providerOverride: targetProvider }
         : { modelOverride: target };
     }),
     { priority: HOOK_PRIORITY_FORCE_ESCALATE },

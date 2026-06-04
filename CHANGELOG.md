@@ -2,6 +2,37 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.18 — 2026-06-04（model-router / context-watchdog 的 modelOverride 必须 bare id — 根治 deepseek 100% 400）
+
+### 触发
+
+JobZhao 企微聊天持续报 `Something went wrong while processing your request`。gateway 日志显示 embedded run 100% `isError=true`：
+
+- `deepseek/deepseek-v4-pro` → `400 The supported API model names are deepseek-v4-pro or deepseek-v4-flash, but you passed deepseek/deepseek-v4-pro`（带前缀透传）
+- `minimax/MiniMax-M2.7` 被发到 `provider=deepseek`（provider/model 错配）
+- failover 链里出现双前缀 `deepseek/deepseek/deepseek-v4-pro`
+
+### 根因
+
+`model-router` 的 `before_model_resolve` hook 返回 `{ modelOverride: decision.model }`——`decision.model` 是 **fully-qualified** `provider/model`，且**漏返 `providerOverride`**。
+
+OpenClaw 核心 `resolveHookModelSelection`（pi-embedded-runner）：
+
+```js
+if (override.providerOverride) provider = override.providerOverride; // 不返 → provider 停在旧值
+if (override.modelOverride)   modelId   = override.modelOverride;    // 直接当 API model 字段，不再 split
+```
+
+→ `modelOverride` 带前缀直接发给 deepseek（openai-completions）→ 400；provider 不跟随切换 → minimax 模型被发到 deepseek API。`context-watchdog` v6.6.4 用 `target.fullId` 是**同源潜伏 bug**（long-ctx 触发少未暴露）。
+
+### 修复
+
+- `model-router`：新增 `toBareModel()`；`before_model_resolve` 两处（缓存命中 + 主返回）改返 `{ modelOverride: <bare id>, providerOverride: <provider> }`。
+- `context-watchdog`：两处 FORCE-escalate 改用 bare（`target.bareId` / `target`），log 仍用 fullId 便于阅读。
+- 实测：`openclaw agent` 触发 pro tier → `winnerModel=deepseek-v4-pro` / `result=success` / `fallbackUsed=false`。
+
+> 配套运维（非本包代码）：`~/.openclaw/openclaw.json` 修正 `agents.defaults.model` 大小写/幽灵 model（config-doctor 标 error 的 failover chain）；`~/.openclaw/enhance/model-route.json` 清畸形 speedTracking 双前缀脏 key + 理顺 enabled（deepseek 主 / minimax 备）。
+
 ## 6.7.16 — 2026-05-11（bot-upload-link error path 漏判 hotfix）
 
 ### 触发

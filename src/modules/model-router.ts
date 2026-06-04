@@ -505,6 +505,18 @@ function detectPromptInlineMedia(prompt?: string): Set<string> {
   return types;
 }
 
+/**
+ * v6.7.18: OpenClaw `before_model_resolve` 的 `modelOverride` 必须是 **bare model id**（不带 provider 前缀）。
+ * 核心 `resolveHookModelSelection` 把 hook 返回的 `modelOverride` 直接赋给 `modelId` 当 API model 字段
+ * （不再 `splitProviderModel`），带前缀 `deepseek/deepseek-v4-pro` 会被 deepseek API 拒 400
+ * （`but you passed deepseek/deepseek-v4-pro`，实测 2026-06-04）。provider 由 `providerOverride` 单独指定。
+ * 历史教训：context-watchdog v6.6.4 用 `fullId` 是同源潜伏 bug，long-ctx 触发少未暴露。
+ */
+function toBareModel(fullId: string): string {
+  const i = fullId.indexOf("/");
+  return i > 0 ? fullId.slice(i + 1) : fullId;
+}
+
 /** 匹配任意一个 pattern */
 function matchAny(patterns: readonly RegExp[], text: string): boolean {
   for (const pat of patterns) {
@@ -939,7 +951,8 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       const cached = cacheGet(ck);
       if (cached) {
         api.logger.info(`[model-router] CACHE HIT: ${cached.reason} | → ${cached.model}`);
-        return { modelOverride: cached.model };
+        // v6.7.18: modelOverride 取 bare id（见 toBareModel）+ providerOverride 单独定 provider。
+        return { modelOverride: toBareModel(cached.model), providerOverride: cached.provider };
       }
     }
 
@@ -956,7 +969,8 @@ export function registerModelRouter(api: OpenClawPluginApi) {
       `[model-router] ${decision.reason} | tier=${decision.taskTier} | → ${decision.model}`
     );
 
-    return { modelOverride: decision.model };
+    // v6.7.18: modelOverride 取 bare id（见 toBareModel）+ providerOverride 单独定 provider。
+    return { modelOverride: toBareModel(decision.model), providerOverride: decision.provider };
   });
 
   // ── v5.8.5 latency tracker：监听 model_call_ended 收集 P50/P95/errRate ──
