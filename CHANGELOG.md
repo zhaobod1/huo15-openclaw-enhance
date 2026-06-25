@@ -1,4 +1,10 @@
 
+## v6.7.21 (2026-06-26)
+
+- 修复: better-sqlite3 每次更新后丢失原生绑定迫使手工 rebuild
+- package.json postinstall 加 `npm rebuild better-sqlite3`，安装自动编译
+
+
 ## v6.7.20 (2026-06-25)
 
 - 版本号递增发布（代码无改动）

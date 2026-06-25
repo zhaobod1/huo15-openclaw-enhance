@@ -1,6 +1,6 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.20",
+  "version": "6.7.21",
   "publishConfig": {
     "access": "public"
   },
@@ -25,7 +25,7 @@
     "typecheck": "tsc --noEmit",
     "release": "bash scripts/release.sh",
     "prepublishOnly": "npm run typecheck && npm run build",
-    "postinstall": "node scripts/postinstall.cjs",
+    "postinstall": "node scripts/postinstall.cjs && npm rebuild better-sqlite3 || true",
     "build": "tsc && cp package.json dist/ && cp openclaw.plugin.json dist/ 2>/dev/null || true"
   },
   "keywords": [
