@@ -74,6 +74,8 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 **安全闸门**：路径黑名单（`/.ssh/ /.aws/ /.gnupg/ /etc/` 等不让分享）、绝对路径校验、`..` 防 traversal、500MB 大小上限、12 hex token 不可枚举遍历、HTTP handler 内 filename 防越界（不能含 `/ \\ ..`）。**零 child_process**（fs.copyFileSync），lazy cleanup（不在 register 期跑后台任务）。
 
+> ⚠️ **v6.7.19 起已移除 model-router（自动切换模型）**。下面 v5.7.x 的 model-router 章节仅作历史保留——当前版本不再按任务/配额自动切换模型，模型选择交回龙虾原生 / 用户配置；仅 context-watchdog 在上下文逼近上限时保留「超限保护切换」。
+
 ### v5.7.12 model-router: 速度+精度+覆盖率三重增强（2026-05-01）
 
 **1. 响应速度**：路由决策缓存（TTL 30s）、极短 prompt 短路（<50 字符直走 M2.7）、`getBestModel` 结果缓存

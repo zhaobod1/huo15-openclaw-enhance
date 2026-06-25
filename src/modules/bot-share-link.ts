@@ -272,6 +272,28 @@ function deriveFriendlyName(finalName: string): string {
   return dash > 0 ? finalName.slice(dash + 1) : finalName;
 }
 
+/** 图片扩展名 —— 命中则用 Markdown image 语法让龙虾管家内联预览缩略图。 */
+const IMAGE_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "heic", "heif", "ico",
+]);
+function isImageFile(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return false;
+  return IMAGE_EXTS.has(name.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * 生成「可在龙虾管家预览」的 Markdown 片段：
+ * - 图片 → `![名](url)`：客户端内联渲染缩略图
+ * - 其他文件 → `[📎 名](url)`：可点击下载卡片
+ * 任何渲染 Markdown 的客户端（龙虾管家 web / 钉钉 markdown）都能预览；
+ * 不渲染 Markdown 的纯文本渠道（企微 text）由各自 send 层降级（见 wecom 渲染器）。
+ */
+function buildPreviewMarkdown(displayName: string, url: string): string {
+  const safeName = displayName.replace(/[\[\]]/g, "");
+  return isImageFile(displayName) ? `![${safeName}](${url})` : `[📎 ${safeName}](${url})`;
+}
+
 export function registerBotShareLink(
   api: OpenClawPluginApi,
   config: BotShareConfig | undefined,
@@ -447,7 +469,8 @@ export function registerBotShareLink(
       description:
         "把本地文件投递到 OpenClaw share 目录，返回对外的临时下载链接。**任意大小都用这个工具**（包括 < 10MB 的小文件）—— wecom/钉钉等 IM 渠道的 outbound 不识别 'MEDIA:'/'FILE:' 等文本约定，不调本工具就只能发普通文字，用户什么也收不到。" +
         "用于企微/钉钉/微信等渠道发文件：传一个绝对路径，返回 https://<公网域名>/plugins/enhance-share/<token>-<filename> 给用户下载。" +
-        "zero-config：用户访问过 dashboard 或点过任何 share 链接后，公网 baseUrl 自动从 host header 检测，不需要配 env / nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。",
+        "zero-config：用户访问过 dashboard 或点过任何 share 链接后，公网 baseUrl 自动从 host header 检测，不需要配 env / nginx alias。文件 24h 后下次工具调用时自动 lazy 清理。" +
+        "**返回结果里有一行 Markdown（图片为 `![](url)`、其他文件为 `[📎名](url)`）—— 发给用户时请原样保留这行 Markdown，龙虾管家会内联预览图片缩略图 / 渲染成可点击下载卡片**（structuredContent.markdown 也带这个值）。",
       parameters: Type.Object({
         filePath: Type.String({
           description:
@@ -570,10 +593,16 @@ export function registerBotShareLink(
           detected: "host header 自动检测",
           fallback: "默认兜底",
         };
+        const displayName = label ?? deriveFriendlyName(finalName);
+        const previewMd = buildPreviewMarkdown(displayName, url);
+        const isImg = isImageFile(displayName);
         const lines = [
           `✓ 已生成临时下载链接（${formatSize(st.size)}，${ttlH}h 后过期）：`,
           ``,
-          url,
+          previewMd,
+          ``,
+          `📌 发给用户时请原样保留上面这行 Markdown —— 龙虾管家会${isImg ? "内联预览图片缩略图" : "渲染成可点击下载卡片"}（纯文本渠道如企微会自动降级为链接）。`,
+          `纯链接（复制用）：${url}`,
           ``,
           label ? `展示名：${label}` : "",
           `源文件：${normalized}`,
@@ -596,6 +625,8 @@ export function registerBotShareLink(
           content: [{ type: "text" as const, text: lines }],
           structuredContent: {
             url,
+            markdown: previewMd,
+            isImage: isImg,
             token,
             filename: finalName,
             sourcePath: normalized,
@@ -662,13 +693,14 @@ export function registerBotShareLink(
         ];
         for (const e of sorted) {
           const url = buildShareUrl(baseUrl, urlPrefix, e.filename);
+          const displayName = e.label ?? deriveFriendlyName(e.filename);
           const remainH = (
             (new Date(e.expireAt).getTime() - now.getTime()) /
             3600 /
             1000
           ).toFixed(1);
-          lines.push(`  · ${e.label ?? e.filename} · ${formatSize(e.sizeBytes)} · 剩 ${remainH}h`);
-          lines.push(`    ${url}`);
+          lines.push(`  · ${displayName} · ${formatSize(e.sizeBytes)} · 剩 ${remainH}h`);
+          lines.push(`    ${buildPreviewMarkdown(displayName, url)}`);
           lines.push(`    源: ${e.sourcePath}`);
         }
         if (pendingMissing > 0) {
@@ -679,10 +711,11 @@ export function registerBotShareLink(
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: {
-            entries: sorted.map((e) => ({
-              ...e,
-              url: buildShareUrl(baseUrl, urlPrefix, e.filename),
-            })),
+            entries: sorted.map((e) => {
+              const u = buildShareUrl(baseUrl, urlPrefix, e.filename);
+              const dn = e.label ?? deriveFriendlyName(e.filename);
+              return { ...e, url: u, markdown: buildPreviewMarkdown(dn, u), isImage: isImageFile(dn) };
+            }),
             pruned,
             pendingMissing,
             baseUrl,

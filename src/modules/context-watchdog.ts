@@ -19,7 +19,7 @@
  * 非侵入式保证：
  *   - 零 child_process / 零新 npm 依赖
  *   - 不修龙虾核心 / 不复制 model-fallback / 不抢龙虾 routing 决策
- *   - 仅观察 + 提醒（通过 prompt supplement）；切模型让 model-router 自己决定
+ *   - 仅观察 + 提醒（通过 prompt supplement）；仅在 ctx 逼近上限（默认 95%）时才强切大 ctx 模型防 overflow
  *
  * 实测痛点（2026-05-11）：
  *   用户长会话 + 跨日续接 + 多轮工具调用，token 累计到 180K+ 还没主动 /compact，
@@ -409,7 +409,7 @@ function buildCriticalBanner(percent: number, used: number, max: number, modelId
 function buildEscalateHint(currentModel: string, currentMax: number, used: number, percent: number): string {
   const pct = Math.round(percent * 100);
   return `【建议切大 ctx 模型 - ${pct}%】当前 model=${currentModel}（ctx ${currentMax.toLocaleString()}），用量已达 ${pct}%。
-**主动调用 \`enhance_route_to_long_ctx\` 工具立即切换**（推荐）；或继续 /compact / 让 model-router 自选 LONG_CONTEXT_MODELS。
+**主动调用 \`enhance_route_to_long_ctx\` 工具立即切换**（推荐）；或继续 /compact 压缩上下文。
 长 ctx 候选（≥256K）：claude-opus-4.7-1m (1M) / gemini-2.5-pro (2M) / kimi-k2 (256K)`;
 }
 
@@ -1430,7 +1430,7 @@ export function registerContextWatchdog(
           provider: targetProvider,
           currentPercent: percent,
           reason: params?.reason ?? "no reason given",
-          message: `已切到 ${targetFullId}（ctx ${(targetCtxMax ?? DEFAULT_CTX_MAX).toLocaleString()}）。**下一轮** LLM 调用 ctx-watchdog 会在 before_model_resolve 强制路由过去；当 ctx 降下来后 model-router 重新评估自动选回最优。`,
+          message: `已切到 ${targetFullId}（ctx ${(targetCtxMax ?? DEFAULT_CTX_MAX).toLocaleString()}）。**下一轮** LLM 调用 ctx-watchdog 会在 before_model_resolve 强制路由过去；当 ctx 降下来后调用 \`enhance_route_revert_to_original\` 切回原模型省成本。`,
           note: fromModel ? `已记录 originalModel=${s.originalModel}，将来 ctx 降到 60% 以下后会建议切回` : undefined,
         };
       },
@@ -1442,7 +1442,7 @@ export function registerContextWatchdog(
   api.registerTool(
     (ctx: OpenClawPluginToolContext) => ({
       name: "enhance_route_revert_to_original",
-      description: "切回原模型（compact 后 ctx 降下来时省成本用）。本工具清掉 ctx-watchdog 的强切意愿，让 model-router 重新走任务路由自然回到原 tier。仅在 enhance_ctx_status 显示 originalModel 不等于 model 且 percent<60% 时调",
+      description: "切回原模型（compact 后 ctx 降下来时省成本用）。本工具清掉 ctx-watchdog 的强切意愿，恢复到你配置的默认模型。仅在 enhance_ctx_status 显示 originalModel 不等于 model 且 percent<60% 时调",
       inputSchema: Type.Object({
         reason: Type.Optional(Type.String({ description: "切回原因（如 'compact 后 ctx 降到 40%'）" })),
       }),
@@ -1482,7 +1482,7 @@ export function registerContextWatchdog(
           newCtxMax: originalCtxMax,
           projectedPercent: Math.round(projectedPercent * 100),
           reason: params?.reason ?? "no reason given",
-          message: `已清掉 ctx-watchdog 的强切意愿，下一轮 model-router 会重新走任务路由——预期切回到 ${targetModel} 或同 tier 最优。`,
+          message: `已清掉 ctx-watchdog 的强切意愿，下一轮恢复到默认模型——预期切回到 ${targetModel}。`,
         };
       },
     }) as any,

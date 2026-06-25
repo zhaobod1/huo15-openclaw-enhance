@@ -13,7 +13,7 @@
  * - 钩子从 ctx.agentId 获取当前 Agent
  * - 每个企微用户/群组的数据完全隔离
  */
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { definePluginEntry, type OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
 import { wrapApiForSafeHooks } from "./src/utils/safe-api-wrapper.js";
 import { createRequire } from "node:module";
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -52,7 +52,6 @@ import { registerCcBridgePrompt } from "./src/modules/cc-bridge-prompt.js";
 import { registerCcBridgePreFetch } from "./src/modules/cc-bridge-pre-fetch.js";
 import { registerCcBridgeDispatchHarness } from "./src/modules/cc-bridge-dispatch-harness.js";
 import { registerCcBridgeKeywordDispatch } from "./src/modules/cc-bridge-keyword-dispatch.js";
-import { registerModelRouter } from "./src/modules/model-router.js";
 import { registerLargeFileBridge } from "./src/modules/large-file-bridge.js";
 import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
@@ -76,7 +75,10 @@ const TIER_MAX: Record<ToolTier, Tier> = {
   full: 3,
 };
 
-export default definePluginEntry({
+// 显式注解 default export 类型 — SDK 2026.6.x 起 definePluginEntry 返回类型推断会引用
+// SDK 内部带 hash 的 chunk 文件名（types-B70zVumi.js），导致 TS2742 "inferred type cannot
+// be named without a reference"。给一个稳定的具名类型即可根治，纯类型零运行时改动。
+const enhancePlugin: OpenClawPluginDefinition = definePluginEntry({
   id: "enhance",
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
   description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
@@ -294,17 +296,6 @@ export default definePluginEntry({
         load: () => registerNativeMemorySurfacer(api, config.nativeMemorySurfacer),
       },
       {
-        // v5.7.12 实现 / v5.8.3 真接入：模型路由器（before_model_resolve hook）
-        // tier=1 minimal 也启用——零工具 schema（纯 hook），按 prompt 复杂度 + 多模态自动路由
-        // 5/2 实战发现：5.7.12 起 model-router 一直未接 index.ts，是"幽灵模块"
-        // 5.8.3 改 sidus priority 1 → 4（兜底），deepseek 直连 priority 1（首选）
-        // 触发：sidus deepseek-v4-flash 反复 429 限流卡蓝火 wecom 长任务 12 分钟+
-        name: "模型路由器",
-        tier: 1,
-        enabled: config.modelRouter?.enabled !== false,
-        load: () => registerModelRouter(api),
-      },
-      {
         // v5.7.22: BOT 文件分享桥（企微/钉钉无法直传大文件时的兜底）
         // tier=1 minimal 也启用——这是渠道兜底能力，没了它播客/大附件就发不出去
         // 默认 enabled=true，零 child_process（fs.copyFileSync），路径黑名单 sanitizer 防 LLM path traversal
@@ -452,3 +443,5 @@ export default definePluginEntry({
     api.logger.info(`[enhance] 龙虾增强包 v${pkg.version} 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能）${degradeNote}，启用模块: ${loaded.join("、")}`);
   },
 });
+
+export default enhancePlugin;

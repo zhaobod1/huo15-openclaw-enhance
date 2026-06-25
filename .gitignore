@@ -1,2 +1,39 @@
+# 依赖与构建产物
 node_modules/
 dist/
+*.tsbuildinfo
+
+# 日志
+*.log
+.npm-debug.log*
+
+# 运行时数据 / 数据库（不入库）
+*.sqlite
+*.sqlite-journal
+*.reset.*
+
+# 环境与本地配置
+.env
+.env.*
+*.local
+
+# 备份 / 临时文件（发版前 .bak、误产物等）
+*.bak
+*.bak.*
+*.orig
+*~
+tmp/
+
+# 系统
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# 本地私有 agent 指令（含敏感内容，不入库）
+.agents/
+
+# Claude Code 项目上下文：.claude/ 本身要进 git（交接用），仅忽略本地私有设置
+.claude/settings.local.json
+.claude/*.local.json

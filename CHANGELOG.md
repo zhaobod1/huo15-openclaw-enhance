@@ -2,6 +2,12 @@
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
 
+## 6.7.19 — 2026-06-25（去掉自动切换模型 model-router + 分享链接 Markdown 预览 + 适配 openclaw 2026.6.10）
+
+- **去掉自动切换模型（model-router）**：移除「模型路由器」模块（按任务复杂度/配额/熔断 `before_model_resolve` 自动换模型）。删 `src/modules/model-router.ts`、index.ts 注册、`ModelRouterConfig` 配置、`openclaw.plugin.json` contracts.tools 的 7 个 `enhance_model_route_*` 工具。**保留** context-watchdog 的 ctx 95% 超限安全切换 + 预警 banner + 手动切换工具（`enhance_route_to_long_ctx` / `enhance_route_revert_to_original`），并更新其引用 model-router 的用户可见消息。latency-tracker/route-history 等工具保留（context-watchdog 的 isModelBanned 仍用）。
+- **分享链接 Markdown 预览**：`enhance_share_file` / `enhance_share_list` 返回结果新增可预览 Markdown —— 图片用 `![名](url)` 让龙虾管家内联渲染缩略图，其他文件用 `[📎名](url)` 可点击下载卡片。工具 description + structuredContent.markdown 都带，并提示 LLM 原样转发给用户（纯文本渠道如企微由各自 send 层降级）。
+- **适配 openclaw 2026.6.10 SDK**：`definePluginEntry` default export 在 SDK 2026.6.x 推断出内部 hash chunk 类型触发 TS2742，用具名常量 + 显式 `OpenClawPluginDefinition` 注解根治；`build.openclawVersion` → 2026.6.10；compat.pluginApi / peerDependencies 保持 ranged 不变。
+
 ## 6.7.18 — 2026-06-04（model-router / context-watchdog 的 modelOverride 必须 bare id — 根治 deepseek 100% 400）
 
 ### 触发
