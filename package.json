@@ -1,10 +1,10 @@
 {
   "name": "@huo15/huo15-openclaw-enhance",
-  "version": "6.7.19",
+  "version": "6.7.20",
   "publishConfig": {
     "access": "public"
   },
-  "description": "\u706b\u4e00\u4e94\u00b7\u514b\u52b3\u5fb7\u00b7\u9f99\u867e\u589e\u5f3a\u63d2\u4ef6 v6.7.16 \u2014 bot-upload-link error path \u6f0f\u5224 hotfix\uff1av6.7.15 \u672c\u5730\u5b9e\u6d4b\u4e09\u8f6e\uff08\u76f4\u8fde/\u8fdc\u7a0b\u5168\u94fe\u8def/\u4e2d\u9014\u4e2d\u65ad\uff09\uff0c\u524d\u4e24\u8f6e\u5b8c\u7f8e\uff0c\u4f46\u7b2c\u4e09\u8f6e\u53d1\u73b0 req.on('error') / ws.on('error') \u89e6\u53d1\u540e Promise done\uff0c\u5916\u9762 `if (aborted)` \u4e0d\u62e6\u622a error case \u7ee7\u7eed\u8d70 renameSync(partial, file) \u2192 ENOENT \u8bef\u62a5 stderr\uff08partial \u5df2\u88ab rmSync \u5220\uff09\u3002\u529f\u80fd\u4e0a\u6ca1\u7834\u574f\u6570\u636e\uff08rename \u5931\u8d25 \u2192 \u65e7\u5b8c\u6574\u6587\u4ef6\u4f9d\u7136\u5b8c\u597d\uff09\uff0c\u4f46\u65e5\u5fd7\u6df7\u4e71\u3002\u4fee\u6cd5\uff1a\u52a0 `failed = true` flag\uff0cerror handler \u91cc set\uff0cPromise \u540e `if (aborted || failed) return` \u63d0\u524d\u51fa\u6808\uff0c\u4e0d\u8d70 rename \u8def\u5f84\u3002\u7ee7\u627f v6.7.15 .partial \u4e34\u65f6\u6587\u4ef6 + 4 \u6863\u5b8c\u6574\u65e5\u5fd7 + v6.7.14 config-doctor tools.profile \u68c0\u6d4b\u3002",
+  "description": "火一五·克劳德·龙虾增强插件 v6.7.16 — bot-upload-link error path 漏判 hotfix：v6.7.15 本地实测三轮（直连/远程全链路/中途中断），前两轮完美，但第三轮发现 req.on('error') / ws.on('error') 触发后 Promise done，外面 `if (aborted)` 不拦截 error case 继续走 renameSync(partial, file) → ENOENT 误报 stderr（partial 已被 rmSync 删）。功能上没破坏数据（rename 失败 → 旧完整文件依然完好），但日志混乱。修法：加 `failed = true` flag，error handler 里 set，Promise 后 `if (aborted || failed) return` 提前出栈，不走 rename 路径。继承 v6.7.15 .partial 临时文件 + 4 档完整日志 + v6.7.14 config-doctor tools.profile 检测。",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

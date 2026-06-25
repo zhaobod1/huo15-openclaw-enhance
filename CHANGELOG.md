@@ -1,3 +1,9 @@
+
+## v6.7.20 (2026-06-25)
+
+- 版本号递增发布（代码无改动）
+
+
 # CHANGELOG
 
 本插件语义化版本号与龙虾适配版本解耦：`package.json.version` 为插件自身的发布版本，`openclaw.build.openclawVersion` 为目标龙虾版本。
