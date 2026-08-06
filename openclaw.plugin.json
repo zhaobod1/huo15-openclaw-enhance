@@ -2,7 +2,7 @@
   "id": "enhance-huo15",
   "name": "火一五·克劳德·龙虾增强插件",
   "description": "非侵入式增强 OpenClaw 2026.4.24+：记忆整合、工具安全、任务/章节/工作流、模式闸门、statusline、定时任务桥接、仪表盘、生命周期监听。v6.1.0 trajectory-archiver v2 路径策略：归档到 sessions-archive 而非 sessions/.archive（移出 sessions/ 子树→openclaw sessions.list 看不到→主线程不 JSON.parse），修复 5/2 实战 sample 暴露的 v1 路径不解决卡顿根因。继承 v6.0.0 npm 包改名 + v5.8.0 hook-profiler",
-  "version": "2.6.0",
+  "version": "6.7.23",
   "enabledByDefault": true,
   "uiHints": {
     "toolTier": {
