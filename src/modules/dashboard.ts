@@ -707,7 +707,7 @@ const UPLOAD_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>&#x1F4E4; 大文件上传</h1>
-<p class="subtitle">企微聊天文件上限 100MB，本页支持最大 <b>2GB</b> 单文件流式上传</p>
+<p class="subtitle">IM 渠道聊天文件上限：企微 100MB / 钉钉 20MB / 飞书 30MB —— 本页支持最大 <b>2GB</b> 单文件流式上传</p>
 <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
   <div class="icon">&#x1F4C1;</div>
   <p>点击选择文件或拖拽文件到此处</p>

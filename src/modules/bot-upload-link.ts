@@ -648,7 +648,7 @@ export function registerBotUploadLink(
       description:
         "生成一个用户上传文件给 AI 的临时 URL（拖拽上传页）。用于：" +
         "(1) 用户主动说要传大文件 / 视频 / 数据集；" +
-        "(2) 用户消息含『视频/文件超过 100M，无法下载』『文件已被截断』等 IM 渠道大小拦截系统提示文本（企微 100MB / 钉钉等）；" +
+        "(2) 用户消息含『视频/文件超过 100M，无法下载』『文件已被截断』等 IM 渠道大小拦截系统提示文本（企微 100MB / 钉钉 20MB / 飞书 30MB）；" +
         "(3) 用户尝试在 IM 直传但失败的征兆。" +
         "返回的 URL 让用户在浏览器拖拽上传，文件落到 ~/.openclaw/upload/<token>/files/<filename>。" +
         "用户传完后回聊天说『传完了』→ AI 调 enhance_upload_check(token) 拿路径再 Read 分析。",
@@ -889,13 +889,13 @@ export function registerBotUploadLink(
         if (!availableTools.has("enhance_upload_link")) return [];
         return [
           "## 文件上传（用户 → AI）",
-          "- 触发场景任一命中就调 `enhance_upload_link`：① 用户主动说要传大文件/视频/数据集；② 用户消息含『视频/文件超过 100M，无法下载』『文件已被截断』等 IM 渠道大小拦截系统提示（企微 100MB / 钉钉等）；③ 用户尝试在 IM 直传但失败的征兆。",
+          "- 触发场景任一命中就调 `enhance_upload_link`：① 用户主动说要传大文件/视频/数据集；② 用户消息含『视频/文件超过 100M，无法下载』『文件已被截断』等 IM 渠道大小拦截系统提示（企微 100MB / 钉钉 20MB / 飞书 30MB）；③ 用户尝试在 IM 直传但失败的征兆。",
           "- 返回 URL 发给用户，让其浏览器拖拽上传。用户说『传完了』→ 调 `enhance_upload_check(token)` 拿路径再 Read 分析。",
           "- 不要让用户在 IM 渠道硬上传超过 20MB 文件——必失败。",
         ];
       });
       api.logger.info(
-        "[enhance-bot-upload] prompt supplement 已注册（引导 LLM 在企微 100MB 等场景主动调 enhance_upload_link）",
+        "[enhance-bot-upload] prompt supplement 已注册（引导 LLM 在 IM 渠道文件上限——企微 100MB / 钉钉 20MB / 飞书 30MB 等场景主动调 enhance_upload_link）",
       );
     } catch (err) {
       api.logger.warn(

@@ -1,6 +1,8 @@
 /**
  * 渠道检测工具 - 跨渠道统一抽象
- * 支持: wecom(企微), dingtalk(钉钉), terminal
+ * 支持: wecom(企微), dingtalk(钉钉), feishu(飞书), terminal
+ * 注：isTerminal/getOutputFormat 等为既有公共 API（供其他模块按需取用），
+ * 当前活跃调用方为 large-file-bridge（isImChannel/detectChannel）。
  */
 
 // sessionKey → channelId 的缓存
@@ -46,6 +48,21 @@ export function isWecom(sessionKey: string): boolean {
 export function isDingtalk(sessionKey: string): boolean {
   const ch = getChannel(sessionKey);
   return ch === "dingtalk" || ch === "dingding";
+}
+
+/**
+ * 是否飞书渠道（feishu / lark 两种标识都认）
+ */
+export function isFeishu(sessionKey: string): boolean {
+  const ch = getChannel(sessionKey);
+  return ch === "feishu" || ch === "lark";
+}
+
+/**
+ * 是否 IM 渠道（企微 / 钉钉 / 飞书——都有文件大小上限，需走链接上传兜底）
+ */
+export function isImChannel(sessionKey: string): boolean {
+  return isWecom(sessionKey) || isDingtalk(sessionKey) || isFeishu(sessionKey);
 }
 
 /**

@@ -513,20 +513,22 @@ export interface HookProfilerConfig {
 
 // ── 大文件上传桥接 (v6.x) ──
 /**
- * 企微有 100MB 文件传输上限。当用户发送 >100MB 文件时，企微返回
- * "视频/文件超过100M，无法下载" 纯文本错误。本模块：
- * 1. 检测该错误文本，注入上传链接引导
+ * IM 渠道对文件传输有大小上限（企微聊天 100MB / 钉钉 20MB / 飞书 30MB）。本模块：
+ * 1. 检测渠道大文件错误文本，注入上传链接引导
  * 2. 检测用户主动提大文件上传意图，主动提供上传链接
  * 3. 提供 enhance_upload_large_file 工具和上传表单 GET/POST /plugins/enhance/upload
  * 与 bot-share-link 互补：bot-share-link 处理本地文件→分享链接，本模块负责检测+上传表单。
+ * 注：字段与 src/modules/large-file-bridge.ts 内定义保持同步（TS 接口无运行时开销，双处定义可接受）。
  */
 export interface LargeFileBridgeConfig {
   enabled?: boolean;
   /** 自定义上传页面 URL；不填则自动生成为 {baseUrl}/plugins/enhance/upload */
   uploadUrl?: string;
-  /** 上传页面基础 URL（企微分享场景需显式填公网地址） */
+  /** 上传页面基础 URL（IM 分享场景需显式填公网地址） */
   baseUrl?: string;
-  /** 检测企微 >100M 错误文本，默认 true */
+  /** 检测渠道大文件错误文本（企微 100M / 钉钉 20M / 飞书 30M），默认 true。旧名 detectWecomError 仍兼容 */
+  detectChannelError?: boolean;
+  /** 兼容旧配置：detectWecomError === false 等价于 detectChannelError === false */
   detectWecomError?: boolean;
   /** 用户提大文件/上传相关关键词时主动提供链接，默认 true */
   proactiveOffer?: boolean;

@@ -34,6 +34,9 @@ tmp/
 # 本地私有 agent 指令（含敏感内容，不入库）
 .agents/
 
+# Reasonix / 本地 agent 运行时状态（不入库）
+.reasonix/
+
 # Claude Code 项目上下文：.claude/ 本身要进 git（交接用），仅忽略本地私有设置
 .claude/settings.local.json
 .claude/*.local.json

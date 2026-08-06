@@ -7,7 +7,7 @@
 
 `@huo15/huo15-openclaw-enhance` —— **非侵入式**的 OpenClaw（龙虾）插件。在不改龙虾核心、不重复龙虾原生能力的前提下，补齐「项目工程化 + 多 Agent 运营」维度的能力（结构化记忆、任务/章节追踪、配置体检、文件分享/预览、Claude Code 桥接、上下文守护等 36 个模块）。
 
-- npm: `@huo15/huo15-openclaw-enhance`（当前 v6.7.19）
+- npm: `@huo15/huo15-openclaw-enhance`（当前 v6.7.21）
 - 主仓库: https://cnb.cool/huo15/ai/huo15-openclaw-enhance （remote `origin`）
 - GitHub 镜像: https://github.com/zhaobod1/huo15-openclaw-enhance （remote `github`，SSH 别名 `github-zhaobod1`）
 - ClawHub slug: `huo15-huo15-openclaw-enhance`
@@ -16,7 +16,9 @@
 
 **Enhance OpenClaw, never modify or duplicate it. 龙虾有的，让龙虾管。**
 
-加任何新功能前，先 `grep` `~/workspace/projects/openclaw/openclaw-source`（只读参考，禁改）找原生等价物：原生**有**就走原生 API（`registerMemoryCapability` / `on(hook, handler)` 等），原生**没有**才补。详见 [docs/decisions/](docs/decisions/)。
+1. **非侵入式增强**：不修改龙虾核心、不重复龙虾原生能力。加任何新功能前，先 `grep` `~/workspace/projects/openclaw/openclaw-source`（只读参考，禁改）找原生等价物：原生**有**就走原生 API（`registerMemoryCapability` / `on(hook, handler)` 等），原生**没有**才补。详见 [docs/decisions/](docs/decisions/)。
+2. **适配 Openclaw 最新稳定版**：`compat.pluginApi` / `peerDependencies.openclaw` 保持 semver range（见开发铁律 1），但**每次发版前必须** `npm i openclaw@latest --no-save` 装最新稳定版 SDK 再过 `npx tsc --noEmit`——只使用最新稳定版公开 API，不依赖已移除/未文档化的内部接口；`build.openclawVersion` 指向目标 runtime 的最新稳定版。SDK 升级撞 breaking change 时，先查 `docs/lessons/` 有无对应踩坑，没有则补一条。
+3. **不跟 OpenClaw 功能冲突、不重复造轮子**：原生**有**的能力绝不自己另写一套（不造重复轮子）——工具/钩子/命令的命名、行为、入口一律避开原生与已有渠道插件的占用；hook 优先级、事件语义不覆盖原生行为。每次升级 OpenClaw 时检查原生是否新增了与本插件重叠的能力：**一旦原生新增实现了本插件的某个功能，本插件就让位**——标记 deprecated、收敛为只读提示或删除，绝不双轨运行与原生抢活。详见 [docs/decisions/0001-non-invasive-enhancement.md](docs/decisions/0001-non-invasive-enhancement.md)。
 
 ## 怎么跑
 

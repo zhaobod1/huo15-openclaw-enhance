@@ -1,4 +1,10 @@
 
+## v6.7.22 (unreleased)
+
+- **大文件上传多渠道化**：large-file-bridge 从「企微 100MB 单渠道」扩展为 IM 渠道限制表（企微 聊天 100MB/API 20MB、钉钉 20MB、飞书 30MB，来源渠道开放平台官方文档）。错误文本检测覆盖企微/钉钉/飞书各自文案（含飞书英文 file size exceed）+ 通用中文兜底正则（`文件/视频超过 X MB 无法/失败`）；主动引导从只卡 `wecom-` 扩展到 `wecom-/dingtalk-/dingding-/feishu-/lark-` 前缀 ∪ message_received 渠道缓存（channel-detect isImChannel）双通道；before_prompt_build 注入文案 / before_agent_reply 兜底 suffix / enhance_upload_large_file 的 note 全部渠道感知。channel-detect 新增 isFeishu / isImChannel，配置项改名 detectChannelError（旧名 detectWecomError 兼容）。
+- **postinstall 交互式 baseURL 初始化**：`npm install` 后若 stdin/stderr 均为 TTY 且未配置，直接询问用户输入 baseURL（示例 `https://nengbaibot.huo15.com`），裸域名自动补 `https://`，校验通过后写入 `~/.openclaw/share/config.json`（与 enhance_share_set_baseurl 同格式）；空回车/无效输入回退原纯提示，8s 无输入自动跳过防挂死；CI / 已配置 / 非 TTY 行为不变。
+- 项目规则：CLAUDE.md 最高铁律补充「适配 Openclaw 最新稳定版」（发版前必须 `npm i openclaw@latest --no-save` + `npx tsc --noEmit`，只用最新稳定版公开 API；版本号更新为 v6.7.21）与「不跟 OpenClaw 功能冲突、不重复造轮子」（原生有的能力不另写一套、命名避开原生占用、原生新增重叠功能时插件让位）。
+
 ## v6.7.21 (2026-06-26)
 
 - 修复: better-sqlite3 每次更新后丢失原生绑定迫使手工 rebuild

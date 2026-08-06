@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// postinstall - hint about BOT_BASE_URL after npm install.
-// 零 require 外部包；只用 fs/path（node 内置），不算 §6.2 禁的 child_process。
-// 不动用户文件，纯写 stderr。已配置 / CI / silent 自动跳过。
+// postinstall - 提示 + 交互式配置 BOT_BASE_URL（v6.7.22 起 TTY 下直接询问并写入插件自有配置）。
+// 零 require 外部包；只用 fs/path/readline（node 内置），不算 §6.2 禁的 child_process。
+// 只写插件自有目录 ~/.openclaw/share/config.json（与 enhance_share_set_baseurl 同路径同格式），不动用户的 openclaw.json。
+// 已配置 / CI / silent / 非 TTY 自动跳过交互（非 TTY 时仍打纯提示）。
 
 "use strict";
 
@@ -81,4 +82,128 @@ var msg =
   c.dim + "（已配置 / CI 环境会自动跳过此提示）" + c.reset + "\n" +
   "\n";
 
-process.stderr.write(msg);
+// ---- 交互式 baseURL 输入（TTY 才有；非 TTY / 管道环境自动退回纯提示）----
+// v6.7.22: 初始化时直接问用户 baseURL，写入 ~/.openclaw/share/config.json
+//（与 enhance_share_set_baseurl 同格式、同路径；只写插件自有目录，不动 openclaw.json）。
+// 示例：本机 OpenClaw 内网穿透域名 https://nengbaibot.huo15.com
+function normalizeBaseUrl(raw) {
+  var v = String(raw || "").trim();
+  if (!v) return null;
+  if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+  var parsed;
+  try {
+    parsed = new URL(v);
+  } catch (_e) {
+    return null;
+  }
+  if (parsed.pathname && parsed.pathname !== "/" && parsed.pathname !== "") return null;
+  if (parsed.search || parsed.hash) return null;
+  return parsed.protocol + "//" + parsed.host;
+}
+
+function persistBaseUrl(apiUrl) {
+  var home = process.env.HOME || process.env.USERPROFILE;
+  if (!home) return false;
+  var shareDir = path.join(home, ".openclaw", "share");
+  var cfgPath = path.join(shareDir, "config.json");
+  var current = {};
+  try {
+    if (fs.existsSync(cfgPath)) {
+      var parsed = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      if (parsed && typeof parsed === "object") current = parsed;
+    }
+  } catch (_e) { /* ignore corrupt */ }
+  current.baseUrl = apiUrl;
+  current.setAt = new Date().toISOString();
+  current.setBy = "postinstall";
+  try {
+    fs.mkdirSync(shareDir, { recursive: true });
+    // 原子写：先写临时文件再 rename，避免 Ctrl+C 撞写瞬间损坏 config.json
+    var tmpPath = cfgPath + ".tmp-" + process.pid;
+    fs.writeFileSync(tmpPath, JSON.stringify(current, null, 2), "utf-8");
+    fs.renameSync(tmpPath, cfgPath);
+    return true;
+  } catch (_e) {
+    try { fs.unlinkSync(cfgPath + ".tmp-" + process.pid); } catch (_e2) { /* ignore */ }
+    return false;
+  }
+}
+
+// 交互段：仅当 stderr/stdin 都是 TTY 且用户未在非交互管道中
+if (process.stdin && process.stdin.isTTY && process.stderr && process.stderr.isTTY) {
+  var readline = require("readline");
+  var rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  var answered = false;
+  var prompted = false;
+
+  function doPrompt() {
+    if (prompted) return;
+    prompted = true;
+    rl.question(
+      "\n" +
+        c.cyan + "▶ " + c.reset + c.bold + "是否现在配置 baseURL（公网下载/上传域名）？" + c.reset + "\n" +
+        "  测试示例：" + c.dim + "https://nengbaibot.huo15.com" + c.reset + "\n" +
+        "  直接回车跳过（稍后可随时配置），请输入： ",
+      function (answer) {
+        var trimmed = String(answer || "").trim();
+        var normalized = trimmed ? normalizeBaseUrl(answer) : null;
+        if (trimmed && !normalized) {
+          // 无效输入：打印警告，随后 close 时自动回退纯提示
+          process.stderr.write(c.yellow + "⚠ 输入无效（需域名或 http(s)://host[:port]，不带路径/query）。已跳过，稍后可再配置。\n" + c.reset);
+          rl.close();
+          return;
+        }
+        if (normalized) {
+          if (persistBaseUrl(normalized)) {
+            answered = true; // 只有真正写入才算回答，close 时不再打纯提示
+            process.stderr.write(c.green + "✓ baseUrl=" + normalized + " 已保存到 ~/.openclaw/share/config.json\n" + c.reset);
+          } else {
+            process.stderr.write(c.yellow + "⚠ 保存失败（写 ~/.openclaw/share/config.json 出错）。稍后可对 AI 说「把 baseUrl 设成 " + normalized + "」。\n" + c.reset);
+          }
+        }
+        // 空回车：answered 保持 false → close 时回退纯提示
+        rl.close();
+      }
+    );
+  }
+
+  // 若用户在 8s 内无输入，视为跳过，避免安装流程挂死
+  var timedOut = false;
+  var timer = setTimeout(function () {
+    if (!answered) {
+      timedOut = true;
+      try { rl.close(); } catch (_e) { /* ignore */ }
+    }
+  }, 8000);
+
+  // Ctrl+C 优雅退出：静默退出，不打纯提示（npm 视为安装成功）
+  var sigint = false;
+  rl.on("SIGINT", function () {
+    sigint = true;
+    clearTimeout(timer);
+    try { rl.close(); } catch (_e) { /* ignore */ }
+  });
+
+  rl.on("close", function () {
+    clearTimeout(timer);
+    if (!answered && !sigint) {
+      if (timedOut) {
+        // 超时：用户不在场，只打一行，避免与纯提示重复
+        process.stderr.write(
+          c.dim + "\n（8 秒未收到输入，已跳过配置。稍后可对 AI 说「把 baseUrl 设成 https://your-domain.com」）\n" + c.reset
+        );
+      } else {
+        // 空回车/无效输入：用户在场，回退完整纯提示（含三种配置方式）
+        process.stderr.write(
+          c.dim + "\n（未配置 baseURL，以下为配置方式）\n" + c.reset
+        );
+        process.stderr.write(msg);
+      }
+    }
+    process.exit(0);
+  });
+
+  doPrompt();
+} else {
+  process.stderr.write(msg);
+}
