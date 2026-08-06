@@ -37,7 +37,7 @@
 
 老 npm 包对应的 ClawHub slug `huo15-openclaw-enhance` 上有 ghost manifest 死结——1.3.0-5.1.0 期间 27 个版本 pluginApi=bare `2026.2.24`（早于本仓 §6.1 红线"compat.pluginApi 必须 ranged"修复），ClawHub plugin entry record 在那段历史首次注册时缓存了 bare 值，后续 publish 不刷新 record 字段，OpenClaw 走 `clawhub:` 协议解析时永远拿到老 manifest 报 `requires plugin API 2026.2.24`。
 
-**修复**：换 npm 包名（与 `huo15-huihuoyun-odoo` 等 huo15-* 命名规范对齐）+ 新 ClawHub slug `huo15-huo15-openclaw-enhance`，让 ClawHub 重新创建一个干净的 plugin entry。OpenClaw plugin id 仍是 `enhance`，老用户配置不需迁移。详见 [CHANGELOG.md](./CHANGELOG.md) v6.0.0 段。
+**修复**：换 npm 包名（与 `huo15-huihuoyun-odoo` 等 huo15-* 命名规范对齐）+ 新 ClawHub slug `huo15-huo15-openclaw-enhance`，让 ClawHub 重新创建一个干净的 plugin entry。详见 [CHANGELOG.md](./CHANGELOG.md) v6.0.0 段。（v6.7.22 起 OpenClaw plugin id 因 ClawHub code-plugin id 被老包占用而改为 `enhance-huo15`，见[一键安装](#一键安装)段警告。）
 
 老 npm 包已 deprecate；老 ClawHub slug 已 hide。已装老版本用户跑[迁移命令](#老版本用户迁移v5x--v600)即可。
 
@@ -226,7 +226,9 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 ## 一键安装
 
-> ⚠️ **v6.0.0 起 npm 包改名**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`（与 `huo15-huihuoyun-odoo` 等其他 huo15-* 包命名规范对齐 + 让 ClawHub 重新创建干净的 plugin entry，绕开老 slug 1.3.0-5.1.0 期间 27 个 bare pluginApi 留下的 ghost manifest 死结）。OpenClaw plugin id 仍是 `enhance`，老用户配置 `~/.openclaw/openclaw.json` 里 `plugins.entries.enhance.*` 不需要迁移。
+> ⚠️ **v6.0.0 起 npm 包改名**：`@huo15/openclaw-enhance` → `@huo15/huo15-openclaw-enhance`（与 `huo15-huihuoyun-odoo` 等其他 huo15-* 包命名规范对齐 + 让 ClawHub 重新创建干净的 plugin entry，绕开老 slug 1.3.0-5.1.0 期间 27 个 bare pluginApi 留下的 ghost manifest 死结）。
+>
+> ⚠️ **v6.7.22 起 OpenClaw plugin id 改 `enhance-huo15`**：ClawHub 上 code-plugin 的插件 id `enhance` 被老包 `@huo15/openclaw-enhance`（owner huo15，非本仓可操作账号）占用，新 slug 无法以 `enhance` id 注册 code-plugin，经决策改为 `enhance-huo15`。**老用户 `~/.openclaw/openclaw.json` 里 `plugins.entries.enhance.*` 配置需迁移为 `plugins.entries.enhance-huo15.*`**；本地数据目录（`~/.openclaw/extensions/enhance`、`~/.openclaw/share`、`~/.openclaw/upload`）与 URL 前缀（`/plugins/enhance*`）不变。
 
 ```bash
 openclaw plugins install @huo15/huo15-openclaw-enhance --force
@@ -241,7 +243,7 @@ openclaw restart
 # 1. 卸载老 plugin（OpenClaw 内部 plugin id 是 enhance）
 openclaw plugins uninstall enhance
 
-# 2. 装新包（npm 包名变了，但 OpenClaw plugin id 还是 enhance）
+# 2. 装新包（v6.7.22 起 OpenClaw plugin id 是 enhance-huo15；老配置 plugins.entries.enhance.* 需迁为 enhance-huo15.*）
 openclaw plugins install @huo15/huo15-openclaw-enhance --force
 
 # 3. 重启

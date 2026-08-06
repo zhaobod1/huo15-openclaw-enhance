@@ -79,7 +79,10 @@ const TIER_MAX: Record<ToolTier, Tier> = {
 // SDK 内部带 hash 的 chunk 文件名（types-B70zVumi.js），导致 TS2742 "inferred type cannot
 // be named without a reference"。给一个稳定的具名类型即可根治，纯类型零运行时改动。
 const enhancePlugin: OpenClawPluginDefinition = definePluginEntry({
-  id: "enhance",
+  // v6.7.22: ClawHub 上 code-plugin 的插件 id "enhance" 被老包 @huo15/openclaw-enhance 占用
+  // （owner huo15，非本仓可操作账号），新 slug 无法以 enhance id 注册 code-plugin。
+  // 经决策改为 enhance-huo15（保留 enhance 语义 + huo15 标识）；本地数据目录/URL 前缀不变。
+  id: "enhance-huo15",
   name: "龙虾增强包 (OpenClaw Enhancement Kit)",
   description: "结构化记忆、工具安全守卫、提示词增强、工作流自动化、仪表盘",
 
