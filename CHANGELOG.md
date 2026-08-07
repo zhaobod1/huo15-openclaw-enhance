@@ -1,4 +1,19 @@
 
+## v6.7.24 (2026-08-07)
+
+- **大文件上传绑定 OpenClaw 会话（session）**：上传 token 现在**绑定创建它的完整 sessionKey**，并支持「塞进会话」——用户上传完成后自动注入该 session 的下一轮上下文，agent 无需用户再描述即可感知文件。
+  - `UploadEntry` 新增 `sessionId` 字段（`enhance_upload_link` 工具与 large-file-bridge 自动 token 均写入，同一份 `~/.openclaw/upload/manifest.json`）。
+  - **会话注入**：`/api/upload` 落盘成功后调原生 `api.session.workflow.enqueueNextTurnInjection({sessionKey, placement:"prepend_context", idempotencyKey:"enhance-upload:<file>:<size>", ttlMs:6h})`，注入「文件已上传：name (size) + 落盘路径」。外部插件可用（`sendSessionAttachment` 是 bundled-only，硬性拒绝第三方插件，不可用）。
+  - **按会话查询**：`enhance_upload_check` 新增 `sessionKey` 参数，不传 token 时列出该会话全部 token 及文件；缺省值取工具 ctx 的当前会话（不受 LLM 控制，防跨会话枚举）；token 分支返回里带 `sessionId`。
+  - **状态投影不做**：调研确认原生 `registerSessionExtension` 的 `project` 回调只在 session 已有插件状态时才被 host 调用，而写入状态的 `patchSessionExtension` **未暴露给第三方插件**——对外部插件注册即死代码，故不注册（详见代码注释）；「会话 ↔ 上传记录」由 manifest + 按会话查询 + 会话注入三者覆盖。
+
+- **移除 enhance 内置的 11 个配套 huo15-openclaw-\* 技能管理**（`huo15-openclaw-plan-mode` / `explore-mode` / `verify-mode` / `memory-curator` / `frontend-design` / `design-director` / `brand-protocol` / `design-critique` / `simplify` / `security-review` / `code-review`）：背景是用户侧引入 `superpowers-openclaw-plugin`（桥接 obra/superpowers 14 个工作流技能，覆盖 plan / verify / code-review 等场景），决定这 11 个技能整体弃用。
+  - 删除 `src/modules/skill-installer.ts`（`CLAW_HUB_SKILLS` 列表 + `enhance_install_skills` 工具）与 `src/modules/skill-doctor.ts`（`EXPECTED_SKILLS` 巡检 + `enhance_skill_doctor` 工具）。
+  - `skill-recommender.ts` 保留「按需求挑已装 skill + 自建规划」核心，移除 `KNOWN_HUO15_SKILLS` 映射、「ClawHub 未装 huo15-* 候选」段与 `includeUninstalled` 参数。
+  - `index.ts` 移除两模块注册与首次启动「配套技能未安装」提示；`openclaw.plugin.json` contracts.tools 移除 `enhance_install_skills` / `enhance_skill_doctor`。
+  - 文档同步：README 删「增强技能」章节、模块表删「技能巡检/技能安装器」行、toolTier 工具数 10/19/27 → 9/18/25；docs/architecture.md / HANDOVER.md / CLAUDE.md 模块数 36 → 34；docs/SELF_ITERATE.md 的 skill 发布流程改为 `openclaw skills install <slug>`（插件不再引用 slug）。
+  - 本地 `~/.openclaw` 下已装的 11 个技能实例需用户自行清理（见对话记录中的 find 命令，共 644 个实例）。
+
 ## v6.7.23 (2026-08-06)
 
 - OpenClaw plugin id 改 `enhance-huo15` 后的重新发布（npm 上 6.7.22 已带旧 id，不可重发同版本）。

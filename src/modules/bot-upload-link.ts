@@ -74,6 +74,8 @@ interface UploadEntry {
   token: string;
   label?: string;
   ownerAgent?: string;
+  /** 创建该 token 时的 OpenClaw sessionKey（完整绑定，不做截断）；用于会话注入与按 session 查询 */
+  sessionId?: string;
   createdAt: string;
   expireAt: string;
   files: Array<{
@@ -162,6 +164,42 @@ function formatSize(bytes: number): string {
 
 function errorResponse(msg: string) {
   return { content: [{ type: "text" as const, text: `✗ ${msg}` }] };
+}
+
+/**
+ * v6.7.24: 上传完成后把「文件已到」注入该 session 的下一轮上下文（原生
+ * api.session.workflow.enqueueNextTurnInjection，外部插件可用）。这样无论用户
+ * 接下来说什么（“分析这个文件”/“继续”），agent 的下一轮 prompt 里都已有文件信息。
+ * 幂等 key 用 文件名+时间，ttl 6h 防注入堆积。
+ */
+async function notifySessionFileArrived(
+  api: OpenClawPluginApi,
+  sessionKey: string | undefined,
+  fileName: string,
+  filePath: string,
+  sizeBytes: number,
+): Promise<void> {
+  if (!sessionKey) return;
+  try {
+    const r = await api.session?.workflow?.enqueueNextTurnInjection?.({
+      sessionKey,
+      text:
+        `📎 用户已通过上传页上传文件：**${fileName}**（${formatSize(sizeBytes)}）\n` +
+        `落盘路径：\`${filePath}\`\n` +
+        `本会话可直接 Read 该路径分析或处理（不需要再向用户要文件）。`,
+      placement: "prepend_context",
+      ttlMs: 6 * 3600 * 1000,
+      idempotencyKey: `enhance-upload:${fileName}:${sizeBytes}`,
+    });
+    if (r && !r.enqueued) {
+      // 被 allowPromptInjection=false 等策略拦截，静默即可
+      api.logger.info(`[enhance-bot-upload] session 注入被拒（enqueued=false） session=${sessionKey.slice(0, 12)}`);
+    }
+  } catch (err) {
+    api.logger.warn(
+      `[enhance-bot-upload] session 注入失败 session=${sessionKey.slice(0, 12)}：${(err as Error).message}`,
+    );
+  }
 }
 
 function resolveBaseUrl(
@@ -609,6 +647,15 @@ export function registerBotUploadLink(
           }
         }
 
+        // v6.7.24: 上传完成 → 绑定 session 的下一轮注入（agent 自动感知文件已到）
+        void notifySessionFileArrived(
+          api,
+          idx >= 0 ? fresh.entries[idx].sessionId : undefined,
+          fileName,
+          filePath,
+          receivedBytes,
+        );
+
         const durationMs = Date.now() - uploadStartedAt;
         const throughputMBs =
           durationMs > 0 ? (receivedBytes / 1024 / 1024 / (durationMs / 1000)).toFixed(2) : "?";
@@ -684,6 +731,9 @@ export function registerBotUploadLink(
         const now = new Date();
         const expireAt = new Date(now.getTime() + ttlH * 3600 * 1000);
         const ownerAgent = ((ctx as unknown as { agentId?: string })?.agentId ?? "").trim() || undefined;
+        // v6.7.24: 绑定当前 session —— 完整 sessionKey（不截断），供会话注入 / 按 session 查询
+        const ctxAny = ctx as unknown as { sessionKey?: string; sessionId?: string };
+        const sessionId = (ctxAny.sessionKey ?? ctxAny.sessionId ?? "").trim() || undefined;
 
         const manifest = safeReadManifest(manifestPath);
         const pruned = pruneExpired(uploadRoot, manifest, now);
@@ -691,6 +741,7 @@ export function registerBotUploadLink(
           token,
           label,
           ownerAgent,
+          sessionId,
           createdAt: now.toISOString(),
           expireAt: expireAt.toISOString(),
           files: [],
@@ -720,6 +771,7 @@ export function registerBotUploadLink(
             : `baseUrl=${baseUrl}`,
           ``,
           `**用户操作步骤**：把此 URL 发给用户 → 浏览器打开 → 拖拽文件上传 → 用户说"传完了" → AI 调 \`enhance_upload_check(token="${token}")\` 取路径再 Read。`,
+          sessionId ? `绑定会话：${sessionId.slice(0, 12)}…（上传完成会自动注入本会话上下文）` : "",
         ]
           .filter(Boolean)
           .join("\n");
@@ -730,6 +782,7 @@ export function registerBotUploadLink(
             url,
             token,
             label,
+            sessionId,
             uploadRoot: tokenDir,
             expireAt: expireAt.toISOString(),
             baseUrl,
@@ -744,17 +797,75 @@ export function registerBotUploadLink(
   );
 
   api.registerTool(
-    ((_ctx: OpenClawPluginToolContext) => ({
+    ((ctx: OpenClawPluginToolContext) => ({
       name: "enhance_upload_check",
       description:
-        "查看某个 upload token 当前已收到的文件列表 + 落盘路径。LLM 在用户说『传完了』后调，拿到路径再 Read 文件分析。",
+        "查看某个 upload token 当前已收到的文件列表 + 落盘路径。LLM 在用户说『传完了』后调，拿到路径再 Read 文件分析。" +
+        "也支持按会话查询：不传 token 时默认查当前会话（v6.7.24），或显式传 sessionKey。",
       parameters: Type.Object({
-        token: Type.String({
-          description: "12 位 hex token，由 enhance_upload_link 返回",
-        }),
+        token: Type.Optional(
+          Type.String({
+            description: "12 位 hex token，由 enhance_upload_link 返回；与 sessionKey 二选一",
+          }),
+        ),
+        sessionKey: Type.Optional(
+          Type.String({
+            description: "OpenClaw 会话 key；缺省时用当前会话（ctx.sessionKey）",
+          }),
+        ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const token = String(params.token ?? "").trim();
+        // v6.7.24: sessionKey 缺省 = 当前会话（ctx 提供，不受 LLM 控制，天然防跨会话枚举）
+        const ctxAny = ctx as unknown as { sessionKey?: string; sessionId?: string };
+        const currentSession = (ctxAny.sessionKey ?? ctxAny.sessionId ?? "").trim();
+        const sessionKey = String(params.sessionKey ?? currentSession).trim();
+
+        // v6.7.24: 按会话查询——不传 token 时列出该 session 的所有 token 及文件
+        if (!token) {
+          if (!sessionKey) {
+            return errorResponse(`token 和 sessionKey 至少要传一个`);
+          }
+          const manifest = safeReadManifest(manifestPath);
+          pruneExpired(uploadRoot, manifest, new Date());
+          const mine = manifest.entries.filter((e) => e.sessionId === sessionKey);
+          if (mine.length === 0) {
+            return {
+              content: [{ type: "text" as const, text: `📭 会话 ${sessionKey.slice(0, 12)}… 暂无上传记录（或 token 已过期清理）。` }],
+              structuredContent: { sessionKey, tokens: [] },
+            };
+          }
+          const lines = [`📦 会话 ${sessionKey.slice(0, 12)}… 共 ${mine.length} 个上传 token：`, ""];
+          const out: Array<{ token: string; label?: string; expireAt: string; files: Array<{ name: string; path: string; sizeBytes: number }> }> = [];
+          for (const e of mine) {
+            const tokenDir = join(uploadRoot, e.token, "files");
+            let fsFiles: string[] = [];
+            try {
+              fsFiles = readdirSync(tokenDir);
+            } catch {
+              fsFiles = [];
+            }
+            const files = e.files.filter((f) => fsFiles.includes(f.name));
+            lines.push(`  · token ${e.token}${e.label ? ` (${e.label})` : ""} — ${files.length} 个文件`);
+            for (const f of files) {
+              const p = join(tokenDir, f.name);
+              lines.push(`      ${f.name} (${formatSize(f.sizeBytes)})\n      Read: ${p}`);
+            }
+            out.push({
+              token: e.token,
+              label: e.label,
+              expireAt: e.expireAt,
+              files: files.map((f) => ({ name: f.name, path: join(tokenDir, f.name), sizeBytes: f.sizeBytes })),
+            });
+          }
+          lines.push("");
+          lines.push("下一步：用 Read 工具读对应路径分析文件。");
+          return {
+            content: [{ type: "text" as const, text: lines.join("\n") }],
+            structuredContent: { sessionKey, tokens: out },
+          };
+        }
+
         if (!isValidToken(token)) {
           return errorResponse(`token 格式不对（要 12 hex 字符）：${token}`);
         }
@@ -810,7 +921,13 @@ export function registerBotUploadLink(
 
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
-          structuredContent: { token, label: entry.label, expireAt: entry.expireAt, files: out },
+          structuredContent: {
+            token,
+            label: entry.label,
+            sessionId: entry.sessionId,
+            expireAt: entry.expireAt,
+            files: out,
+          },
         };
       },
     })) as any,
@@ -879,6 +996,14 @@ export function registerBotUploadLink(
     })) as any,
     { name: "enhance_upload_revoke" },
   );
+
+  // ── v6.7.24 说明：session 状态投影为何不做了 ──
+  // 原生 api.session.state.registerSessionExtension 存在，但其 project 回调只在
+  // session 已有插件状态（patchSessionExtension 写入）时才被 host 调用；而
+  // patchSessionExtension 并未暴露给第三方插件（SDK facade 无此方法）。
+  // 因此对外部插件注册 extension 是死代码（永不投影），这里不注册；
+  // 「会话 ↔ 上传记录」改为由 manifest(sessionId) + enhance_upload_check(sessionKey)
+  // + 上传完成 enqueueNextTurnInjection 三者实现（同为原生能力，外部插件可用）。
 
   // ── prompt supplement: 引导 LLM 在 IM 大文件场景主动调 ──
   // 跟 bot-share-link 的 supplement 同款套路；touch 触发关键词字面写进去

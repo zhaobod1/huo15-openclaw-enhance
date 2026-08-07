@@ -6,7 +6,7 @@
 
 ```
 index.ts             插件入口（definePluginEntry → register）
-src/modules/*        36 个功能模块，每个 register 一类能力
+src/modules/*        34 个功能模块，每个 register 一类能力
 src/utils/*          共享工具：sqlite-store / safe-api-wrapper / resolve-home /
                      notification-queue / latency-tracker / route-history / model-route-config
 src/types.ts         EnhancePluginConfig 等类型定义
@@ -32,7 +32,7 @@ templates/*          非嵌入式长文档模板
 
 `index.ts` 的 `TIER_MAX`：`minimal→1`、`balanced→2`（默认）、`full→3`。每个模块标 tier，运行时**只 register tier ≤ 当前档位的模块**，其余整个不加载（省 tool schema 重量）。
 
-## 4. 模块清单（src/modules/，36 个）
+## 4. 模块清单（src/modules/，34 个）
 
 ### 记忆与上下文
 | 模块 | 职责 |
@@ -63,8 +63,7 @@ templates/*          非嵌入式长文档模板
 | `self-check.ts` | 验证插件自身配置/依赖 |
 | `config-doctor.ts` | 扫已装插件 compat.pluginApi / tools.profile 红线 |
 | `session-doctor.ts` | 诊断卡住/异常 session |
-| `skill-doctor.ts` | 扫已装 skill frontmatter/slug 一致性 |
-| `skill-recommender.ts` | 按上下文推荐 skill |
+| `skill-recommender.ts` | 按需求挑已装 skill / 给自建 skill 规划 |
 | `hook-profiler.ts` | 统计 hook handler 耗时 |
 
 ### 文件与桥接
@@ -81,7 +80,6 @@ templates/*          非嵌入式长文档模板
 | `tool-safety.ts` | 工具调用日志、风险分级、危险命令拦截建议 |
 | `mode-gate.ts` | 按运行模式 gate 工具可用性 |
 | `workflow-hooks.ts` | on(hook) 事件驱动自动化 |
-| `skill-installer.ts` | 生成 `clawhub install` 命令，return-cliCmd |
 | `scheduled-tasks-bridge.ts` | 桥接 openclaw cron，return-cliCmd |
 | `statusline.ts` | statusline 贡献 |
 | `dashboard.ts` | HTTP 路由展示各模块状态 |

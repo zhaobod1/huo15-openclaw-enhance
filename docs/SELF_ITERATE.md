@@ -4,7 +4,7 @@
 >
 > 1. **不断自我迭代** — 每 3 天对照 Claude Code（官方 docs / 本地 npm 源码 / 反编译 Claude Desktop APP）做一次能力 gap 调研，挑高 ROI 候选落地。
 > 2. **零侵入** — 永远不动 openclaw 核心代码、不复制龙虾原生功能。重叠功能以龙虾为准。
-> 3. **skill 走 ClawHub** — 任何要新增 / 修改的 skill **必须先在本地 `huo15-skills/` 里写好 → 发布到 ClawHub → 然后让本插件的 `skill-installer.ts` 引用 slug**。**插件代码里绝不内嵌 skill 内容**。
+> 3. **skill 走 ClawHub** — 任何要新增 / 修改的 skill **必须先在本地 `huo15-skills/` 里写好 → 发布到 ClawHub → 再用 `openclaw skills install <slug>` 装到 workspace/skills**（enhance 插件不内置引用任何 huo15-* 技能，v6.7.24 起）。**插件代码里绝不内嵌 skill 内容**。
 
 本文档把这套迭代节奏沉淀成 SOP，每次迭代结束直接更新这里。
 
@@ -150,9 +150,8 @@ CLAWHUB_TOKEN=clh_<TOKEN> clawhub publish ./huo15-openclaw-<name> --version 1.0.
 # 3. 等 ClawHub 索引可见（搜索能找到）
 clawhub search huo15-openclaw-<name>
 
-# 4. 然后到 enhance 仓库 src/modules/skill-installer.ts 把 slug 加到 CLAW_HUB_SKILLS
-#    src/modules/skill-doctor.ts 同步加到 EXPECTED_SKILLS
-#    bump enhance 版本 → 走上面的 plugin 发布流程
+# 4. 在 OpenClaw 里安装（enhance 插件不再内置引用 huo15-* 技能，v6.7.24 起）
+openclaw skills install huo15-openclaw-<name> --dir ~/.openclaw/workspace/skills
 ```
 
 ⚠️ **绝对不要在插件代码里内嵌 skill 内容**。Skill 必须独立发版，插件只引用 slug。
@@ -206,7 +205,7 @@ clawhub search huo15-openclaw-<name>
 
 | 已用 | 未用但有过候选/ROI | 未用且不适合 |
 |---|---|---|
-| before_prompt_build, before_agent_reply, before_reset, before_tool_call, after_tool_call, session_start, session_end, subagent_spawned, subagent_ended | tool_result_persist (❌ 见上)、subagent_spawning (overlap mode-gate)、agent_end (overlap session-recap idle)、before_message_write (overlap mode-gate)、before_install (overlap skill-doctor) | llm_input/output (太重)、inbound_claim/message_*/gateway_*/before_dispatch/reply_dispatch (route 层，非 enhance 关心) |
+| before_prompt_build, before_agent_reply, before_reset, before_tool_call, after_tool_call, session_start, session_end, subagent_spawned, subagent_ended | tool_result_persist (❌ 见上)、subagent_spawning (overlap mode-gate)、agent_end (overlap session-recap idle)、before_message_write (overlap mode-gate)、before_install (已无对应模块，v6.7.24 起) | llm_input/output (太重)、inbound_claim/message_*/gateway_*/before_dispatch/reply_dispatch (route 层，非 enhance 关心) |
 
 结论：**enhance 已用 9 个 hook 已经覆盖核心场景**；剩余 hook 要么 overlap 已有模块，要么不适合。
 

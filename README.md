@@ -201,9 +201,9 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 
 | 配置项 | 暴露工具数 (v5.7) | 适用场景 |
 |--------|-----------|---------|
-| `toolTier: "minimal"` | 10 | 上下文极紧 / 最小核心模式（记忆、状态栏、章节、模式、spawn） |
-| `toolTier: "balanced"` *(默认)* | 19 | 多数日常会话 — 加 todo / 章节标记 / 定时任务桥 / **transcript-search** |
-| `toolTier: "full"` | 27 | 需要工作流自动化 / safety / session-recap / skill-doctor 时 |
+| `toolTier: "minimal"` | 9 | 上下文极紧 / 最小核心模式（记忆、状态栏、章节、模式、spawn） |
+| `toolTier: "balanced"` *(默认)* | 18 | 多数日常会话 — 加 todo / 章节标记 / 定时任务桥 / **transcript-search** |
+| `toolTier: "full"` | 25 | 需要工作流自动化 / safety / session-recap 时 |
 
 - **工具分层（toolTier）** — 按需暴露 schema，每轮 prompt 减负
 - **Workflow 5→2 工具合并** — 用 `action=` 派发器收敛同类操作
@@ -218,7 +218,7 @@ URL 从 v5.7.23 的 `/plugins/enhance/share/...`（dashboard 子路径，靠 bri
 - **工具安全补丁** — 仅作为**观察员**存在（尊重龙虾原生 `tools.allow/deny`），统计错误分类、给出退避建议，从不擅自重试或硬拦截
 - **提示词增强** — 仅保留 `qualityGuidelines`，其它早已由龙虾系统提示词覆盖，不重复
 - **任务/章节/模式闸门** — Claude Code TodoWrite / mark_chapter / plan-explore 的龙虾化实现；模式闸门在 `before_tool_call` 阻止计划/探索模式误触写操作
-- **状态栏 / 技能巡检 / 子任务孵化** — 一行看全当前状态；诊断技能目录缺失；把"现在不该做"的副作用登记为延期任务
+- **状态栏 / 子任务孵化** — 一行看全当前状态；把"现在不该做"的副作用登记为延期任务
 - **定时任务桥** — 登记工作流时返回一条 `openclaw cron add` 命令，**调度归龙虾**，插件只负责触发时装填上下文
 - **增强仪表盘（含小火苗宠物）** — Web UI 实时查看记忆 / 任务 / 章节 / 定时 / 宠物状态，支持按 Agent 筛选
 
@@ -276,8 +276,6 @@ openclaw restart
 | **工具安全观察** | L3 | 错误分类（429/5xx/网络）+ 指数退避建议；不拦截，不重试 | `enhance_safety_log` `enhance_retry_status` `enhance_safety_rules` |
 | **任务规划** | L3 | 把多步任务拆解保存为 plan 工件 | `enhance_task_plan` |
 | **会话回顾（75min idle）** | L3 | idle 自动 prependContext「上次到这儿」 | `enhance_session_recap` |
-| **技能巡检** | L3 | 只读检查 11 个增强技能安装状态 + 给出 clawhub 修复命令 | `enhance_skill_doctor` |
-| **技能安装器** | L1 | 返回 11 个配套 skill 的一键安装 CLI 命令（不执行） | `enhance_install_skills` |
 | **记忆整合** | L1 | hook 注入：把命中的记忆与查询条件合成上下文片段 | `enhance_memory_consolidate` |
 | **提示词增强** | — | 追加 `qualityGuidelines`，其它已由龙虾系统提示词覆盖 | 自动（hook 注入） |
 | **共享知识库语料** | — | 桥接 `~/.openclaw/kb/shared/` 到龙虾 `memory_search`（corpus="kb"） | 自动（corpus supplement） |
@@ -293,31 +291,7 @@ openclaw restart
 | 工具 allow/deny | ✅ 龙虾负责 | enhance 只**观察**结果、做错误分类；不拦截 |
 | 任务清单 / 计划文件 | ⚠️ 无对应原语 | enhance 独立实现（SQLite），语义对齐 Claude Code |
 | Cron 调度 | ✅ 龙虾 cron-cli | enhance 不管理调度；只在触发时注入 instructions |
-| 技能安装 | ✅ ClawHub | enhance 只读巡检，不擅自安装 |
-
----
-
-## 增强技能
-
-安装时会自动注入 8 个增强技能到 `workspace/skills/`（4 个工作流 + 4 个设计）：
-
-### 工作流模式
-
-| 技能 | 说明 | 灵感来源 |
-|------|------|---------|
-| `huo15-openclaw-plan-mode` | 结构化规划模式 — 执行复杂任务前先做需求分析、方案设计、风险评估 | Claude Code Plan Agent |
-| `huo15-openclaw-explore-mode` | 深度探索模式 — 只读调研代码库/系统/话题后再给出结论 | Claude Code Explore Agent |
-| `huo15-openclaw-verify-mode` | 验证检查模式 — 检查工作成果、运行测试、验证假设 | Claude Code Verification Agent |
-| `huo15-openclaw-memory-curator` | 记忆整理 — 定期审查记忆、提取洞察、清理过期条目 | Claude Code auto-memory |
-
-### 设计能力（v5.4 新增）
-
-| 技能 | 说明 | 灵感来源 |
-|------|------|---------|
-| `huo15-openclaw-frontend-design` | 高保真 Web UI 原型 + 5 美学流派 + 反 AI Slop 硬红线 + Junior/Full 两趟渲染 | Anthropic frontend-design skill |
-| `huo15-openclaw-design-director` | 设计方向顾问 — 5 流派 × 20 哲学 → 3 方向反差对比 + 强制推荐 | huashu-design 方向选型模式 |
-| `huo15-openclaw-brand-protocol` | 品牌规范抓取 — Ask/Search/Download/Verify/Codify 5 步 → brand-spec.md | huashu Brand Protocol 5-step |
-| `huo15-openclaw-design-critique` | 5 维设计评审 — 美学/可用性/品牌/内容/实现 + Keep/Fix/Quick Wins 三分类 | Web Design review 社区共识 |
+| 技能安装 | ✅ ClawHub / `openclaw skills` | enhance 不管理技能；用户按需 `openclaw skills install <slug>` |
 
 ---
 
@@ -365,9 +339,9 @@ openclaw restart
 
 | 取值 | 工具数 | 暴露的工具模块 | 适用场景 |
 |------|--------|----------------|----------|
-| `"minimal"` | 10 | 记忆 + 状态栏 + spawn + 模式 + 章节安装器 + integrator | 上下文紧 / 长会话 / 极简核心 |
-| `"balanced"` *(默认)* | 19 | minimal + todo + 章节标记 + 定时任务桥 + **transcript-search (v5.7)** | 多数日常使用 |
-| `"full"` | 27 | 全部，含 workflow / safety / task-planner / session-recap / skill-doctor | 工作流自动化 / 完整 harness |
+| `"minimal"` | 9 | 记忆 + 状态栏 + spawn + 模式 + 章节 + integrator | 上下文紧 / 长会话 / 极简核心 |
+| `"balanced"` *(默认)* | 18 | minimal + todo + 章节标记 + 定时任务桥 + **transcript-search (v5.7)** | 多数日常使用 |
+| `"full"` | 25 | 全部，含 workflow / safety / task-planner / session-recap | 工作流自动化 / 完整 harness |
 
 修改 `toolTier` 后需要 `openclaw restart` 才能生效。
 
@@ -414,7 +388,7 @@ openclaw restart
 | 记忆系统 | 6 层记忆 + Agent frontmatter | 5 类分类 + SQLite agent_id 隔离 |
 | 权限安全 | 5 层权限模型 + 异步分类器 | 规则匹配 + block/log/allow + 审计日志 |
 | 提示词工程 | Memoized sections + 优先级系统 | 可配置段落 + appendSystemContext 注入 |
-| Agent 系统 | 3 种 Agent 类型 + frontmatter 配置 | 4 个增强技能 + OpenClaw skill 系统 |
+| Agent 系统 | 3 种 Agent 类型 + frontmatter 配置 | OpenClaw skill 系统（enhance 不注入技能） |
 | 工作流 | 17 个生命周期事件 | 触发词驱动 + before_prompt_build 注入 |
 
 ---

@@ -235,7 +235,11 @@ export function registerLargeFileBridge(
   const MANIFEST_PATH = join(UPLOAD_ROOT, "manifest.json");
   const URL_PREFIX = "/plugins/enhance-upload";
 
-  function createUploadToken(label: string | undefined, ownerAgent: string | undefined): string | null {
+  function createUploadToken(
+    label: string | undefined,
+    ownerAgent: string | undefined,
+    sessionId: string | undefined,
+  ): string | null {
     try {
       const token = randomBytes(6).toString("hex");  // 12 hex chars,与 bot-upload-link 一致
       const tokenDir = join(UPLOAD_ROOT, token, "files");
@@ -256,6 +260,8 @@ export function registerLargeFileBridge(
         token,
         label,
         ownerAgent,
+        // v6.7.24: 绑定当前 session 完整 sessionKey（供上传完成后会话注入 + 按 session 查询）
+        sessionId,
         createdAt: now.toISOString(),
         expireAt: expireAt.toISOString(),
         files: [],
@@ -373,7 +379,7 @@ export function registerLargeFileBridge(
       envName: "BOT_BASE_URL",
       fallback: "http://localhost:18789",
     });
-    const token = createUploadToken(`session:${sessionId.slice(0, 12)}`, agentId);
+    const token = createUploadToken(`session:${sessionId.slice(0, 12)}`, agentId, sessionId || undefined);
     const url = token
       ? buildTokenUrl(baseUrl, token)
       : resolveUploadUrl();  // token 生成失败兜底用共享 URL

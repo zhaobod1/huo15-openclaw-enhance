@@ -74,7 +74,7 @@ grep -E '"version"' package.json; head -5 CHANGELOG.md
 ## 7. 关键文档索引
 
 - [CLAUDE.md](../CLAUDE.md) — 接手第一入口、开发铁律
-- [architecture.md](architecture.md) — 架构 / 36 模块清单 / 数据流
+- [architecture.md](architecture.md) — 架构 / 34 模块清单 / 数据流
 - [PRD.md](PRD.md) — 产品需求 / 非目标边界
 - [decisions/](decisions/) — ADR（为什么非侵入、为什么去 model-router）
 - [lessons/](lessons/) — 踩坑复盘（SDK 2026.6 TS2742 / 工具故障 fabricated 警示）

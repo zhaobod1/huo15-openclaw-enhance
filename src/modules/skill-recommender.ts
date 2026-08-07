@@ -7,8 +7,7 @@
  *
  * 1. 启动期扫所有 skill 路径，解析 SKILL.md frontmatter（name + description + aliases）
  * 2. 工具 enhance_skill_recommend(query) 按 query 算相关度排序
- * 3. 已装命中 < threshold → 列 ClawHub 上 enhance 自带的 11 个 huo15-* 候选 + 安装命令
- * 4. ClawHub 也没合适的 → 给"自建 skill"规划（frontmatter 模板 + 触发关键词 + 内容大纲建议）
+ * 3. 已装命中 < threshold → 给"自建 skill"规划（frontmatter 模板 + 触发关键词 + 内容大纲建议）
  *
  * 红线遵守：
  * - 完全只读 skill 目录，不修改任何 SKILL.md
@@ -22,7 +21,6 @@ import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { resolveOpenClawHome } from "../utils/resolve-home.js";
-import { CLAW_HUB_SKILLS } from "./skill-installer.js";
 import type { SkillRecommenderConfig } from "../types.js";
 
 interface SkillEntry {
@@ -35,53 +33,7 @@ interface SkillEntry {
   source: string;
 }
 
-/** 已知的 huo15-* skill metadata（fallback 用，避免依赖 ClawHub 在线查询）*/
-const KNOWN_HUO15_SKILLS: Record<string, { description: string; aliases: string[] }> = {
-  "huo15-openclaw-plan-mode": {
-    description: "结构化规划模式 — 在执行复杂任务前先做系统性规划。对标 Claude Code Plan Agent",
-    aliases: ["plan", "规划", "计划", "plan mode"],
-  },
-  "huo15-openclaw-explore-mode": {
-    description: "深度探索模式 — 阅读理解大型代码库 / 文档，先扫面再深挖",
-    aliases: ["explore", "探索", "调研", "读代码"],
-  },
-  "huo15-openclaw-verify-mode": {
-    description: "验证检查模式 — 改完代码后系统性自检（typecheck / 测试 / 行为验证）",
-    aliases: ["verify", "验证", "测试", "自检"],
-  },
-  "huo15-openclaw-memory-curator": {
-    description: "记忆整理 — 周期性合并/去重/裁剪 enhance 三层记忆库",
-    aliases: ["memory", "记忆整理", "记忆清理"],
-  },
-  "huo15-openclaw-frontend-design": {
-    description: "高保真 Web UI 原型生成 — 5 美学流派 + 反 AI Slop 硬红线 + Playwright 自验证",
-    aliases: ["前端", "Web UI", "原型", "frontend", "design"],
-  },
-  "huo15-openclaw-design-director": {
-    description: "设计方向顾问 — 3 方向反差对比 + 强制推荐 + 五维矩阵",
-    aliases: ["设计方向", "设计选型", "design director"],
-  },
-  "huo15-openclaw-brand-protocol": {
-    description: "品牌规范抓取 — Ask/Search/Download/Verify+Extract/Codify 5 步流程",
-    aliases: ["品牌", "brand", "VI", "logo"],
-  },
-  "huo15-openclaw-design-critique": {
-    description: "5 维设计评审 — 美学/可用性/品牌一致/内容/实现 + Keep/Fix/Quick Wins",
-    aliases: ["设计评审", "设计审查", "design critique"],
-  },
-  "huo15-openclaw-simplify": {
-    description: "代码简化三维审查 — 复用 / 质量 / 效率 + 分级修复清单（🔴必改/🟡建议/🟢可选）",
-    aliases: ["simplify", "简化", "重构", "代码简化"],
-  },
-  "huo15-openclaw-security-review": {
-    description: "六类漏洞矩阵安全审查 — 密钥/注入/XSS/SSRF/权限/危险依赖 + CVSS 分级",
-    aliases: ["security", "安全审查", "漏洞", "security review"],
-  },
-  "huo15-openclaw-code-review": {
-    description: "PR 五维综合评审 — 设计/实现/测试/安全/可维护 + 可粘贴 markdown 评论",
-    aliases: ["code review", "review", "PR review", "代码审查"],
-  },
-};
+
 
 const STOP_WORDS = new Set([
   "the", "a", "an", "is", "are", "and", "or", "to", "of", "in", "for", "on", "at",
@@ -277,7 +229,6 @@ interface RecommendOptions {
   query: string;
   limit: number;
   installedThreshold: number;
-  includeUninstalled: boolean;
   includePlanning: boolean;
   openclawDir: string;
 }
@@ -304,34 +255,6 @@ function recommend(opts: RecommendOptions): string {
     }
   }
 
-  // ── 2. ClawHub 上未装的 huo15-* 候选 ──
-  if (opts.includeUninstalled) {
-    const installedSlugs = new Set(opts.installedSkills.map((s) => s.slug));
-    const uninstalled = CLAW_HUB_SKILLS.filter((slug) => !installedSlugs.has(slug)).map((slug) => ({
-      slug,
-      meta: KNOWN_HUO15_SKILLS[slug] ?? { description: "", aliases: [] },
-    }));
-
-    const matched = uninstalled
-      .map(({ slug, meta }) => ({
-        slug,
-        meta,
-        score: scoreSkill({ slug, description: meta.description, aliases: meta.aliases }, opts.query),
-      }))
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, opts.limit);
-
-    if (matched.length > 0) {
-      lines.push(`📦 ClawHub 上可装但还没装的 huo15-* skill：\n`);
-      for (const { slug, meta, score } of matched) {
-        lines.push(`  ${score.toFixed(2)} ${slug}`);
-        if (meta.description) lines.push(`        ${meta.description}`);
-        lines.push(`        安装：openclaw skills install ${slug}`);
-        lines.push("");
-      }
-    }
-  }
 
   // ── 3. 都没合适 → 自建规划 ──
   const noGoodHit = goodHits.length === 0;
@@ -354,7 +277,7 @@ function recommend(opts: RecommendOptions): string {
     lines.push("---");
     lines.push("```");
     lines.push("");
-    lines.push("内容大纲建议（参考 huo15-openclaw-* 系列结构）：");
+    lines.push("内容大纲建议（参考 ClawHub 社区 skill 的通用结构）：");
     lines.push("  1. 简介：什么场景下召唤本 skill");
     lines.push("  2. 触发关键词 + 反触发词（避免误召唤）");
     lines.push("  3. 主流程：3-5 步骤化的执行框架");
@@ -362,21 +285,20 @@ function recommend(opts: RecommendOptions): string {
     lines.push("  5. 输出格式（用户能直接复制的格式）");
     lines.push("  6. 实例（1-2 个 before/after 对比）");
     lines.push("");
-    lines.push("**⚠️ 红线 #3（用户硬约束）**：必须先在 huo15-skills 本地仓库写好 → clawhub publish 发到 ClawHub → 再让 enhance 的 skill-installer.ts CLAW_HUB_SKILLS 引用 slug。**插件代码绝不内嵌 skill 内容**。");
+    lines.push("**⚠️ 红线 #3（用户硬约束）**：必须先在 huo15-skills 本地仓库写好 → clawhub publish 发到 ClawHub → 用 `openclaw skills install <slug>` 安装。**插件代码绝不内嵌 skill 内容**。");
     lines.push("");
     lines.push("操作步骤：");
     lines.push(`  1. cd ~/workspace/projects/openclaw/huo15-skills && mkdir ${proposedSlug}`);
     lines.push(`  2. 把上面的 frontmatter + 内容大纲写到 ${proposedSlug}/SKILL.md`);
     lines.push(`  3. CLAWHUB_TOKEN=clh_<TOKEN> clawhub publish ./${proposedSlug} --version 1.0.0`);
-    lines.push(`  4. 编辑 huo15-openclaw-enhance/src/modules/skill-installer.ts，把 "${proposedSlug}" 加到 CLAW_HUB_SKILLS`);
-    lines.push(`  5. enhance bump 版本 → 发 npm + ClawHub`);
+    lines.push(`  4. openclaw skills install ${proposedSlug} --dir ~/.openclaw/workspace/skills`);
   }
 
   if (lines.length === 0) {
     lines.push(`未找到与 "${trimQuery(opts.query, 60)}" 相关的 skill。`);
     lines.push(`可以试试：`);
     lines.push(`  - 改用更具体的关键词（如 "代码 review" / "Web UI 设计" / "安全审查"）`);
-    lines.push(`  - 用 enhance_skill_doctor 看完整已装清单`);
+    lines.push(`  - 用 openclaw skills list 看完整已装清单`);
     lines.push(`  - 加 includePlanning=true 让我给你一份新 skill 规划`);
   }
   return lines.join("\n");
@@ -429,13 +351,10 @@ export function registerSkillRecommender(api: OpenClawPluginApi, config?: SkillR
   api.registerTool(
     ((_ctx: OpenClawPluginToolContext) => ({
       name: "enhance_skill_recommend",
-      description: "按用户需求挑已装 skill / 推荐未装 huo15-* / 给自建规划。结合三种结果按相关度排序",
+      description: "按用户需求挑已装 skill / 给自建 skill 规划。按相关度排序",
       parameters: Type.Object({
         query: Type.String({ description: "用户需求文本，如 '帮我 review 这个 PR' / '设计一个 Web UI'" }),
         limit: Type.Optional(Type.Number({ description: "每段最多返回几条，默认 5", minimum: 1, maximum: 20 })),
-        includeUninstalled: Type.Optional(
-          Type.Boolean({ description: "是否包含 ClawHub 上未装的 huo15-* 候选，默认 true" }),
-        ),
         includePlanning: Type.Optional(
           Type.Boolean({ description: "命中 < 阈值时是否给自建 skill 规划，默认 true" }),
         ),
@@ -450,7 +369,6 @@ export function registerSkillRecommender(api: OpenClawPluginApi, config?: SkillR
           query,
           limit: Math.max(1, Math.min(20, Number(params.limit ?? 5))),
           installedThreshold: config?.installedThreshold ?? 0.25,
-          includeUninstalled: params.includeUninstalled !== false,
           includePlanning: params.includePlanning !== false,
           openclawDir,
         });

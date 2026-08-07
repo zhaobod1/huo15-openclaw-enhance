@@ -31,9 +31,7 @@ import { registerChapterMarks } from "./src/modules/chapter-marks.js";
 import { registerModeGate } from "./src/modules/mode-gate.js";
 import { registerStatusline } from "./src/modules/statusline.js";
 import { registerSpawnTask } from "./src/modules/spawn-task.js";
-import { registerSkillDoctor } from "./src/modules/skill-doctor.js";
 import { registerScheduledTasksBridge } from "./src/modules/scheduled-tasks-bridge.js";
-import { registerSkillInstaller, CLAW_HUB_SKILLS } from "./src/modules/skill-installer.js";
 import { registerKbCorpus } from "./src/modules/kb-corpus.js";
 import { registerSessionRecap } from "./src/modules/session-recap.js";
 import { registerTranscriptSearch } from "./src/modules/transcript-search.js";
@@ -57,14 +55,13 @@ import { createNotificationQueue } from "./src/modules/notification-queue.js";
 import { resolveOpenClawHome } from "./src/utils/resolve-home.js";
 import { initDb } from "./src/utils/sqlite-store.js";
 import type { EnhancePluginConfig, ToolTier } from "./src/types.js";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 /**
  * 工具分层映射（v5.6）：
- * - L1 minimal: 记忆核心 / 状态栏 / spawn / 模式 / 章节 / installer / integrator
+ * - L1 minimal: 记忆核心 / 状态栏 / spawn / 模式 / 章节 / integrator
  * - L2 balanced (default): +todo / 定时任务桥
- * - L3 full: +workflow / safety / task-planner / session-recap / skill-doctor
+ * - L3 full: +workflow / safety / task-planner / session-recap
  *
  * 只会载入 tier 内的模块，其他模块整个不 register（省下 tool schema 全部重量）。
  */
@@ -157,12 +154,6 @@ const enhancePlugin: OpenClawPluginDefinition = definePluginEntry({
         load: () => registerModeGate(api, config.mode, notifyQueue!),
       },
       {
-        name: "技能安装器",
-        tier: 1,
-        enabled: true,
-        load: () => registerSkillInstaller(api),
-      },
-      {
         name: "记忆整合",
         tier: 1,
         enabled: config.memory?.enabled !== false && dbAvailable,
@@ -215,12 +206,6 @@ const enhancePlugin: OpenClawPluginDefinition = definePluginEntry({
         tier: 3,
         enabled: config.sessionRecap?.enabled !== false && dbAvailable,
         load: () => registerSessionRecap(api, config.sessionRecap),
-      },
-      {
-        name: "技能巡检",
-        tier: 3,
-        enabled: true,
-        load: () => registerSkillDoctor(api),
       },
 
       // ── 非工具模块（不占 tool schema，tier 不影响）──
@@ -426,22 +411,7 @@ const enhancePlugin: OpenClawPluginDefinition = definePluginEntry({
       );
     }
 
-    // 首次启动提示：配套技能需手动安装（插件不执行外部命令，只给提示）
-    try {
-      const globalSkillsDir = join(openclawHome, "workspace", "skills");
-      const missing = CLAW_HUB_SKILLS.filter(
-        (s) => !existsSync(join(globalSkillsDir, s)),
-      );
-      if (missing.length > 0) {
-        api.logger.info(
-          `[enhance] 检测到 ${missing.length} 个配套技能未安装：${missing.join("、")}；` +
-            `调用 enhance_install_skills 获取一键安装命令，或手动运行 clawhub install <技能名> --dir ${globalSkillsDir}`,
-        );
-      }
-    } catch {
-      // 静默跳过（非关键路径）
-    }
-
+    // 首次启动提示已移除：enhance 不再内置管理 huo15-* 配套技能（由用户按需 openclaw skills install）
     const degradeNote = dbAvailable ? "" : "（DB 降级模式：better-sqlite3 原生绑定丢失）";
     api.logger.info(`[enhance] 龙虾增强包 v${pkg.version} 已加载（toolTier=${toolTier}，非侵入式，不重复龙虾原生功能）${degradeNote}，启用模块: ${loaded.join("、")}`);
   },

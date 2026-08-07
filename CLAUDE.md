@@ -5,7 +5,7 @@
 
 ## 是什么
 
-`@huo15/huo15-openclaw-enhance` —— **非侵入式**的 OpenClaw（龙虾）插件。在不改龙虾核心、不重复龙虾原生能力的前提下，补齐「项目工程化 + 多 Agent 运营」维度的能力（结构化记忆、任务/章节追踪、配置体检、文件分享/预览、Claude Code 桥接、上下文守护等 36 个模块）。
+`@huo15/huo15-openclaw-enhance` —— **非侵入式**的 OpenClaw（龙虾）插件。在不改龙虾核心、不重复龙虾原生能力的前提下，补齐「项目工程化 + 多 Agent 运营」维度的能力（结构化记忆、任务/章节追踪、配置体检、文件分享/预览、Claude Code 桥接、上下文守护等 34 个模块）。
 
 - npm: `@huo15/huo15-openclaw-enhance`（当前 v6.7.21）
 - 主仓库: https://cnb.cool/huo15/ai/huo15-openclaw-enhance （remote `origin`）
@@ -35,7 +35,7 @@ openclaw plugins install "$(pwd)"   # 装到本地 OpenClaw
 ## 开发铁律（任何 @huo15/* 插件通用）
 
 1. **`compat.pluginApi` 必须 semver range**（`>=2026.4.24`），不能裸版本；`peerDependencies.openclaw` 同理（`^2026.4.24`）。`build.openclawVersion` 是信息字段，裸版本 OK。
-2. **禁 `child_process`**（execSync/spawn/spawnSync）—— 企业 npm 扫描器判高危整包拦截。需要跑外部命令的功能一律 **return-cliCmd 模式**。参考 `skill-installer.ts` / `scheduled-tasks-bridge.ts` / `spawn-task.ts`。
+2. **禁 `child_process`**（execSync/spawn/spawnSync）—— 企业 npm 扫描器判高危整包拦截。需要跑外部命令的功能一律 **return-cliCmd 模式**。参考 `scheduled-tasks-bridge.ts` / `spawn-task.ts`。
 3. **`registerMemoryCorpusSupplement` / `registerMemoryPromptSupplement` 是单参**（pluginId 自动注入）。
 4. **诊断不修复**：要「建议改龙虾配置」的功能一律 return-cliCmd，**永不** `fs.writeFileSync` 用户配置文件。
 5. **LLM 输出过 sanitizer**：LLM 生成的 target/URL/路径一律不可信，发文件/广播前必经插件层闸门。
@@ -50,7 +50,7 @@ openclaw plugins install "$(pwd)"   # 装到本地 OpenClaw
 | 路径 | 内容 |
 |---|---|
 | `index.ts` | 插件入口 |
-| `src/modules/*` | 36 个功能模块，每个 register 一类能力 |
+| `src/modules/*` | 34 个功能模块，每个 register 一类能力 |
 | `src/utils/*` | sqlite-store / safe-api-wrapper / resolve-home / notification-queue / latency-tracker |
 | `docs/architecture.md` | 架构、模块清单、数据流 |
 | `docs/PRD.md` | 产品需求、非目标边界 |

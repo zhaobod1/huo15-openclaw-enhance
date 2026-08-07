@@ -59,7 +59,7 @@ metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 
 **调研**：反编译 `/Applications/Claude.app/Contents/Resources/app.asar`，发现 Claude 的 skill auto-discovery **本质是把所有 skill 的 name+description 拼成 `"Available skills: ${list}."` 注入到 specialist agent 的 system prompt** —— 没有复杂算法，让 LLM 自己挑。
 
-**enhance 改造**：照搬 name+description 匹配思路，但**改成按需工具**避免每轮 prompt 占 schema。新增模块 `skill-recommender` + 工具 `enhance_skill_recommend(query, limit?, includeUninstalled?, includePlanning?)`：
+**enhance 改造**：照搬 name+description 匹配思路，但**改成按需工具**避免每轮 prompt 占 schema。新增模块 `skill-recommender` + 工具 `enhance_skill_recommend(query, limit?, includePlanning?)`：
 
 1. **启动期扫多路径**（WeCom / DingTalk 多 agent 场景关键）：
    - `~/.openclaw/skills/`
@@ -158,9 +158,9 @@ metadata: { "openclaw": { "emoji": "🦞", "requires": { "bins": [] } } }
 ## v5.6 新特性（2026-04-24）
 
 - **工具分层（toolTier）** — 按 minimal/balanced/full 三档暴露工具 schema，降低每轮 prompt 固定底座（解决长会话 context 提早爆满）
-  - `minimal`（10 工具）：仅核心层 — 记忆 / 状态栏 / spawn / 模式 / 章节 / installer / integrator
+  - `minimal`（9 工具）：仅核心层 — 记忆 / 状态栏 / spawn / 模式 / 章节 / integrator
   - `balanced`（18 工具，默认）：+ todo / 章节 / 定时任务桥
-  - `full`（26 工具）：+ workflow / safety / task-planner / session-recap / skill-doctor
+  - `full`（25 工具）：+ workflow / safety / task-planner / session-recap
 - **Workflow 5→2 工具合并** — `enhance_workflow_define / _list / _delete / _tasks / enhance_task` 合并为 `enhance_workflow`（action=define/list/delete/tasks）+ `enhance_task`（保留独立 action 派发器）
 - **工具描述全面压缩** — 26 个工具描述从 ~4610 字符 → ~1750 字符（-62%），每轮 prompt 节省约 1400 token，prompt cache 更稳
 
